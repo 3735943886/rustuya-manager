@@ -1,4 +1,4 @@
-# Rustuya Manager (AI-Assisted)
+# Rustuya Manager
 
 A management tool for rustuya-bridge to ensure efficient synchronization of Tuya devices.
 
@@ -40,12 +40,12 @@ pip install rich
 ### 3. Usage
 Execute the manager script in your root directory:
 ```bash
-python3 rustuya_manager.py
+python3 rustuya-manager.py
 ```
 
 Advanced Usage:
 ```bash
-python3 rustuya_manager.py --config ./config.json --cloud ./tuyadevices.json --broker 192.168.1.100
+python3 rustuya-manager.py --config ./config.json --cloud ./tuyadevices.json --broker 192.168.1.100
 ```
 
 ## Configuration

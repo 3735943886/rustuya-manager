@@ -6,59 +6,135 @@ Synchronizes devices between Tuya Cloud (tuyadevices.json) and rustuya-bridge.
 
 import json
 import argparse
-import os
 import sys
 import threading
-import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional, Dict, List, Any, Union
 import paho.mqtt.client as mqtt
+
 try:
     from rich.console import Console
     from rich.table import Table
     from rich.panel import Panel
-    from rich.text import Text
     from rich.prompt import Prompt, Confirm
     from rich import box
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
-    class Console:
-        def print(self, *args, **kwargs):
-            if args and hasattr(args[0], 'plain'):
-                print(args[0].plain, **kwargs)
-            else:
-                print(*args, **kwargs)
-    
-    class Table:
-        def __init__(self, **kwargs): 
-            self.title = kwargs.get('title', '')
-            self.columns = []
-            self.rows = []
-        def add_column(self, name, **kwargs): self.columns.append(name)
-        def add_row(self, *args): self.rows.append(args)
 
-    class Panel:
-        def __init__(self, text, **kwargs): self.plain = f"--- {text} ---"
+# --- UI Abstraction Layer ---
+class UIManager:
+    """Provides a consistent UI interface regardless of whether 'rich' is installed."""
+    def __init__(self):
+        self.console = Console() if HAS_RICH else self._fallback_console()
 
-    class Text:
-        @staticmethod
-        def assemble(*args):
-            return type('Plain', (), {'plain': "".join([str(a[0]) if isinstance(a, tuple) else str(a) for a in args])})
+    def _fallback_console(self):
+        class FallbackConsole:
+            def print(self, *args, **kwargs):
+                # Simple fallback for rich tags
+                msg = str(args[0]) if args else ""
+                import re
+                msg = re.sub(r'\[.*?\]', '', msg) 
+                print(msg, **kwargs)
+        return FallbackConsole()
 
-    class Prompt:
-        @staticmethod
-        def ask(msg, choices=None, default=None):
-            prompt_str = f"{msg} ({'/'.join(choices)})" if choices else msg
-            if default: prompt_str += f" [{default}]"
-            res = input(f"{prompt_str}: ").strip()
-            return res if res else default
+    def print(self, *args, **kwargs):
+        self.console.print(*args, **kwargs)
 
-    class Confirm:
-        @staticmethod
-        def ask(msg):
-            return input(f"{msg} (y/n): ").lower().startswith('y')
+    def panel(self, text: str, title: str = "", style: str = "cyan"):
+        if HAS_RICH:
+            self.console.print(Panel(text, title=title, border_style=style, expand=False))
+        else:
+            self.print(f"\n[{title}]\n{text}\n" + "-"*len(text))
 
-    class box:
-        ROUNDED = None
+    def confirm(self, msg: str) -> bool:
+        if HAS_RICH:
+            return Confirm.ask(msg)
+        return input(f"{msg} (y/n): ").lower().startswith('y')
+
+    def ask(self, msg: str, choices: List[str] = None, default: str = None) -> str:
+        if HAS_RICH:
+            return Prompt.ask(msg, choices=choices, default=default)
+        prompt_str = f"{msg}"
+        if choices: prompt_str += f" ({'/'.join(choices)})"
+        if default: prompt_str += f" [{default}]"
+        res = input(f"{prompt_str}: ").strip()
+        return res if res else default
+
+    def table(self, title: str, columns: List[Dict[str, Any]], rows: List[List[Any]]):
+        if HAS_RICH:
+            table = Table(title=title, box=box.ROUNDED, header_style="bold magenta")
+            for col in columns:
+                table.add_column(col["name"], style=col.get("style"), justify=col.get("justify", "left"), no_wrap=col.get("no_wrap", False))
+            for row in rows:
+                table.add_row(*[str(item) for item in row])
+            self.console.print(table)
+        else:
+            self.print(f"\n=== {title} ===")
+            for row in rows:
+                self.print(" | ".join(str(r) for r in row))
+
+ui = UIManager()
+
+# --- Data Models ---
+@dataclass
+class Device:
+    id: str
+    name: str = "N/A"
+    type: str = "WiFi"
+    cid: Optional[str] = None
+    parent_id: Optional[str] = None
+    key: Optional[str] = None
+    ip: str = "Auto"
+    version: str = "Auto"
+    raw_data: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Device':
+        did = data.get('id')
+        name = data.get('name', 'N/A')
+        cid = data.get('node_id') or data.get('cid')
+        parent_id = data.get('parent') or data.get('parent_id')
+        key = data.get('local_key') or data.get('key')
+        ip = data.get('ip') or "Auto"
+        version = data.get('version') or data.get('ver') or "Auto"
+        
+        is_sub = (data.get('sub') is True or cid is not None)
+        if ip != "Auto" and not parent_id:
+            is_sub = False
+            
+        return cls(
+            id=did, name=name, type="SubDevice" if is_sub else "WiFi",
+            cid=cid, parent_id=parent_id, key=key, ip=ip, version=version,
+            raw_data=data
+        )
+
+    def get_routing_info(self) -> str:
+        if self.type == "SubDevice":
+            return f"P:{self.shorten(self.parent_id)} C:{self.cid}"
+        return ""
+
+    @staticmethod
+    def shorten(val: str, length: int = 12) -> str:
+        if not val or len(val) <= length: return str(val)
+        return f"{val[:4]}...{val[-4:]}"
+
+    def compare(self, other: 'Device') -> List[str]:
+        mismatches = []
+        if self.type == "WiFi":
+            if self.key and other.key and self.key != other.key:
+                mismatches.append(f"KEY: [yellow]{self.shorten(other.key)}[/yellow] -> [bold cyan]{self.shorten(self.key)}[/bold cyan]")
+            if other.ip != "Auto" and self.ip != other.ip:
+                mismatches.append(f"IP: [yellow]{other.ip}[/yellow] -> [bold cyan]{self.ip}[/bold cyan]")
+            if other.version != "Auto" and self.version != other.version:
+                mismatches.append(f"VER: [yellow]{other.version}[/yellow] -> [bold cyan]{self.version}[/bold cyan]")
+        else:
+            if self.cid != other.cid:
+                mismatches.append(f"CID: [yellow]{other.cid}[/yellow] -> [bold cyan]{self.cid}[/bold cyan]")
+            if self.parent_id != other.parent_id:
+                mismatches.append(f"PARENT: [yellow]{self.shorten(other.parent_id)}[/yellow] -> [bold cyan]{self.shorten(self.parent_id)}[/bold cyan]")
+        return mismatches
 
 # Default Constants
 DEFAULT_ROOT = 'rustuya'
@@ -66,384 +142,187 @@ DEFAULT_CONFIG = 'config.json'
 DEFAULT_CLOUD = 'tuyadevices.json'
 TIMEOUT_SEC = 5
 
-console = Console()
-
 class RustuyaManager:
-    def __init__(self, config_path, cloud_path):
-        self.config_path = config_path
-        self.cloud_path = cloud_path
+    def __init__(self, config_path: str, cloud_path: str):
+        self.config_path = Path(config_path)
+        self.cloud_path = Path(cloud_path)
         self.config = {}
-        self.cloud_devices = {}
-        self.bridge_devices = {}
+        self.cloud_devices: Dict[str, Device] = {}
+        self.bridge_devices: Dict[str, Device] = {}
         self.mqtt_client = None
         self.response_received = threading.Event()
         
-        # Derived settings
-        self.broker = 'localhost'
-        self.port = 1883
+        self.broker, self.port = 'localhost', 1883
         self.root_topic = DEFAULT_ROOT
-        
-        # Topic Templates (matches rustuya-bridge config names)
-        # Defaults if not provided in config.json
         self.mqtt_command_topic = "{root}/command"
-        self.mqtt_message_topic = None # Will be derived if missing
+        self.mqtt_message_topic = None 
         self.mqtt_event_topic = "{root}/event/{type}"
         
-        # Status categorizations
-        self.mismatched = []
-        self.missing = []
-        self.orphaned = []
-        self.synced = []
+        self.mismatched, self.missing, self.orphaned, self.synced = [], [], [], []
 
-    def ensure_file_exists(self, initial_path, description):
-        """Checks if a file exists; if not, scans directory and asks user to select."""
-        if initial_path and os.path.exists(initial_path):
-            return initial_path
-
-        console.print(f"\n[bold yellow]⚠ {description} not found at:[/bold yellow] [dim]{initial_path}[/dim]")
-        
-        # Scan for candidate JSON files in current directory
-        json_files = [f for f in os.listdir('.') if f.endswith('.json')]
-        
-        if not json_files:
-            return Prompt.ask(f"[bold cyan]Please enter the path to your {description} manualy[/bold cyan]")
-
-        console.print(f"[bold]Found these JSON files in the current directory:[/bold]")
-        for i, f in enumerate(json_files, 1):
-            console.print(f"  {i}. [cyan]{f}[/cyan]")
-        console.print(f"  m. [dim]Enter path manually[/dim]")
-        console.print(f"  q. [red]Quit[/red]")
-
-        choice = Prompt.ask("\nSelect a file", choices=[str(i) for i in range(1, len(json_files)+1)] + ["m", "q"])
-
-        if choice == "q":
-            sys.exit(0)
-        elif choice == "m":
-            return Prompt.ask(f"[bold cyan]Enter path to {description}[/bold cyan]")
-        else:
-            return json_files[int(choice) - 1]
+    def ensure_file(self, path: Path, desc: str) -> Path:
+        if path.exists(): return path
+        ui.print(f"\n[yellow]⚠ {desc} not found at:[/yellow] {path}")
+        files = list(Path('.').glob('*.json'))
+        if not files: return Path(ui.ask(f"Enter path to {desc}"))
+        ui.print("Available JSON files:")
+        for i, f in enumerate(files, 1): ui.print(f"  {i}. [cyan]{f}[/cyan]")
+        choice = ui.ask("Select file", choices=[str(i) for i in range(1, len(files)+1)] + ["m", "q"], default="q")
+        if choice == "q": sys.exit(0)
+        if choice == "m": return Path(ui.ask(f"Enter path to {desc}"))
+        return files[int(choice) - 1]
 
     def load_configs(self):
-        # 0. Interactively ensure cloud data exists (required)
-        self.cloud_path = self.ensure_file_exists(self.cloud_path, "Cloud Data (tuyadevices.json)")
-
-        # 1. Load Bridge Config (config.json) - Optional
-        if os.path.exists(self.config_path):
+        self.cloud_path = self.ensure_file(self.cloud_path, "Cloud Data")
+        if self.config_path.exists():
             try:
-                with open(self.config_path, 'r', encoding='utf-8') as f:
-                    self.config = json.load(f)
-                
-                # Extract MQTT info
+                with self.config_path.open() as f: self.config = json.load(f)
                 self.broker = self.config.get('mqtt_broker', self.broker)
                 if '://' in self.broker:
-                    # Very basic parsing of mqtt://host:port
-                    parts = self.broker.split('://')[-1].split(':')
-                    self.broker = parts[0]
-                    if len(parts) > 1:
-                        try:
-                            self.port = int(parts[1])
-                        except: pass
-                
+                    addr = self.broker.split('://')[-1].split(':')
+                    self.broker = addr[0]
+                    if len(addr) > 1: self.port = int(addr[1])
                 self.root_topic = self.config.get('mqtt_root_topic', self.root_topic)
-                
-                # Load templates from config
-                if 'mqtt_command_topic' in self.config:
-                    self.mqtt_command_topic = self.config['mqtt_command_topic']
-                if 'mqtt_message_topic' in self.config:
-                    self.mqtt_message_topic = self.config['mqtt_message_topic']
-                if 'mqtt_event_topic' in self.config:
-                    self.mqtt_event_topic = self.config['mqtt_event_topic']
+                for key in ['command', 'message', 'event']:
+                    topic_key = f'mqtt_{key}_topic'
+                    if topic_key in self.config: setattr(self, topic_key, self.config[topic_key])
+                ui.print(f"[green]✔[/green] Loaded config from {self.config_path}")
+            except Exception as e: ui.print(f"[red]✘[/red] Config error: {e}"); sys.exit(1)
+        else: ui.print(f"[yellow]![/yellow] Using default MQTT: {self.broker}:{self.port}")
 
-                console.print(f"[green]✔[/green] Loaded config from [bold]{self.config_path}[/bold]")
-            except Exception as e:
-                console.print(f"[red]✘[/red] Error: Failed to parse {self.config_path}: {e}")
-                sys.exit(1)
-        else:
-            console.print(f"[yellow]![/yellow] Config [bold]{self.config_path}[/bold] not found. Using default MQTT broker: [cyan]{self.broker}:{self.port}[/cyan]")
-
-        # 2. Load Cloud Data (tuyadevices.json)
         try:
-            with open(self.cloud_path, 'r', encoding='utf-8') as f:
+            with self.cloud_path.open() as f:
                 data = json.load(f)
-                if isinstance(data, list):
-                    self.cloud_devices = {d['id']: d for d in data if 'id' in d}
-                else:
-                    self.cloud_devices = data
-            console.print(f"[green]✔[/green] Loaded cloud data from [bold]{self.cloud_path}[/bold] ({len(self.cloud_devices)} devices)")
-        except Exception as e:
-            console.print(f"[red]✘[/red] Error: Failed to load {self.cloud_path}: {e}")
-            sys.exit(1)
+                dev_list = data if isinstance(data, list) else data.values()
+                self.cloud_devices = {d['id']: Device.from_dict(d) for d in dev_list if 'id' in d}
+            ui.print(f"[green]✔[/green] Loaded {len(self.cloud_devices)} cloud devices")
+        except Exception as e: ui.print(f"[red]✘[/red] Cloud data error: {e}"); sys.exit(1)
 
     def on_message(self, client, userdata, msg):
         try:
-            payload = json.loads(msg.payload.decode('utf-8'))
-            # Rust bridge returns status response with 'devices' map
-            devices = payload.get('devices', {})
-            # If it's the standard API response format
-            if not devices and 'data' in payload and isinstance(payload['data'], dict):
-                devices = payload['data'].get('devices', {})
-            
-            if devices:
-                self.bridge_devices = devices
+            payload = json.loads(msg.payload.decode())
+            devices = payload.get('devices') or payload.get('data', {}).get('devices')
+            if devices is not None:
+                self.bridge_devices = {did: Device.from_dict(d) for did, d in devices.items()}
                 self.response_received.set()
-        except Exception as e:
-            pass
+        except: pass
 
-    def resolve_topic(self, template, **kwargs):
-        """Resolves template variables like {root}, {id}, {action}, {level}"""
+    def resolve_topic(self, template: str, **kwargs) -> str:
         if template is None:
-            # Fallback logic from bridge.rs
-            root_topic = self.mqtt_event_topic \
-                .replace("/{type}", "") \
-                .replace("/event", "") \
-                .rstrip('/')
-            
-            level = kwargs.get('level', 'response')
-            device_id = kwargs.get('id', 'bridge')
-            template = f"{root_topic}/{level}/{device_id}"
-            
-        res = template.replace("{root}", self.root_topic)
-        for k, v in kwargs.items():
-            res = res.replace("{" + k + "}", str(v))
+            base = self.mqtt_event_topic.replace("/{type}", "").replace("/event", "").rstrip('/')
+            template = f"{base}/{{level}}/{{id}}"
+        kwargs.update({'root': self.root_topic, 'level': kwargs.get('level', 'response'), 'id': kwargs.get('id', 'bridge')})
+        res = template
+        for k, v in kwargs.items(): res = res.replace("{" + k + "}", str(v))
         return res
 
     def fetch_bridge_status(self):
-        console.print("[cyan]Connecting to MQTT broker...[/cyan]")
+        ui.print("[cyan]Connecting to MQTT...[/cyan]")
         try:
-            # Handle paho-mqtt v2 vs v1
-            try:
-                self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-            except AttributeError:
-                self.mqtt_client = mqtt.Client()
-
+            try: self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+            except: self.mqtt_client = mqtt.Client()
             self.mqtt_client.on_message = self.on_message
             self.mqtt_client.connect(self.broker, self.port)
-            
-            # 1. Resolve response topic for bridge
-            # Usually {root}/response/bridge or {root}/extra/device/response/bridge
-            resp_topic = self.resolve_topic(self.mqtt_message_topic, id="bridge", level="response")
+            resp_topic = self.resolve_topic(self.mqtt_message_topic)
             self.mqtt_client.subscribe(resp_topic)
-            console.print(f"[dim]Subscribed to response: {resp_topic}[/dim]")
-            
             self.mqtt_client.loop_start()
-
-            console.print("[cyan]Requesting bridge status...[/cyan]")
-            
-            # 2. Resolve command topic for status
-            cmd_topic = self.resolve_topic(self.mqtt_command_topic, action="status", id="bridge")
-            status_payload = json.dumps({"action": "status"})
-            
-            # Publish status request
-            self.mqtt_client.publish(cmd_topic, status_payload)
-            # Some bridges might expect just None or empty on a specific status topic
-            # We'll try just the resolved command topic first as it's the standard
-            
-            if not self.response_received.wait(TIMEOUT_SEC):
-                console.print("[yellow]⚠ Timeout: No response from bridge. Is it running?[/yellow]")
-            
+            cmd_topic = self.resolve_topic(self.mqtt_command_topic, action="status")
+            self.mqtt_client.publish(cmd_topic, json.dumps({"action": "status"}))
+            if not self.response_received.wait(TIMEOUT_SEC): ui.print("[yellow]⚠ Timeout: No response from bridge.[/yellow]")
             self.mqtt_client.loop_stop()
-        except Exception as e:
-            console.print(f"[red]✘ MQTT Error: {e}[/red]")
+        except Exception as e: ui.print(f"[red]✘ MQTT Error: {e}[/red]")
 
     def compare(self):
-        self.mismatched = []
-        self.missing = []
-        self.orphaned = []
-        self.synced = []
-
-        cloud_ids = set(self.cloud_devices.keys())
-        bridge_ids = set(self.bridge_devices.keys())
-
-        # Check for Missing and Mismatched
+        self.mismatched, self.missing, self.orphaned, self.synced = [], [], [], []
+        cloud_ids, bridge_ids = set(self.cloud_devices.keys()), set(self.bridge_devices.keys())
         for cid in cloud_ids:
             cdev = self.cloud_devices[cid]
-            if cid not in bridge_ids:
-                self.missing.append(cdev)
+            if cid not in bridge_ids: self.missing.append(cdev)
             else:
-                bdev = self.bridge_devices[cid]
-                # Compare local keys
-                c_key = cdev.get('local_key') or cdev.get('key')
-                b_key = bdev.get('key') or bdev.get('local_key')
-                
-                if c_key and b_key and c_key != b_key:
-                    self.mismatched.append({**cdev, 'old_key': b_key, 'new_key': c_key})
-                else:
-                    self.synced.append(cdev)
-
-        # Check for Orphaned
+                m = cdev.compare(self.bridge_devices[cid])
+                if m: self.mismatched.append({'dev': cdev, 'reason': "\n".join(m)})
+                else: self.synced.append(cdev)
         for bid in bridge_ids:
-            if bid not in cloud_ids:
-                self.orphaned.append(self.bridge_devices[bid])
+            if bid not in cloud_ids: self.orphaned.append(self.bridge_devices[bid])
 
     def show_dashboard(self):
         self.compare()
-        
-        if HAS_RICH:
-            table = Table(title="Rustuya Device Sync Dashboard", box=box.ROUNDED, header_style="bold magenta")
-            table.add_column("ID", style="cyan", no_wrap=True)
-            table.add_column("Name", style="white")
-            table.add_column("Status", justify="center")
-            table.add_column("Local Key (Old -> New)", style="dim")
+        cols = [{"name": "Type", "style": "dim"}, {"name": "ID / Routing", "style": "cyan", "no_wrap": True}, 
+                {"name": "Name", "style": "white"}, {"name": "Status", "justify": "center"}, {"name": "Details", "style": "dim"}]
+        rows = []
+        for d in self.mismatched: rows.append([d['dev'].type, d['dev'].id, d['dev'].name, "[yellow]MISMATCH[/yellow]", d['reason']])
+        for d in self.missing: rows.append([d.type, f"{d.id}\n[dim]{d.get_routing_info()}[/dim]", d.name, "[green]MISSING[/green]", f"Key: {Device.shorten(d.key)}"])
+        for d in self.orphaned: rows.append([d.type, d.id, d.name, "[red]ORPHANE[/red]", ""])
+        for d in self.synced: rows.append([d.type, d.id, d.name, "[blue]SYNCED[/blue]", ""])
+        ui.table("Rustuya Device Dashboard", cols, rows)
+        ui.panel(f"Summary: {len(self.synced)} Synced, {len(self.mismatched)} Mismatch, {len(self.missing)} Missing, {len(self.orphaned)} Orphaned", title="Sync Status")
 
-            for dev in self.mismatched:
-                table.add_row(dev['id'], dev.get('name', 'N/A'), "[bold yellow]KEY MISMATCH[/bold yellow]", f"{dev['old_key']} -> {dev['new_key']}")
-            for dev in self.missing:
-                table.add_row(dev['id'], dev.get('name', 'N/A'), "[bold green]MISSING (NEW)[/bold green]", f"-> {dev.get('local_key', '???')}")
-            for dev in self.orphaned:
-                table.add_row(dev['id'], dev.get('name', 'N/A'), "[bold red]ORPHANED[/bold red]", "")
-            for dev in self.synced:
-                table.add_row(dev['id'], dev.get('name', 'N/A'), "[blue]SYNCED[/blue]", "")
-            
-            console.print(table)
-        else:
-            # Plain Text Fallback
-            console.print(f"\n=== Rustuya Device Sync Dashboard ===")
-            for dev in self.mismatched:
-                console.print(f"[MISMATCH] {dev['id']} ({dev.get('name')}) | {dev['old_key']} -> {dev['new_key']}")
-            for dev in self.missing:
-                console.print(f"[MISSING]  {dev['id']} ({dev.get('name')})")
-            for dev in self.orphaned:
-                console.print(f"[ORPHANED] {dev['id']} ({dev.get('name')})")
-            # Skip synced in plain text to keep it clean, or just list count
-        
-        summary_text = f"Summary: {len(self.synced)} Synced, {len(self.mismatched)} Mismatch, {len(self.missing)} Missing, {len(self.orphaned)} Orphaned"
-        if HAS_RICH:
-            summary = Text.assemble(
-                ("Summary: ", "bold"),
-                (f"{len(self.synced)} Synced", "blue"), ", ",
-                (f"{len(self.mismatched)} Mismatch", "yellow"), ", ",
-                (f"{len(self.missing)} Missing", "green"), ", ",
-                (f"{len(self.orphaned)} Orphaned", "red")
-            )
-            console.print(Panel(summary))
-        else:
-            console.print(f"\n{summary_text}\n" + "-"*len(summary_text))
-
-    def publish_action(self, topic_suffix, payload):
-        """Helper to publish action to bridge"""
+    def publish_action(self, action: str, dev: Device):
         if not self.mqtt_client:
             try:
-                try:
-                    self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-                except AttributeError:
-                    self.mqtt_client = mqtt.Client()
+                try: self.mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+                except: self.mqtt_client = mqtt.Client()
                 self.mqtt_client.connect(self.broker, self.port)
-            except Exception as e:
-                console.print(f"[red]Error connecting for action: {e}[/red]")
-                return
-
-        # Resolve command topic for this specific action
-        action_name = topic_suffix.split('/')[-1] # e.g. "add", "remove"
-        topic = self.resolve_topic(self.mqtt_command_topic, action=action_name)
-        
+            except Exception as e: ui.print(f"[red]✘ Connection Error: {e}[/red]"); return
+        topic = self.resolve_topic(self.mqtt_command_topic, action=action)
+        payload = {"action": action, "id": dev.id, "name": dev.name}
+        if action == "add":
+            if dev.type == "WiFi":
+                for k in ['key', 'ip', 'version']:
+                    v = getattr(dev, k)
+                    if v and v != "Auto": payload[k] = v
+            else:
+                for k in ['cid', 'parent_id']:
+                    v = getattr(dev, k)
+                    if v: payload[k] = v
         self.mqtt_client.publish(topic, json.dumps(payload))
-        console.print(f"[dim]Published to: {topic}[/dim]")
-            
-    def run_sync_keys(self):
-        if not self.mismatched:
-            console.print("[dim]No keys to update.[/dim]")
-            return
-        
-        console.print(f"\n[bold yellow]Updating {len(self.mismatched)} keys...[/bold yellow]")
-        for dev in self.mismatched:
-            console.print(f"  → Updating [cyan]{dev['id']}[/cyan] ({dev.get('name')})")
-            # Bridge update is usually just 'add' with existing ID
-            payload = {**dev} # Contain all cloud info
-            payload['key'] = dev['new_key']
-            self.publish_action("command", {"action": "add", **payload})
-            # Also try the specific add topic
-            self.publish_action("add", payload)
-            
-        console.print("[bold green]Done![/bold green]")
+        ui.print(f"[dim]Published {action} to: {topic}[/dim]")
 
-    def run_add_missing(self):
-        if not self.missing:
-            console.print("[dim]No missing devices to add.[/dim]")
-            return
-        
-        console.print(f"\n[bold green]Adding {len(self.missing)} devices...[/bold green]")
-        for dev in self.missing:
-            if Confirm.ask(f"  Add [cyan]{dev['id']}[/cyan] ({dev.get('name')})?"):
-                self.publish_action("command", {"action": "add", **dev})
-                self.publish_action("add", dev)
-        console.print("[bold green]Done![/bold green]")
-
-    def run_remove_orphans(self):
-        if not self.orphaned:
-            console.print("[dim]No orphaned devices to remove.[/dim]")
-            return
-        
-        console.print(f"\n[bold red]Removing {len(self.orphaned)} orphaned devices...[/bold red]")
-        for dev in self.orphaned:
-            did = dev.get('id')
-            if Confirm.ask(f"  Remove [cyan]{did}[/cyan] ({dev.get('name')})?"):
-                self.publish_action("command", {"action": "remove", "id": did})
-                self.publish_action("remove", {"id": did})
-        console.print("[bold green]Done![/bold green]")
+    def batch_process(self, items: list, name: str, func, auto: bool = False):
+        if not items: ui.print(f"[dim]No items to {name}.[/dim]"); return
+        ui.print(f"\n[bold]{name.capitalize()} {len(items)} items...[/bold]")
+        all_mode = auto
+        for item in items:
+            dev = item['dev'] if isinstance(item, dict) else item
+            if not all_mode:
+                res = ui.ask(f"  {name.capitalize()} {dev.id} ({dev.name})?", choices=["y", "n", "a", "q"], default="y").lower()
+                if res == "q": break
+                if res == "n": continue
+                if res == "a": all_mode = True
+            func(dev)
+        ui.print(f"[green]{name.capitalize()} done.[/green]")
 
     def interactive_menu(self):
         while True:
             self.show_dashboard()
-            
-            if not self.mismatched and not self.missing and not self.orphaned:
-                console.print("\n[bold green]✨ System is fully synchronized. No actions required.[/bold green]")
-                break
-
-            console.print("\n[bold]Select an action:[/bold]")
-            console.print("1. [yellow]Update Mismatched Keys[/yellow]")
-            console.print("2. [green]Add Missing Devices[/green]")
-            console.print("3. [red]Remove Orphaned Devices[/red]")
-            console.print("4. [bold cyan]Sync All[/bold cyan]")
-            console.print("5. Exit")
-            
-            choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5"], default="5")
-            
-            if choice == "1":
-                self.run_sync_keys()
-            elif choice == "2":
-                self.run_add_missing()
-            elif choice == "3":
-                self.run_remove_orphans()
+            if not any([self.mismatched, self.missing, self.orphaned]):
+                ui.print("\n[bold green]✨ System synchronized.[/bold green]"); break
+            ui.print("\n1. Update Mismatches\n2. Add Missing\n3. Remove Orphans\n4. Sync All\nq. Exit")
+            choice = ui.ask("Select", choices=["1", "2", "3", "4", "q"], default="q")
+            if choice == "1": self.batch_process(self.mismatched, "update", lambda d: self.publish_action("add", d))
+            elif choice == "2": self.batch_process(self.missing, "add", lambda d: self.publish_action("add", d))
+            elif choice == "3": self.batch_process(self.orphaned, "remove", lambda d: self.publish_action("remove", d))
             elif choice == "4":
-                if Confirm.ask("Are you sure you want to perform all sync actions?"):
-                    self.run_sync_keys()
-                    for dev in self.missing:
-                        self.publish_action("add", dev)
-                    for dev in self.orphaned:
-                        self.publish_action("remove", {"id": dev.get('id')})
-                    console.print("[bold green]Full Sync Completed![/bold green]")
-            elif choice == "5":
-                break
-            
-            # Re-fetch status to see updates
-            console.print("\n[dim]Refreshing status...[/dim]")
-            self.response_received.clear()
-            self.fetch_bridge_status()
+                if ui.confirm("Sync all?"):
+                    self.batch_process(self.mismatched, "update", lambda d: self.publish_action("add", d), auto=True)
+                    self.batch_process(self.missing, "add", lambda d: self.publish_action("add", d), auto=True)
+                    self.batch_process(self.orphaned, "remove", lambda d: self.publish_action("remove", d), auto=True)
+            elif choice == "q": break
+            ui.print("\n[dim]Refreshing...[/dim]"); self.response_received.clear(); self.fetch_bridge_status()
 
 def main():
     parser = argparse.ArgumentParser(description="Rustuya Bridge Management Tool")
-    parser.add_argument("-c", "--config", default=DEFAULT_CONFIG, help=f"Path to config.json (default: {DEFAULT_CONFIG})")
-    parser.add_argument("-l", "--cloud", default=DEFAULT_CLOUD, help=f"Path to tuyadevices.json (default: {DEFAULT_CLOUD})")
-    parser.add_argument("--broker", help="Override MQTT broker address")
-    parser.add_argument("--root", help="Override MQTT root topic")
-    
+    parser.add_argument("-c", "--config", default=DEFAULT_CONFIG)
+    parser.add_argument("-l", "--cloud", default=DEFAULT_CLOUD)
+    parser.add_argument("--broker")
+    parser.add_argument("--root")
     args = parser.parse_args()
-    
-    manager = RustuyaManager(args.config, args.cloud)
-    if args.broker: manager.broker = args.broker
-    if args.root: manager.root_topic = args.root
-    
-    console.print(Panel("[bold cyan]Rustuya Bridge Manager[/bold cyan]\n[dim]State-of-the-art device synchronization[/dim]", expand=False))
-    if not HAS_RICH:
-        console.print("[yellow]Note: 'rich' library not found. Falling back to plain text mode.[/yellow]\n")
-    
-    manager.load_configs()
-    manager.fetch_bridge_status()
-    manager.interactive_menu()
+    mgr = RustuyaManager(args.config, args.cloud)
+    if args.broker: mgr.broker = args.broker
+    if args.root: mgr.root_topic = args.root
+    ui.panel("Rustuya Bridge Manager", title="Welcome")
+    mgr.load_configs(); mgr.fetch_bridge_status(); mgr.interactive_menu()
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Exiting...[/yellow]")
-        sys.exit(0)
+    try: main()
+    except KeyboardInterrupt: ui.print("\nExiting..."); sys.exit(0)

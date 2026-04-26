@@ -1,240 +1,316 @@
 import asyncio
 import json
 import logging
-import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from contextlib import asynccontextmanager
 import aiomqtt
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rustuya-web")
 
-# Globals for state
-devices_map = {}
-websocket_connections = set()
-mqtt_client = None
-
-# Config defaults
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR.parent
 CONFIG_PATH = DATA_DIR / "config.json"
 CLOUD_PATH = DATA_DIR / "tuyadevices.json"
 CREDS_PATH = DATA_DIR / "tuyacreds.json"
 
-# We will try to load config
-mqtt_broker = "127.0.0.1"
-mqtt_port = 1883
-root_topic = "rustuya"
-mqtt_command_topic = f"{root_topic}/command"
-mqtt_event_topic = f"{root_topic}/event"
 
-def load_config():
-    global mqtt_broker, mqtt_port, root_topic, mqtt_command_topic, mqtt_event_topic
-    if CONFIG_PATH.exists():
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+@dataclass
+class AppConfig:
+    mqtt_broker: str = "127.0.0.1"
+    mqtt_port: int = 1883
+    root_topic: str = "rustuya"
+    mqtt_command_topic: str = ""
+    mqtt_event_topic: str = ""
+
+    def __post_init__(self):
+        self._refresh_topics()
+
+    def _refresh_topics(self):
+        self.mqtt_command_topic = self.mqtt_command_topic or f"{self.root_topic}/command"
+        self.mqtt_event_topic = self.mqtt_event_topic or f"{self.root_topic}/event/{{type}}"
+
+    @classmethod
+    def load(cls) -> "AppConfig":
+        cfg = cls()
+        if not CONFIG_PATH.exists():
+            return cfg
         try:
-            with open(CONFIG_PATH) as f:
-                config = json.load(f)
-                broker_full = config.get("mqtt_broker", mqtt_broker)
-                if '://' in broker_full:
-                    broker_full = broker_full.split('://')[-1]
-                parts = broker_full.split(':')
-                mqtt_broker = parts[0]
-                if len(parts) > 1:
-                    mqtt_port = int(parts[1])
-                root_topic = config.get("mqtt_root_topic", root_topic)
-                mqtt_command_topic = config.get("mqtt_command_topic", f"{root_topic}/command")
-                mqtt_event_topic = config.get("mqtt_event_topic", f"{root_topic}/event/{{type}}")
+            with CONFIG_PATH.open() as f:
+                data = json.load(f)
+            broker_full = data.get("mqtt_broker", cfg.mqtt_broker)
+            if "://" in broker_full:
+                broker_full = broker_full.split("://")[-1]
+            parts = broker_full.split(":")
+            cfg.mqtt_broker = parts[0]
+            if len(parts) > 1:
+                cfg.mqtt_port = int(parts[1])
+            cfg.root_topic = data.get("mqtt_root_topic", cfg.root_topic)
+            cfg.mqtt_command_topic = data.get("mqtt_command_topic", f"{cfg.root_topic}/command")
+            cfg.mqtt_event_topic = data.get("mqtt_event_topic", f"{cfg.root_topic}/event/{{type}}")
         except Exception as e:
-            logger.error(f"Error loading config: {e}")
+            logger.error("Error loading config: %s", e)
+        return cfg
 
-async def broadcast(message: dict):
+
+# ---------------------------------------------------------------------------
+# App state
+# ---------------------------------------------------------------------------
+@dataclass
+class AppState:
+    config: AppConfig = field(default_factory=AppConfig)
+    devices_map: dict = field(default_factory=dict)
+    websocket_connections: set = field(default_factory=set)
+    mqtt_client: "aiomqtt.Client | None" = None
+
+
+state = AppState()
+
+
+# ---------------------------------------------------------------------------
+# WebSocket broadcast
+# ---------------------------------------------------------------------------
+async def broadcast(message: dict) -> None:
+    if not state.websocket_connections:
+        return
     msg_str = json.dumps(message)
-    disconnected = set()
-    for ws in websocket_connections:
-        try:
-            await ws.send_text(msg_str)
-        except:
-            disconnected.add(ws)
-    for ws in disconnected:
-        websocket_connections.remove(ws)
+    results = await asyncio.gather(
+        *(ws.send_text(msg_str) for ws in state.websocket_connections),
+        return_exceptions=True,
+    )
+    dead = {
+        ws
+        for ws, result in zip(list(state.websocket_connections), results)
+        if isinstance(result, Exception)
+    }
+    state.websocket_connections -= dead
 
-async def mqtt_listener():
-    global mqtt_client
+
+# ---------------------------------------------------------------------------
+# MQTT message processing helpers
+# ---------------------------------------------------------------------------
+def extract_devices(payload: dict) -> dict | None:
+    """Extract device list/dict from various payload shapes."""
+    devs = payload.get("devices") or payload.get("data", {}).get("devices")
+    if not devs:
+        return None
+    if isinstance(devs, list):
+        return {d["id"]: d for d in devs if "id" in d}
+    if isinstance(devs, dict):
+        return devs
+    return None
+
+
+def handle_mqtt_message(topic: str, payload) -> tuple[bool, dict | None]:
+    """
+    Process a decoded MQTT payload and update devices_map in place.
+
+    Returns:
+        (devices_updated, updated_devices_snapshot | None)
+    """
+    if not isinstance(payload, dict):
+        return False, None
+
+    # Full snapshot (devices key present)
+    devs = extract_devices(payload)
+    if devs is not None:
+        state.devices_map.update(devs)
+        return True, dict(state.devices_map)
+
+    # Partial update (single device by id)
+    did = payload.get("id")
+    if did and did in state.devices_map:
+        state.devices_map[did].update(payload)
+        return True, dict(state.devices_map)
+
+    return False, None
+
+
+# ---------------------------------------------------------------------------
+# MQTT listener
+# ---------------------------------------------------------------------------
+async def mqtt_listener() -> None:
+    cfg = state.config
     reconnect_delay = 5
+
     while True:
         try:
-            async with aiomqtt.Client(hostname=mqtt_broker, port=mqtt_port) as client:
-                mqtt_client = client
-                logger.info(f"Connected to MQTT broker at {mqtt_broker}:{mqtt_port}")
-                
-                # Request full status on connect
-                await client.publish(mqtt_command_topic.replace("{action}", "status").replace("{root}", root_topic), json.dumps({"action": "status"}))
-                
-                # Subscribe to root and events
-                await client.subscribe(f"{root_topic}/#")
-                
+            async with aiomqtt.Client(hostname=cfg.mqtt_broker, port=cfg.mqtt_port) as client:
+                state.mqtt_client = client
+                logger.info("Connected to MQTT broker at %s:%d", cfg.mqtt_broker, cfg.mqtt_port)
+
+                # Request full status snapshot on (re)connect
+                status_topic = (
+                    cfg.mqtt_command_topic
+                    .replace("{action}", "status")
+                    .replace("{root}", cfg.root_topic)
+                )
+                await client.publish(status_topic, json.dumps({"action": "status"}))
+                await client.subscribe(f"{cfg.root_topic}/#")
+
                 async for message in client.messages:
                     topic = str(message.topic)
                     try:
                         payload = json.loads(message.payload.decode())
-                    except:
+                    except Exception:
                         payload = message.payload.decode()
-                        
-                    # Handle device snapshot/updates
-                    devices_updated = False
-                    if "devices" in payload or ("data" in payload and "devices" in payload["data"]):
-                        devs = payload.get("devices") or payload.get("data", {}).get("devices")
-                        if devs:
-                            if isinstance(devs, list):
-                                for dev in devs:
-                                    did = dev.get("id")
-                                    if did:
-                                        devices_map[did] = dev
-                            elif isinstance(devs, dict):
-                                for did, d in devs.items():
-                                    devices_map[did] = d
-                            devices_updated = True
-                    elif "id" in payload:
-                        # Partial update
-                        did = payload["id"]
-                        if did in devices_map:
-                            devices_map[did].update(payload)
-                            devices_updated = True
-                    
+
+                    devices_updated, updated_devices = handle_mqtt_message(topic, payload)
                     await broadcast({
                         "type": "mqtt",
                         "topic": topic,
                         "payload": payload,
                         "devices_updated": devices_updated,
-                        "devices": devices_map if devices_updated else None
+                        "devices": updated_devices,
                     })
-                    
-        except aiomqtt.MqttError as err:
-            logger.warning(f"MQTT connection failed: {err}. Retrying in {reconnect_delay} seconds...")
-            mqtt_client = None
-            await asyncio.sleep(reconnect_delay)
+
+        except aiomqtt.MqttError as e:
+            logger.warning("MQTT connection failed: %s. Retrying in %ds...", e, reconnect_delay)
         except Exception as e:
-            logger.error(f"Unexpected MQTT error: {e}")
-            mqtt_client = None
+            logger.error("Unexpected MQTT error: %s", e)
+        finally:
+            state.mqtt_client = None
             await asyncio.sleep(reconnect_delay)
 
+
+# ---------------------------------------------------------------------------
+# Wizard
+# ---------------------------------------------------------------------------
+async def run_wizard(user_code: str) -> None:
+    from tuyawizard.wizard import TuyaWizard, postprocess_devices
+
+    async def update_wizard(step: str, *, url: str | None = None, running: bool = True, error: str | None = None):
+        status = {"running": running, "step": step, "url": url}
+        if error is not None:
+            status["error"] = error
+        await broadcast({"type": "wizard", "status": status})
+
+    loop = asyncio.get_running_loop()
+
+    def qr_callback(url: str | None):
+        step = "Waiting for app scan..." if url else "Fetching devices..."
+        asyncio.run_coroutine_threadsafe(update_wizard(step, url=url), loop)
+
+    try:
+        await update_wizard("Starting API Login...")
+        tuya = TuyaWizard(info_file=str(CREDS_PATH))
+        await asyncio.to_thread(tuya.login_auto, user_code=user_code, qr_callback=qr_callback)
+
+        await update_wizard("Fetching devices...")
+        tuyadevices = await asyncio.to_thread(tuya.fetch_devices)
+
+        await update_wizard("Applying post-process (matching subdevices and scanning IPs)...")
+        await asyncio.to_thread(postprocess_devices, tuyadevices, "all")
+
+        await update_wizard("Saving devices...")
+        with CLOUD_PATH.open("w", encoding="utf-8") as f:
+            json.dump(tuyadevices, f, indent=4, ensure_ascii=False)
+
+        await update_wizard("Wizard Complete! Refreshing devices...", running=False)
+
+    except Exception as e:
+        logger.error("Wizard error: %s", e)
+        await update_wizard("Wizard failed.", running=False, error=str(e))
+
+
+# ---------------------------------------------------------------------------
+# WebSocket helpers
+# ---------------------------------------------------------------------------
+def load_init_data() -> dict:
+    """Load cloud devices and user_code for the WebSocket init payload."""
+    cloud_devices = {}
+    user_code = ""
+
+    if CLOUD_PATH.exists():
+        try:
+            with CLOUD_PATH.open() as f:
+                data = json.load(f)
+            dl = data if isinstance(data, list) else list(data.values())
+            cloud_devices = {d["id"]: d for d in dl if "id" in d}
+        except Exception as e:
+            logger.error("Error loading cloud file: %s", e)
+
+    if CREDS_PATH.exists():
+        try:
+            with CREDS_PATH.open() as f:
+                user_code = json.load(f).get("user_code", "")
+        except Exception as e:
+            logger.error("Error loading creds file: %s", e)
+
+    return {"cloud_devices": cloud_devices, "user_code": user_code}
+
+
+async def handle_ws_command(cmd: dict) -> None:
+    """Dispatch a WebSocket command to the correct handler."""
+    action = cmd.get("action", "")
+    payload = cmd.get("payload", {})
+
+    bridge_actions = {"add", "remove", "status", "query", "get", "delete"}
+    if action in bridge_actions:
+        if action == "delete":
+            action = "remove"
+        payload["action"] = action
+        if state.mqtt_client:
+            pub_topic = (
+                state.config.mqtt_command_topic
+                .replace("{action}", action)
+                .replace("{root}", state.config.root_topic)
+            )
+            await state.mqtt_client.publish(pub_topic, json.dumps(payload))
+        return
+
+    if action == "wizard_start":
+        asyncio.create_task(run_wizard(payload.get("user_code", "")))
+
+
+# ---------------------------------------------------------------------------
+# FastAPI app
+# ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    load_config()
+    state.config = AppConfig.load()
     task = asyncio.create_task(mqtt_listener())
     yield
     task.cancel()
 
-app = FastAPI(lifespan=lifespan)
 
-# Setup Templates & Static
-BASE_DIR = Path(__file__).resolve().parent
+app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
 
 @app.get("/")
 async def get_index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
 
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    websocket_connections.add(websocket)
+    state.websocket_connections.add(websocket)
     try:
-        # Create init payload
-        cloud_devices = {}
-        user_code = ""
-        
-        if CLOUD_PATH.exists():
-            try:
-                with CLOUD_PATH.open() as f:
-                    data = json.load(f)
-                    dl = data if isinstance(data, list) else data.values()
-                    cloud_devices = {d.get("id"): d for d in dl if "id" in d}
-            except Exception as e:
-                logger.error(f"Error loading cloud file: {e}")
-                
-        if CREDS_PATH.exists():
-            try:
-                with CREDS_PATH.open() as f:
-                    creds = json.load(f)
-                    user_code = creds.get("user_code", "")
-            except Exception as e:
-                logger.error(f"Error loading creds file: {e}")
-
-        await websocket.send_text(json.dumps({"type": "init", "devices": devices_map, "cloud_devices": cloud_devices, "user_code": user_code}))
-        while True:
-            data = await websocket.receive_text()
-            cmd = json.loads(data)
-            
-            # If UI asks us to publish a command to MQTT
-            if cmd.get("action") in ["add", "remove", "status", "query", "get", "delete"]:
-                action = cmd["action"]
-                # In old UI, "delete" payload was sent to publish_action("remove")
-                if action == "delete": action = "remove"
-                
-                payload = cmd.get("payload", {})
-                payload["action"] = action
-                
-                if mqtt_client:
-                    pub_topic = mqtt_command_topic.replace("{action}", action).replace("{root}", root_topic)
-                    await mqtt_client.publish(pub_topic, json.dumps(payload))
-            elif cmd.get("action") == "wizard_start":
-                user_code = cmd.get("payload", {}).get("user_code", "")
-                asyncio.create_task(run_wizard(user_code))
-
+        init_data = load_init_data()
+        await websocket.send_text(json.dumps({
+            "type": "init",
+            "devices": state.devices_map,
+            **init_data,
+        }))
+        async for raw in websocket.iter_text():
+            await handle_ws_command(json.loads(raw))
     except WebSocketDisconnect:
-        websocket_connections.remove(websocket)
+        pass
     except Exception as e:
-        logger.error(f"WS error: {e}")
-        if websocket in websocket_connections:
-            websocket_connections.remove(websocket)
-
-async def run_wizard(user_code: str):
-    from tuyawizard.wizard import TuyaWizard, postprocess_devices
-    
-    wizard_status = {"running": True, "step": "Starting API Login...", "url": None}
-    await broadcast({"type": "wizard", "status": wizard_status})
-
-    loop = asyncio.get_running_loop()
-
-    def qr_callback(url):
-        wizard_status["url"] = url
-        wizard_status["step"] = "Waiting for app scan..." if url else "Fetching devices..."
-        asyncio.run_coroutine_threadsafe(broadcast({"type": "wizard", "status": wizard_status}), loop)
-
-    try:
-        tuya = TuyaWizard(info_file=str(CREDS_PATH))
-        await asyncio.to_thread(tuya.login_auto, user_code=user_code, qr_callback=qr_callback)
-        
-        wizard_status["step"] = "Fetching devices..."
-        wizard_status["url"] = None
-        await broadcast({"type": "wizard", "status": wizard_status})
-        
-        tuyadevices = await asyncio.to_thread(tuya.fetch_devices)
-        
-        wizard_status["step"] = "Applying post-process (matching subdevices and scanning IPs)..."
-        await broadcast({"type": "wizard", "status": wizard_status})
-        
-        # This function updates tuyadevices in place
-        await asyncio.to_thread(postprocess_devices, tuyadevices, "all")
-        
-        wizard_status["step"] = "Saving devices..."
-        await broadcast({"type": "wizard", "status": wizard_status})
-        
-        with open(CLOUD_PATH, "w", encoding="utf-8") as f:
-            json.dump(tuyadevices, f, indent=4, ensure_ascii=False)
-            
-        wizard_status["step"] = "Wizard Complete! Refreshing devices..."
-        wizard_status["running"] = False
-        await broadcast({"type": "wizard", "status": wizard_status})
-        
-    except Exception as e:
-        logger.error(f"Wizard error: {e}")
-        wizard_status["running"] = False
-        wizard_status["error"] = str(e)
-        await broadcast({"type": "wizard", "status": wizard_status})
+        logger.error("WS error: %s", e)
+    finally:
+        state.websocket_connections.discard(websocket)

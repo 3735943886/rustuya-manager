@@ -19,8 +19,8 @@ logger = logging.getLogger("rustuya-web")
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR.parent
 CONFIG_PATH = DATA_DIR / "config.json"
-CLOUD_PATH = DATA_DIR / "tuyadevices.json"
-CREDS_PATH = DATA_DIR / "tuyacreds.json"
+CLOUD_PATH  = DATA_DIR / "tuyadevices.json"
+CREDS_PATH  = DATA_DIR / "tuyacreds.json"
 
 
 # ---------------------------------------------------------------------------
@@ -35,11 +35,8 @@ class AppConfig:
     mqtt_event_topic: str = ""
 
     def __post_init__(self):
-        self._refresh_topics()
-
-    def _refresh_topics(self):
         self.mqtt_command_topic = self.mqtt_command_topic or f"{self.root_topic}/command"
-        self.mqtt_event_topic = self.mqtt_event_topic or f"{self.root_topic}/event/{{type}}"
+        self.mqtt_event_topic   = self.mqtt_event_topic   or f"{self.root_topic}/event/{{type}}"
 
     @classmethod
     def load(cls) -> "AppConfig":
@@ -56,9 +53,9 @@ class AppConfig:
             cfg.mqtt_broker = parts[0]
             if len(parts) > 1:
                 cfg.mqtt_port = int(parts[1])
-            cfg.root_topic = data.get("mqtt_root_topic", cfg.root_topic)
-            cfg.mqtt_command_topic = data.get("mqtt_command_topic", f"{cfg.root_topic}/command")
-            cfg.mqtt_event_topic = data.get("mqtt_event_topic", f"{cfg.root_topic}/event/{{type}}")
+            cfg.root_topic          = data.get("mqtt_root_topic", cfg.root_topic)
+            cfg.mqtt_command_topic  = data.get("mqtt_command_topic", f"{cfg.root_topic}/command")
+            cfg.mqtt_event_topic    = data.get("mqtt_event_topic",   f"{cfg.root_topic}/event/{{type}}")
         except Exception as e:
             logger.error("Error loading config: %s", e)
         return cfg
@@ -73,6 +70,7 @@ class AppState:
     devices_map: dict = field(default_factory=dict)
     websocket_connections: set = field(default_factory=set)
     mqtt_client: "aiomqtt.Client | None" = None
+    mqtt_connected: bool = False
 
 
 state = AppState()
@@ -97,6 +95,13 @@ async def broadcast(message: dict) -> None:
     state.websocket_connections -= dead
 
 
+async def send_to(websocket: WebSocket, message: dict) -> None:
+    try:
+        await websocket.send_text(json.dumps(message))
+    except Exception:
+        state.websocket_connections.discard(websocket)
+
+
 # ---------------------------------------------------------------------------
 # MQTT message processing helpers
 # ---------------------------------------------------------------------------
@@ -112,23 +117,35 @@ def extract_devices(payload: dict) -> dict | None:
     return None
 
 
+def classify_mqtt_topic(topic: str) -> str:
+    """
+    Classify an incoming MQTT topic into a semantic type.
+    Returns: 'response' | 'error' | 'scanner' | 'event'
+    """
+    cfg = state.config
+    root = cfg.root_topic
+    if f"{root}/response/" in topic or topic.endswith("/response"):
+        return "response"
+    if f"{root}/error/" in topic or topic.endswith("/error"):
+        return "error"
+    if f"{root}/scanner" in topic:
+        return "scanner"
+    return "event"
+
+
 def handle_mqtt_message(topic: str, payload) -> tuple[bool, dict | None]:
     """
     Process a decoded MQTT payload and update devices_map in place.
-
-    Returns:
-        (devices_updated, updated_devices_snapshot | None)
+    Returns: (devices_updated, updated_devices_snapshot | None)
     """
     if not isinstance(payload, dict):
         return False, None
 
-    # Full snapshot (devices key present)
     devs = extract_devices(payload)
     if devs is not None:
         state.devices_map.update(devs)
         return True, dict(state.devices_map)
 
-    # Partial update (single device by id)
     did = payload.get("id")
     if did and did in state.devices_map:
         state.devices_map[did].update(payload)
@@ -147,10 +164,11 @@ async def mqtt_listener() -> None:
     while True:
         try:
             async with aiomqtt.Client(hostname=cfg.mqtt_broker, port=cfg.mqtt_port) as client:
-                state.mqtt_client = client
+                state.mqtt_client    = client
+                state.mqtt_connected = True
                 logger.info("Connected to MQTT broker at %s:%d", cfg.mqtt_broker, cfg.mqtt_port)
+                await broadcast({"type": "mqtt_status", "connected": True})
 
-                # Request full status snapshot on (re)connect
                 status_topic = (
                     cfg.mqtt_command_topic
                     .replace("{action}", "status")
@@ -160,19 +178,22 @@ async def mqtt_listener() -> None:
                 await client.subscribe(f"{cfg.root_topic}/#")
 
                 async for message in client.messages:
-                    topic = str(message.topic)
+                    topic   = str(message.topic)
                     try:
                         payload = json.loads(message.payload.decode())
                     except Exception:
                         payload = message.payload.decode()
 
+                    topic_type = classify_mqtt_topic(topic)
                     devices_updated, updated_devices = handle_mqtt_message(topic, payload)
+
                     await broadcast({
-                        "type": "mqtt",
-                        "topic": topic,
-                        "payload": payload,
+                        "type":            "mqtt",
+                        "topic_type":      topic_type,
+                        "topic":           topic,
+                        "payload":         payload,
                         "devices_updated": devices_updated,
-                        "devices": updated_devices,
+                        "devices":         updated_devices,
                     })
 
         except aiomqtt.MqttError as e:
@@ -180,7 +201,9 @@ async def mqtt_listener() -> None:
         except Exception as e:
             logger.error("Unexpected MQTT error: %s", e)
         finally:
-            state.mqtt_client = None
+            state.mqtt_client    = None
+            state.mqtt_connected = False
+            await broadcast({"type": "mqtt_status", "connected": False})
             await asyncio.sleep(reconnect_delay)
 
 
@@ -190,11 +213,12 @@ async def mqtt_listener() -> None:
 async def run_wizard(user_code: str) -> None:
     from tuyawizard.wizard import TuyaWizard, postprocess_devices
 
-    async def update_wizard(step: str, *, url: str | None = None, running: bool = True, error: str | None = None):
+    async def update_wizard(step: str, *, url: str | None = None, running: bool = True,
+                             error: str | None = None, **extra):
         status = {"running": running, "step": step, "url": url}
         if error is not None:
             status["error"] = error
-        await broadcast({"type": "wizard", "status": status})
+        await broadcast({"type": "wizard", "status": status, **extra})
 
     loop = asyncio.get_running_loop()
 
@@ -217,7 +241,9 @@ async def run_wizard(user_code: str) -> None:
         with CLOUD_PATH.open("w", encoding="utf-8") as f:
             json.dump(tuyadevices, f, indent=4, ensure_ascii=False)
 
-        await update_wizard("Wizard Complete! Refreshing devices...", running=False)
+        # Broadcast completion WITH refreshed cloud_devices
+        await update_wizard("Wizard Complete! Refreshing devices...", running=False,
+                             **load_init_data())
 
     except Exception as e:
         logger.error("Wizard error: %s", e)
@@ -230,7 +256,7 @@ async def run_wizard(user_code: str) -> None:
 def load_init_data() -> dict:
     """Load cloud devices and user_code for the WebSocket init payload."""
     cloud_devices = {}
-    user_code = ""
+    user_code     = ""
 
     if CLOUD_PATH.exists():
         try:
@@ -251,9 +277,9 @@ def load_init_data() -> dict:
     return {"cloud_devices": cloud_devices, "user_code": user_code}
 
 
-async def handle_ws_command(cmd: dict) -> None:
+async def handle_ws_command(cmd: dict, websocket: WebSocket) -> None:
     """Dispatch a WebSocket command to the correct handler."""
-    action = cmd.get("action", "")
+    action  = cmd.get("action", "")
     payload = cmd.get("payload", {})
 
     bridge_actions = {"add", "remove", "status", "query", "get", "delete"}
@@ -268,6 +294,12 @@ async def handle_ws_command(cmd: dict) -> None:
                 .replace("{root}", state.config.root_topic)
             )
             await state.mqtt_client.publish(pub_topic, json.dumps(payload))
+        else:
+            await send_to(websocket, {
+                "type":    "bridge_response",
+                "level":   "error",
+                "message": "MQTT broker not connected. Command not sent.",
+            })
         return
 
     if action == "wizard_start":
@@ -302,12 +334,13 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         init_data = load_init_data()
         await websocket.send_text(json.dumps({
-            "type": "init",
-            "devices": state.devices_map,
+            "type":          "init",
+            "devices":       state.devices_map,
+            "mqtt_connected": state.mqtt_connected,
             **init_data,
         }))
         async for raw in websocket.iter_text():
-            await handle_ws_command(json.loads(raw))
+            await handle_ws_command(json.loads(raw), websocket)
     except WebSocketDisconnect:
         pass
     except Exception as e:

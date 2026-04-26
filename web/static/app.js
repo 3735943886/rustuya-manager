@@ -7,6 +7,80 @@ let devices_map = {};
 let cloud_devices = {};
 let currentSyncData = { missing: [], mismatched: [], orphaned: [], synced: [] };
 let currentDeviceId = null;
+let currentFilter = 'all';          // 'all' | 'online' | 'offline' | 'subdevice'
+let liveValues = {};                // { [device_id]: { [dp]: value } }
+let activityLog = [];               // ring buffer, max 100 entries
+const MAX_LOG = 100;
+
+// =============================================================================
+// Toast Notification System
+// =============================================================================
+function showToast(message, level = 'info', duration = 3500) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const colors = {
+        success: 'bg-emerald-600 border-emerald-500',
+        error:   'bg-red-700    border-red-600',
+        info:    'bg-slate-700  border-slate-600',
+        warning: 'bg-amber-600  border-amber-500',
+    };
+    const icons = {
+        success: 'fa-circle-check',
+        error:   'fa-circle-xmark',
+        info:    'fa-circle-info',
+        warning: 'fa-triangle-exclamation',
+    };
+
+    const toast = document.createElement('div');
+    toast.className = `flex items-center gap-3 px-4 py-3 rounded-lg border shadow-xl text-white text-sm
+                       transition-all duration-300 opacity-0 translate-y-2
+                       ${colors[level] ?? colors.info}`;
+    toast.innerHTML = `<i class="fa-solid ${icons[level] ?? icons.info} flex-shrink-0"></i>
+                       <span>${message}</span>`;
+    container.appendChild(toast);
+
+    requestAnimationFrame(() => {
+        toast.classList.remove('opacity-0', 'translate-y-2');
+    });
+
+    setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+// =============================================================================
+// Activity Log
+// =============================================================================
+function addLog(message, level = 'info') {
+    const entry = { ts: new Date().toLocaleTimeString(), message, level };
+    activityLog.unshift(entry);
+    if (activityLog.length > MAX_LOG) activityLog.pop();
+    renderActivityLog();
+}
+
+function renderActivityLog() {
+    const el = document.getElementById('log-body');
+    if (!el) return;
+    const colors = { info: 'text-slate-300', error: 'text-red-400', success: 'text-emerald-400', warning: 'text-amber-400' };
+    el.innerHTML = activityLog.map(({ ts, message, level }) =>
+        `<div class="flex gap-3 text-xs py-1.5 border-b border-slate-700/50 last:border-0">
+            <span class="text-slate-500 shrink-0 font-mono">${ts}</span>
+            <span class="${colors[level] ?? colors.info}">${message}</span>
+         </div>`
+    ).join('') || `<p class="text-slate-500 text-sm text-center py-6">No activity yet.</p>`;
+}
+
+function toggleLogPanel() {
+    document.getElementById('log-panel').classList.toggle('translate-x-full');
+    // Close details if open
+    document.getElementById('details-panel').classList.add('translate-x-full');
+}
+
+function closeLogPanel() {
+    document.getElementById('log-panel').classList.add('translate-x-full');
+}
 
 // =============================================================================
 // WebSocket
@@ -22,13 +96,63 @@ function connectWS() {
 
     ws.onmessage = ({ data }) => {
         const msg = JSON.parse(data);
-        if (msg.type === 'wizard') {
-            handleWizardEvent(msg.status);
+
+        if (msg.type === 'mqtt_status') {
+            updateMqttBrokerStatus(msg.connected);
+            if (!msg.connected) showToast('MQTT broker disconnected', 'warning');
+            else showToast('MQTT broker connected', 'success', 2000);
             return;
         }
+
+        if (msg.type === 'wizard') {
+            handleWizardEvent(msg.status);
+            // Wizard completion may carry refreshed cloud_devices
+            if (msg.cloud_devices) {
+                cloud_devices = msg.cloud_devices;
+                updateSyncStateAndRender();
+            }
+            return;
+        }
+
+        if (msg.type === 'bridge_response') {
+            const level = msg.level === 'error' ? 'error' : 'success';
+            showToast(msg.message, level);
+            addLog(msg.message, level);
+            return;
+        }
+
+        if (msg.type === 'mqtt') {
+            // Bridge response/error via MQTT topic
+            if (msg.topic_type === 'response') {
+                const text = msg.payload?.message || JSON.stringify(msg.payload);
+                showToast(`Bridge: ${text}`, 'success');
+                addLog(`Bridge OK — ${text}`, 'success');
+            } else if (msg.topic_type === 'error') {
+                const text = msg.payload?.message || JSON.stringify(msg.payload);
+                showToast(`Bridge error: ${text}`, 'error');
+                addLog(`Bridge ERR — ${text}`, 'error');
+            } else if (msg.topic_type === 'event') {
+                // Accumulate live DPS values (exclude metadata keys)
+                const META_KEYS = new Set(['id', 'name', 'cid']);
+                const did = msg.payload?.id;
+                if (did && msg.payload) {
+                    const raw = msg.payload.dps || msg.payload;
+                    if (typeof raw === 'object' && !Array.isArray(raw)) {
+                        const ts = new Date().toLocaleTimeString();
+                        liveValues[did] = { ...(liveValues[did] ?? {}) };
+                        for (const [dp, v] of Object.entries(raw)) {
+                            if (!META_KEYS.has(dp)) liveValues[did][dp] = { value: v, ts };
+                        }
+                        if (currentDeviceId === did) updateDetailsLiveValues(did);
+                    }
+                }
+            }
+        }
+
         if (msg.type === 'init' || msg.devices_updated || msg.type === 'status') {
             if (msg.cloud_devices) cloud_devices = msg.cloud_devices;
             if (msg.devices)       devices_map   = msg.devices;
+            if (msg.mqtt_connected !== undefined) updateMqttBrokerStatus(msg.mqtt_connected);
             if (msg.type === 'init' && msg.user_code) {
                 const el = document.getElementById('wizard-code');
                 if (el) el.value = msg.user_code;
@@ -39,6 +163,7 @@ function connectWS() {
 
     ws.onclose = () => {
         updateConnectionStatus(false);
+        updateMqttBrokerStatus(false);
         reconnectTimer = setTimeout(connectWS, 5000);
     };
 
@@ -48,8 +173,9 @@ function connectWS() {
 function sendCommand(action, payload = {}) {
     if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ action, payload }));
+        addLog(`→ ${action}${payload.id ? ` [${payload.id}]` : ''}`, 'info');
     } else {
-        alert('Cannot send command, disconnected from backend');
+        showToast('Disconnected from backend', 'error');
     }
 }
 
@@ -63,6 +189,16 @@ function updateConnectionStatus(connected) {
                <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
            </span>
            <span class="text-slate-300 font-medium tracking-wide">Disconnected</span>`;
+}
+
+function updateMqttBrokerStatus(connected) {
+    const el = document.getElementById('mqtt-broker-status');
+    if (!el) return;
+    el.innerHTML = connected
+        ? `<span class="status-dot status-online"></span>
+           <span class="text-slate-400 text-xs tracking-wide">MQTT Broker</span>`
+        : `<span class="status-dot status-offline"></span>
+           <span class="text-slate-400 text-xs tracking-wide">MQTT Broker</span>`;
 }
 
 // =============================================================================
@@ -90,11 +226,9 @@ function computeSyncState() {
         const ckey = cdev.key || cdev.local_key || cdev.localkey;
         const bkey = bdev.key || bdev.local_key;
         if (ckey && bkey && ckey !== bkey) diff.push('local_key');
-        if (diff.length > 0) {
-            result.mismatched.push({ cloud: cdev, bridge: bdev, reasons: diff });
-        } else {
-            result.synced.push(bdev);
-        }
+        diff.length > 0
+            ? result.mismatched.push({ cloud: cdev, bridge: bdev, reasons: diff })
+            : result.synced.push(bdev);
     }
 
     for (const bid of bridge_ids) {
@@ -132,7 +266,6 @@ function requestStatusUpdate() {
 // =============================================================================
 // Sync panels
 // =============================================================================
-/** Build an item row for sync panels */
 function syncItemRow(label, id, btnText, btnClass, onClickExpr) {
     return `<div class="flex justify-between items-center text-sm border-b border-slate-700/50 pb-2 mb-2 last:border-0">
         <span class="text-white">${label}</span>
@@ -152,8 +285,7 @@ function renderSyncPanels() {
         items: currentSyncData.missing,
         renderRow: (dev) => syncItemRow(
             `${dev.name} <span class="text-slate-500 font-mono text-xs">(${dev.id})</span>`,
-            dev.id,
-            'Import to Bridge',
+            dev.id, 'Import to Bridge',
             'text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-500/30 border-rose-500/20',
             `resolveSingle('missing', '${dev.id}', event)`
         ),
@@ -180,8 +312,7 @@ function renderSyncPanels() {
         items: currentSyncData.orphaned,
         renderRow: (dev) => syncItemRow(
             `${dev.name} <span class="text-slate-500 font-mono text-xs">(${dev.id})</span>`,
-            dev.id,
-            'Delete from Bridge',
+            dev.id, 'Delete from Bridge',
             'text-slate-400 hover:text-red-400 bg-slate-700 hover:bg-red-500/20 border-slate-600 hover:border-red-500/30',
             `resolveSingle('orphaned', '${dev.id}', event)`
         ),
@@ -196,27 +327,23 @@ function renderSyncPanels() {
 function resolveAll(category, e) {
     if (e) e.stopPropagation();
     const actions = {
-        missing:    (dev) => submitDeviceBridgeAdd(dev),
+        missing:    (dev)  => submitDeviceBridgeAdd(dev),
         mismatched: (item) => submitDeviceBridgeAdd(item.cloud),
-        orphaned:   (dev) => sendCommand('remove', { id: dev.id }),
+        orphaned:   (dev)  => sendCommand('remove', { id: dev.id }),
     };
     currentSyncData[category].forEach(actions[category]);
 }
 
 function resolveSingle(category, id, e) {
     if (e) e.stopPropagation();
-    const item = currentSyncData[category].find(
-        x => (x.id ?? x.cloud?.id) === id
-    );
+    const item = currentSyncData[category].find(x => (x.id ?? x.cloud?.id) === id);
     if (!item) return;
-    if (category === 'orphaned') {
-        sendCommand('remove', { id: item.id });
-    } else {
-        submitDeviceBridgeAdd(category === 'mismatched' ? item.cloud : item);
-    }
+    category === 'orphaned'
+        ? sendCommand('remove', { id: item.id })
+        : submitDeviceBridgeAdd(category === 'mismatched' ? item.cloud : item);
 }
 
-// Keep old names as pass-throughs for HTML onclick attributes
+// Legacy shims for HTML onclick
 const resolveMissing    = (e) => resolveAll('missing', e);
 const resolveMismatched = (e) => resolveAll('mismatched', e);
 const resolveOrphans    = (e) => resolveAll('orphaned', e);
@@ -224,7 +351,7 @@ const resolveOrphans    = (e) => resolveAll('orphaned', e);
 function isPrivateIP(ip) {
     if (!ip || typeof ip !== 'string') return false;
     if (ip.toLowerCase() === 'auto') return true;
-    const [a, b, c] = ip.split('.');
+    const [a, b] = ip.split('.');
     if (a === '10') return true;
     if (a === '192' && b === '168') return true;
     if (a === '172' && +b >= 16 && +b <= 31) return true;
@@ -237,10 +364,9 @@ function submitDeviceBridgeAdd(dev) {
         payload.node_id = dev.node_id || dev.cid;
         payload.parent  = dev.parent  || dev.parent_id;
     } else {
-        const ip = isPrivateIP(dev.ip) ? dev.ip : 'Auto';
         Object.assign(payload, {
             key:     dev.key || dev.local_key || dev.localkey,
-            ip,
+            ip:      isPrivateIP(dev.ip) ? dev.ip : 'Auto',
             version: dev.version || '3.3',
         });
     }
@@ -248,20 +374,37 @@ function submitDeviceBridgeAdd(dev) {
 }
 
 // =============================================================================
-// Tree helpers (DRY – shared by renderDashboard + renderTree)
+// Tree helper (shared by renderDashboard + renderTree)
 // =============================================================================
 function buildTree(devices) {
     const rootNodes = [];
     const childMap  = {};
     for (const d of devices) {
         const parentId = d.parent || d.parent_id;
-        if (parentId) {
-            (childMap[parentId] ??= []).push(d);
-        } else {
-            rootNodes.push(d);
-        }
+        if (parentId) (childMap[parentId] ??= []).push(d);
+        else           rootNodes.push(d);
     }
     return { rootNodes, childMap };
+}
+
+// =============================================================================
+// Status filter
+// =============================================================================
+function setFilter(filter) {
+    currentFilter = filter;
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active-filter', btn.dataset.filter === filter);
+    });
+    renderDashboard();
+}
+
+function passesFilter(dev) {
+    if (currentFilter === 'all') return true;
+    const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
+    if (currentFilter === 'subdevice') return isSubDevice;
+    if (currentFilter === 'online')    return !isSubDevice && (dev.status === undefined || dev.status === 'online' || dev.status === true);
+    if (currentFilter === 'offline')   return !isSubDevice && dev.status === 'offline';
+    return true;
 }
 
 // =============================================================================
@@ -283,12 +426,13 @@ function renderDashboard() {
     const search = document.getElementById('search-input').value.toLowerCase();
     tbody.innerHTML = '';
 
-    const devices = currentSyncData.synced.length > 0
+    const allDevices = currentSyncData.synced.length > 0
         ? currentSyncData.synced
         : Object.values(devices_map);
+    const devices = allDevices.filter(d => passesFilter(d));
 
     if (!devices.length) {
-        tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No strictly synced devices found.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No devices match the current filter.</td></tr>`;
         return;
     }
 
@@ -307,6 +451,7 @@ function renderDashboard() {
         const indentIcon = (indent > 0 && !search)
             ? `<i class="fa-solid fa-level-up-alt fa-rotate-90 text-slate-600 mr-2 opacity-70"></i>`
             : '';
+        const hasLive = !!liveValues[dev.id];
 
         const tr = document.createElement('tr');
         tr.onclick   = () => openDetails(dev.id);
@@ -323,10 +468,14 @@ function renderDashboard() {
                     <span class="text-sm font-medium">${typeStr}</span>
                 </div>
             </td>
-            <td class="py-4 px-5 text-sm font-medium text-white">${dev.name || 'Unnamed Device'}</td>
+            <td class="py-4 px-5 text-sm font-medium text-white">
+                ${dev.name || 'Unnamed Device'}
+                ${hasLive ? `<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>` : ''}
+            </td>
             <td class="py-4 px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors">${dev.id}</td>
             <td class="py-4 px-5 text-right">
-                <button class="text-slate-500 hover:text-white p-2 rounded hover:bg-slate-700 transition-colors"
+                <button aria-label="Open device details"
+                        class="text-slate-500 hover:text-white p-2 rounded hover:bg-slate-700 transition-colors"
                         onclick="event.stopPropagation(); openDetails('${dev.id}')">
                     <i class="fa-solid fa-chevron-right"></i>
                 </button>
@@ -337,11 +486,8 @@ function renderDashboard() {
     }
 
     const roots = (rootNodes.length === 0 && devices.length > 0) ? devices : rootNodes;
-    if (search) {
-        devices.forEach(d => appendRow(d, 0));
-    } else {
-        roots.forEach(d => appendRow(d, 0));
-    }
+    if (search) devices.forEach(d => appendRow(d, 0));
+    else        roots.forEach(d => appendRow(d, 0));
 
     populateParentsSelect();
 }
@@ -380,14 +526,18 @@ function renderTree() {
     }
 
     const roots = (rootNodes.length === 0 && Object.keys(devices_map).length > 0)
-        ? Object.values(devices_map)
-        : rootNodes;
+        ? Object.values(devices_map) : rootNodes;
     roots.forEach(d => container.appendChild(createNode(d)));
 }
 
 // =============================================================================
 // Modals
 // =============================================================================
+function showModal(modalId) {
+    document.getElementById('modal-overlay').classList.remove('opacity-0', 'pointer-events-none');
+    document.getElementById(modalId).classList.remove('scale-95', 'hidden');
+}
+
 function openAddDeviceModal() {
     currentDeviceId = null;
     document.getElementById('modal-title').innerText = 'Add Device';
@@ -422,7 +572,7 @@ function openEditDeviceModal(id) {
 }
 
 function openWizardModal() {
-    document.getElementById('device-modal').classList.add('hidden');
+    ['device-modal', 'sync-modal'].forEach(id => document.getElementById(id).classList.add('hidden'));
     document.getElementById('wizard-modal').classList.remove('hidden');
     document.getElementById('wizard-input-step').classList.remove('hidden');
     document.getElementById('wizard-loading-step').classList.add('hidden');
@@ -431,15 +581,8 @@ function openWizardModal() {
     showModal('wizard-modal');
 }
 
-function showModal(modalId) {
-    const overlay = document.getElementById('modal-overlay');
-    overlay.classList.remove('opacity-0', 'pointer-events-none');
-    document.getElementById(modalId).classList.remove('scale-95', 'hidden');
-}
-
 function closeModal() {
-    const overlay = document.getElementById('modal-overlay');
-    overlay.classList.add('opacity-0', 'pointer-events-none');
+    document.getElementById('modal-overlay').classList.add('opacity-0', 'pointer-events-none');
     ['device-modal', 'wizard-modal', 'sync-modal'].forEach(id => {
         const el = document.getElementById(id);
         el.classList.add('scale-95');
@@ -490,11 +633,33 @@ function populateParentsSelect() {
 // =============================================================================
 // Details panel
 // =============================================================================
+const HIDDEN_DETAIL_KEYS = new Set(['dps']);
+
 function renderDetailRow(key, val) {
     return `<div class="detail-item">
         <span class="detail-label">${key.toUpperCase()}</span>
         <span class="detail-value" title="${val}">${val}</span>
     </div>`;
+}
+
+function updateDetailsLiveValues(id) {
+    const el  = document.getElementById('live-values-body');
+    const sec = document.getElementById('live-values-section');
+    if (!el || !sec) return;
+
+    const vals = liveValues[id];
+    if (!vals || !Object.keys(vals).length) {
+        sec.classList.add('hidden');
+        return;
+    }
+    sec.classList.remove('hidden');
+    el.innerHTML = Object.entries(vals).map(([dp, { value, ts }]) =>
+        `<div class="flex justify-between items-center text-xs py-1.5 border-b border-slate-700/50 last:border-0 gap-2">
+            <span class="text-slate-400 font-mono shrink-0">${dp}</span>
+            <span class="text-emerald-400 font-semibold">${JSON.stringify(value)}</span>
+            <span class="text-slate-600 font-mono text-[10px] shrink-0">${ts}</span>
+         </div>`
+    ).join('');
 }
 
 function openDetails(id) {
@@ -508,9 +673,11 @@ function openDetails(id) {
     currentDeviceId = id;
 
     document.getElementById('details-content').innerHTML = Object.entries(dev)
-        .filter(([, v]) => v !== null && v !== undefined && typeof v !== 'object')
+        .filter(([k, v]) => !HIDDEN_DETAIL_KEYS.has(k) && v !== null && v !== undefined && typeof v !== 'object')
         .map(([k, v]) => renderDetailRow(k, v))
         .join('');
+
+    updateDetailsLiveValues(id);
 
     document.getElementById('btn-edit').onclick   = () => { closeDetails(); openEditDeviceModal(id); };
     document.getElementById('btn-delete').onclick = () => {
@@ -521,10 +688,13 @@ function openDetails(id) {
     };
 
     panel.classList.remove('translate-x-full');
+    // Close log panel if open
+    document.getElementById('log-panel')?.classList.add('translate-x-full');
 }
 
 function closeDetails() {
     document.getElementById('details-panel').classList.add('translate-x-full');
+    currentDeviceId = null;
 }
 
 // =============================================================================
@@ -559,6 +729,8 @@ function handleWizardEvent(status) {
         document.getElementById('wizard-status-msg').innerText   = status.error;
         document.getElementById('wizard-spinner').classList.add('hidden');
         document.getElementById('wizard-qr-container').classList.add('hidden');
+        showToast(`Wizard failed: ${status.error}`, 'error', 6000);
+        addLog(`Wizard failed: ${status.error}`, 'error');
         return;
     }
 
@@ -569,7 +741,7 @@ function handleWizardEvent(status) {
     const spinnerEl = document.getElementById('wizard-spinner');
 
     qrEl.classList.toggle('hidden', !hasQr);
-    qrEl.classList.toggle('flex', hasQr);
+    qrEl.classList.toggle('flex',    hasQr);
     spinnerEl.classList.toggle('hidden', hasQr);
 
     if (hasQr) {
@@ -580,13 +752,27 @@ function handleWizardEvent(status) {
 
     if (!status.running) {
         spinnerEl.classList.add('hidden');
+        showToast('Wizard complete! Cloud devices refreshed.', 'success', 4000);
+        addLog('Wizard complete — cloud devices refreshed', 'success');
         setTimeout(() => { closeModal(); requestStatusUpdate(); }, 1500);
     }
 }
 
 // =============================================================================
-// Sync modal refresh — alias for status update
+// Sync modal
+// =============================================================================
 function requestSyncCheck() { requestStatusUpdate(); }
+
+// =============================================================================
+// Keyboard shortcuts
+// =============================================================================
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeModal();
+        closeDetails();
+        closeLogPanel();
+    }
+});
 
 // =============================================================================
 // Bootstrap

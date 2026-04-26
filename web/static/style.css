@@ -104,3 +104,17 @@ body {
 .tree-children {
     @apply ml-6 border-l border-slate-700 pl-4 space-y-1 mt-1;
 }
+
+/* Status Filter Buttons */
+.filter-btn {
+    @apply text-slate-400 hover:text-white transition-colors;
+}
+.filter-btn.active-filter {
+    @apply bg-brandBlue text-white shadow;
+}
+
+/* Toast animations */
+#toast-container > div {
+    pointer-events: auto;
+    max-width: 360px;
+}

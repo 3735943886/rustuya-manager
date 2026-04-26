@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rustuya Dashboard</title>
+    <!-- Use Tailwind via CDN for rapid styling of this modern interface -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkBg: '#0f172a',
+                        cardBg: '#1e293b',
+                        brandBlue: '#3b82f6',
+                        brandHover: '#2563eb'
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="/static/style.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-darkBg text-slate-200 min-h-screen font-sans antialiased">
+    <div id="app" class="flex h-screen overflow-hidden">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="w-64 bg-cardBg border-r border-slate-700 flex flex-col justify-between transition-all duration-300">
+            <div>
+                <div class="h-16 flex items-center px-6 border-b border-slate-700">
+                    <i class="fa-solid fa-microchip text-brandBlue text-2xl mr-3"></i>
+                    <h1 class="text-xl font-bold tracking-wider text-white">Rustuya</h1>
+                </div>
+                <nav class="p-4 space-y-2">
+                    <a href="#" onclick="showSection('dashboard')" class="nav-item active flex items-center px-4 py-3 bg-slate-800 text-brandBlue rounded-lg shadow-sm transition-all duration-200">
+                        <i class="fa-solid fa-border-all w-6 text-center"></i>
+                        <span class="ml-3 font-medium">Dashboard</span>
+                    </a>
+                    <a href="#" onclick="openWizardModal()" class="nav-item flex items-center px-4 py-3 bg-transparent text-slate-400 hover:text-white rounded-lg transition-all duration-200">
+                        <i class="fa-solid fa-wand-magic-sparkles w-6 text-center text-purple-400"></i>
+                        <span class="ml-3 font-medium">Tuya Wizard</span>
+                    </a>
+                </nav>
+            </div>
+            <div class="p-4">
+                <div id="connection-status" class="flex items-center text-sm px-4 py-2 bg-slate-800 rounded-lg">
+                    <span class="relative flex h-3 w-3 mr-3">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                    </span>
+                    <span class="text-slate-300 font-medium tracking-wide">Disconnected</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 flex flex-col overflow-hidden relative">
+            <!-- Header -->
+            <header class="h-16 bg-cardBg bg-opacity-80 backdrop-blur-md border-b border-slate-700 flex items-center justify-between px-6 z-10">
+                <h2 id="page-title" class="text-xl font-semibold text-white tracking-wide">Device Dashboard</h2>
+                <div class="flex items-center space-x-4">
+                    <button onclick="requestStatusUpdate()" class="p-2 text-slate-400 hover:text-white transition-colors tooltip" data-tip="Refresh Status">
+                        <i class="fa-solid fa-rotate-right"></i>
+                    </button>
+                    <button onclick="openAddDeviceModal()" class="btn-primary">
+                        <i class="fa-solid fa-plus mr-2"></i> Add Device
+                    </button>
+                </div>
+            </header>
+
+            <!-- Content Container -->
+            <div class="flex-1 overflow-y-auto p-6 scrollbar">
+                
+                <!-- Dashboard Section -->
+                <section id="dashboard" class="section h-full flex flex-col gap-6">
+                    <!-- Stats Cards -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 shrink-0">
+                        <div class="stat-card">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-slate-400 font-medium">Total Local Devices</h3>
+                                <i class="fa-solid fa-diagram-project text-slate-500"></i>
+                            </div>
+                            <p id="stat-total" class="text-3xl font-bold text-white mt-3">0</p>
+                        </div>
+                        <div class="stat-card">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-slate-400 font-medium">Cloud Fetched</h3>
+                                <i class="fa-solid fa-cloud text-brandBlue"></i>
+                            </div>
+                            <p id="stat-cloud" class="text-3xl font-bold text-white mt-3">0</p>
+                        </div>
+                        <div class="stat-card">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-slate-400 font-medium">Synced</h3>
+                                <i class="fa-solid fa-check-circle text-emerald-500"></i>
+                            </div>
+                            <p id="stat-synced" class="text-3xl font-bold text-white mt-3">0</p>
+                        </div>
+                        <div class="stat-card">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-slate-400 font-medium">Conflicts / Missing</h3>
+                                <i class="fa-solid fa-triangle-exclamation text-amber-500"></i>
+                            </div>
+                            <p id="stat-conflicts" class="text-3xl font-bold text-white mt-3">0</p>
+                        </div>
+                    </div>
+
+                    <!-- Sync/Conflict Panels Container -->
+                    <div class="flex-1 overflow-y-auto scrollbar space-y-4 pr-2">
+                        <!-- Missing Section -->
+                        <div id="section-missing" class="border border-slate-700 rounded-xl overflow-hidden hidden">
+                            <div class="bg-slate-800/90 p-4 flex justify-between items-center cursor-pointer" onclick="document.getElementById('body-missing').classList.toggle('hidden')">
+                                <h4 class="font-semibold text-rose-400 flex items-center">
+                                    <i class="fa-solid fa-cloud-arrow-down mr-3 text-lg"></i>
+                                    Missing in Bridge (<span id="count-missing">0</span>)
+                                </h4>
+                                <div class="flex items-center space-x-4">
+                                    <button onclick="resolveMissing(event)" class="px-3 py-1 bg-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white rounded text-sm font-medium transition-colors">Import All</button>
+                                    <i class="fa-solid fa-chevron-down text-slate-500"></i>
+                                </div>
+                            </div>
+                            <div id="body-missing" class="p-4 bg-cardBg space-y-2 border-t border-slate-700 hidden">
+                                <!-- JS -->
+                            </div>
+                        </div>
+
+                        <!-- Mismatched Section -->
+                        <div id="section-mismatch" class="border border-slate-700 rounded-xl overflow-hidden hidden">
+                            <div class="bg-slate-800/90 p-4 flex justify-between items-center cursor-pointer" onclick="document.getElementById('body-mismatch').classList.toggle('hidden')">
+                                <h4 class="font-semibold text-amber-400 flex items-center">
+                                    <i class="fa-solid fa-code-compare mr-3 text-lg"></i>
+                                    Mismatched Config (<span id="count-mismatch">0</span>)
+                                </h4>
+                                <div class="flex items-center space-x-4">
+                                    <button onclick="resolveMismatched(event)" class="px-3 py-1 bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white rounded text-sm font-medium transition-colors">Update All</button>
+                                    <i class="fa-solid fa-chevron-down text-slate-500"></i>
+                                </div>
+                            </div>
+                            <div id="body-mismatch" class="p-4 bg-cardBg space-y-2 border-t border-slate-700 hidden">
+                                <!-- JS -->
+                            </div>
+                        </div>
+
+                        <!-- Orphaned Section -->
+                        <div id="section-orphan" class="border border-slate-700 rounded-xl overflow-hidden hidden">
+                            <div class="bg-slate-800/90 p-4 flex justify-between items-center cursor-pointer" onclick="document.getElementById('body-orphan').classList.toggle('hidden')">
+                                <h4 class="font-semibold text-slate-400 flex items-center">
+                                    <i class="fa-solid fa-ghost mr-3 text-lg"></i>
+                                    Orphaned in Bridge (<span id="count-orphan">0</span>)
+                                </h4>
+                                <div class="flex items-center space-x-4">
+                                    <button onclick="resolveOrphans(event)" class="px-3 py-1 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white rounded text-sm font-medium transition-colors">Delete All</button>
+                                    <i class="fa-solid fa-chevron-down text-slate-500"></i>
+                                </div>
+                            </div>
+                            <div id="body-orphan" class="p-4 bg-cardBg space-y-2 border-t border-slate-700 hidden">
+                                <!-- JS -->
+                            </div>
+                        </div>
+
+                        <!-- Synced Topologic Devices Table -->
+                        <div class="bg-cardBg rounded-xl border border-slate-700 shadow-xl overflow-hidden flex flex-col mt-4">
+                            <div class="p-4 border-b border-slate-700 flex items-center justify-between bg-slate-800/90 z-10 sticky top-0">
+                                <h3 class="font-semibold text-lg text-emerald-400 flex items-center">
+                                    <i class="fa-solid fa-check-circle mr-3"></i>
+                                    Synced Devices (<span id="count-synced">0</span>)
+                                </h3>
+                                <div class="relative">
+                                    <i class="fa-solid fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500"></i>
+                                    <input type="text" id="search-input" onkeyup="renderDashboard()" placeholder="Search devices..." class="pl-10 pr-4 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:border-brandBlue transition-colors w-64">
+                                </div>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse" id="devices-table">
+                                    <thead class="bg-slate-800/50">
+                                        <tr>
+                                            <th class="py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Status</th>
+                                            <th class="py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Type</th>
+                                            <th class="py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Name</th>
+                                            <th class="py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Device ID</th>
+                                            <th class="py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700 text-right">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="devices-body" class="divide-y divide-slate-700/50">
+                                        <!-- Rows populated by JS -->
+                                        <tr>
+                                            <td colspan="5" class="py-12 text-center text-slate-500 font-medium">
+                                                <i class="fa-solid fa-spinner fa-spin text-2xl mb-3 text-brandBlue"></i>
+                                                <p>Waiting for MQTT data...</p>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                
+                
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals Overlay -->
+    <div id="modal-overlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
+        
+        <!-- Add/Edit Device Modal -->
+        <div id="device-modal" class="bg-cardBg w-full max-w-md rounded-2xl border border-slate-700 shadow-2xl overflow-hidden transform scale-95 transition-transform duration-300">
+            <div class="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
+                <h3 id="modal-title" class="text-xl font-bold text-white">Add Device</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="p-6 space-y-5">
+                <form id="device-form" onsubmit="submitDeviceForm(event)">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-1">Device ID</label>
+                            <input type="text" id="dev-id" required class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-1">Name</label>
+                            <input type="text" id="dev-name" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                        </div>
+                        
+                        <div class="pt-2">
+                             <label class="block text-sm font-medium text-slate-300 mb-2">Protocol</label>
+                             <div class="flex space-x-4">
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="dev-type" value="WiFi" checked onchange="toggleDeviceFields()" class="form-radio text-brandBlue bg-slate-900 border-slate-600 focus:ring-0 focus:ring-offset-0">
+                                    <span class="text-slate-300">WiFi</span>
+                                </label>
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="radio" name="dev-type" value="Zigbee/BLE" onchange="toggleDeviceFields()" class="form-radio text-brandBlue bg-slate-900 border-slate-600 focus:ring-0 focus:ring-offset-0">
+                                    <span class="text-slate-300">Zigbee/BLE</span>
+                                </label>
+                             </div>
+                        </div>
+
+                        <!-- WiFi Fields -->
+                        <div id="fields-wifi" class="space-y-4 pt-2">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-300 mb-1">Local Key</label>
+                                <input type="text" id="dev-key" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-300 mb-1">IP Address</label>
+                                    <input type="text" id="dev-ip" placeholder="Auto" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-300 mb-1">Version</label>
+                                    <input type="text" id="dev-version" placeholder="3.3" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Zigbee Fields -->
+                        <div id="fields-zigbee" class="space-y-4 pt-2 hidden">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-300 mb-1">Node ID (CID)</label>
+                                <input type="text" id="dev-node" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-300 mb-1">Parent ID</label>
+                                <select id="dev-parent" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow appearance-none">
+                                    <option value="">Select Parent...</option>
+                                    <!-- Populated by JS -->
+                                </select>
+                            </div>
+                        </div>
+
+                    </div>
+                    
+                    <div class="mt-8 flex justify-end space-x-3">
+                        <button type="button" onclick="closeModal()" class="px-5 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors font-medium">Cancel</button>
+                        <button type="submit" class="px-5 py-2 rounded-lg bg-brandBlue hover:bg-brandHover shadow-lg shadow-blue-900/20 text-white font-medium transition-colors">Save Device</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Wizard Modal -->
+        <div id="wizard-modal" class="bg-cardBg w-full max-w-lg rounded-2xl border border-slate-700 shadow-2xl overflow-hidden transform scale-95 transition-transform duration-300 hidden">
+            <div class="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-800/50">
+                <h3 class="text-xl font-bold text-white">Tuya Wizard</h3>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white transition-colors">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="p-6 space-y-5">
+                <div id="wizard-input-step">
+                    <p class="text-slate-300 mb-4 text-sm">Enter your TuyaSmart or SmartLife app User Code. You can find this in the app under "Me" > Settings (top right hex) > Account.</p>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-1">User Code</label>
+                            <input type="text" id="wizard-code" placeholder="user_code" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-shadow">
+                        </div>
+                    </div>
+                    <div class="mt-8 flex justify-end space-x-3">
+                        <button type="button" onclick="closeModal()" class="px-5 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800 transition-colors font-medium">Cancel</button>
+                        <button type="button" onclick="startWizard()" class="px-5 py-2 rounded-lg bg-purple-600 hover:bg-purple-700 shadow-lg shadow-purple-900/20 text-white font-medium transition-colors">Start Wizard</button>
+                    </div>
+                </div>
+                
+                <div id="wizard-loading-step" class="hidden flex flex-col items-center justify-center py-6">
+                    <!-- Status Text -->
+                    <h4 id="wizard-status-title" class="text-lg font-semibold text-white text-center mb-2">Connecting to API...</h4>
+                    <p id="wizard-status-msg" class="text-sm text-slate-400 text-center mb-6">Wizard is running in the background.</p>
+                    
+                    <!-- QR Code Block -->
+                    <div id="wizard-qr-container" class="hidden flex-col items-center text-center">
+                        <div>
+                            <div class="p-2 bg-white rounded-xl shadow-inner mb-4 inline-block">
+                                <img id="wizard-qr-img" src="" alt="QR Code" class="w-48 h-48 object-contain">
+                            </div>
+                        </div>
+                        <p class="text-sm font-medium text-slate-300">Please scan this QR Code using the Tuya app</p>
+                    </div>
+                    
+                    <!-- Loading Spinner -->
+                    <div id="wizard-spinner" class="my-6">
+                        <i class="fa-solid fa-circle-notch fa-spin text-4xl text-purple-500"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Sync Modal -->
+        <div id="sync-modal" class="bg-cardBg w-full max-w-4xl rounded-2xl border border-slate-700 shadow-2xl overflow-hidden transform scale-95 transition-transform duration-300 hidden max-h-[90vh] flex flex-col">
+            <div class="p-6 border-b border-slate-700 flex justify-between items-center bg-slate-800/50 shrink-0">
+                <h3 class="text-xl font-bold text-white">Cloud Sync Utility</h3>
+                <div class="flex space-x-3">
+                    <button onclick="requestSyncCheck()" class="p-2 text-brandBlue hover:text-white transition-colors" title="Refresh Check">
+                        <i class="fa-solid fa-arrows-rotate"></i>
+                    </button>
+                    <button onclick="closeModal()" class="text-slate-400 hover:text-white transition-colors">
+                        <i class="fa-solid fa-xmark text-xl"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-6 space-y-6 flex-1 overflow-y-auto scrollbar">
+                <div id="sync-loading" class="flex flex-col items-center py-10">
+                    <i class="fa-solid fa-spinner fa-spin text-4xl text-indigo-500 mb-4"></i>
+                    <p class="text-slate-400">Comparing local state against cloud...</p>
+                </div>
+
+                <div id="sync-content" class="hidden space-y-8">
+                    <!-- Missing Section -->
+                    <div class="border border-slate-700 rounded-xl overflow-hidden">
+                        <div class="bg-slate-800/80 p-4 flex justify-between items-center cursor-pointer" onclick="document.getElementById('sync-missing-body').classList.toggle('hidden')">
+                            <h4 class="font-semibold text-rose-400 flex items-center">
+                                <i class="fa-solid fa-cloud-arrow-down mr-3 text-lg"></i>
+                                Missing in Bridge (<span id="sync-missing-count">0</span>)
+                            </h4>
+                            <div class="flex items-center space-x-4">
+                                <button onclick="resolveMissing(event)" class="px-3 py-1 bg-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white rounded text-sm font-medium transition-colors">Import All</button>
+                                <i class="fa-solid fa-chevron-down text-slate-500"></i>
+                            </div>
+                        </div>
+                        <div id="sync-missing-body" class="p-4 bg-slate-900/50 space-y-2 hidden">
+                            <!-- populated by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Mismatched Section -->
+                    <div class="border border-slate-700 rounded-xl overflow-hidden">
+                        <div class="bg-slate-800/80 p-4 flex justify-between items-center cursor-pointer" onclick="document.getElementById('sync-mismatch-body').classList.toggle('hidden')">
+                            <h4 class="font-semibold text-amber-400 flex items-center">
+                                <i class="fa-solid fa-code-compare mr-3 text-lg"></i>
+                                Mismatched Config (<span id="sync-mismatch-count">0</span>)
+                            </h4>
+                            <div class="flex items-center space-x-4">
+                                <button onclick="resolveMismatched(event)" class="px-3 py-1 bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white rounded text-sm font-medium transition-colors">Update All</button>
+                                <i class="fa-solid fa-chevron-down text-slate-500"></i>
+                            </div>
+                        </div>
+                        <div id="sync-mismatch-body" class="p-4 bg-slate-900/50 space-y-2 hidden">
+                            <!-- populated by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Orphaned Section -->
+                    <div class="border border-slate-700 rounded-xl overflow-hidden">
+                        <div class="bg-slate-800/80 p-4 flex justify-between items-center cursor-pointer" onclick="document.getElementById('sync-orphan-body').classList.toggle('hidden')">
+                            <h4 class="font-semibold text-slate-400 flex items-center">
+                                <i class="fa-solid fa-ghost mr-3 text-lg"></i>
+                                Orphaned in Bridge (<span id="sync-orphan-count">0</span>)
+                            </h4>
+                            <div class="flex items-center space-x-4">
+                                <button onclick="resolveOrphans(event)" class="px-3 py-1 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white rounded text-sm font-medium transition-colors">Delete All</button>
+                                <i class="fa-solid fa-chevron-down text-slate-500"></i>
+                            </div>
+                        </div>
+                        <div id="sync-orphan-body" class="p-4 bg-slate-900/50 space-y-2 hidden">
+                            <!-- populated by JS -->
+                        </div>
+                    </div>
+
+                    <!-- Synced Section -->
+                    <div class="p-4 flex items-center text-emerald-400">
+                        <i class="fa-solid fa-check-circle mr-2"></i>
+                        <span id="sync-synced-count" class="font-medium mr-1">0</span> 
+                        <span>devices nicely synced.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+    </div>
+
+    <!-- Device Details Sliding Panel -->
+    <div id="details-panel" class="fixed inset-y-0 right-0 w-96 bg-cardBg border-l border-slate-700 shadow-2xl transform translate-x-full transition-transform duration-300 z-40 flex flex-col">
+        <div class="h-16 flex items-center justify-between px-6 border-b border-slate-700 bg-slate-800/80 backdrop-blur-md">
+            <h3 class="font-bold text-white tracking-wide">Device Details</h3>
+            <button onclick="closeDetails()" class="text-slate-400 hover:text-white transition-colors">
+                <i class="fa-solid fa-arrow-right"></i>
+            </button>
+        </div>
+        <div id="details-content" class="flex-1 overflow-y-auto p-6 space-y-6 scrollbar">
+            <!-- Details generated by JS -->
+        </div>
+        <div class="p-6 border-t border-slate-700 bg-slate-800/50 grid grid-cols-2 gap-3">
+            <button id="btn-edit" class="btn-secondary justify-center">
+                <i class="fa-solid fa-edit mr-2"></i> Edit
+            </button>
+            <button id="btn-delete" class="bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 hover:border-red-500 transition-all duration-200 px-4 py-2 rounded-lg font-medium shadow-sm flex items-center justify-center">
+                <i class="fa-solid fa-trash mr-2"></i> Delete
+            </button>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

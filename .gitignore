@@ -1,0 +1,16 @@
+# Sensitive data files
+tuyacreds.json
+tuyadevices.json
+config.json
+
+# Python
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+web/venv/
+.venv/
+
+# Env files
+.env

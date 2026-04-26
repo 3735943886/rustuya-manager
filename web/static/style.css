@@ -1,0 +1,106 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+body {
+    font-family: 'Inter', sans-serif;
+}
+
+/* Custom Scrollbar */
+.scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+.scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+.scrollbar::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 3px;
+}
+.scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+}
+
+/* Base button styles */
+.btn-primary {
+    @apply bg-brandBlue hover:bg-brandHover text-white px-4 py-2 rounded-lg font-medium shadow-lg shadow-blue-900/20 transition-all duration-200 flex items-center;
+}
+.btn-secondary {
+    @apply bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 hover:border-slate-500 px-4 py-2 rounded-lg font-medium shadow-sm transition-all duration-200 flex items-center;
+}
+
+/* Navigation active states */
+.nav-item.active {
+    @apply bg-slate-800 text-brandBlue;
+}
+.nav-item:not(.active):hover {
+    @apply bg-slate-800/50 text-white;
+}
+
+/* Stats Cards */
+.stat-card {
+    @apply bg-slate-800/40 rounded-xl p-5 border border-slate-700/50 backdrop-blur-sm transition-all duration-300;
+}
+.stat-card:hover {
+    @apply border-slate-600 shadow-lg transform -translate-y-1 bg-slate-800/60;
+}
+
+/* Table Rows Hover */
+#devices-body tr {
+    @apply transition-colors duration-150 group hover:bg-slate-800/40 cursor-pointer;
+}
+
+/* Status Indicators */
+.status-dot {
+    @apply relative inline-flex rounded-full h-2.5 w-2.5 mr-2;
+}
+.status-online {
+    @apply bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)];
+}
+.status-offline {
+    @apply bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)];
+}
+
+/* Tooltip implementation */
+.tooltip {
+    position: relative;
+}
+.tooltip::before {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: -150%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    border: 1px solid #334155;
+    z-index: 100;
+}
+.tooltip:hover::before {
+    opacity: 1;
+}
+
+/* Details list styling */
+.detail-item {
+    @apply flex items-center justify-between p-3 rounded-lg bg-slate-900/50 border border-slate-700/50 hover:border-slate-600 transition-colors;
+}
+.detail-label {
+    @apply text-slate-400 font-medium text-sm;
+}
+.detail-value {
+    @apply text-white font-mono text-sm max-w-[200px] truncate;
+}
+
+/* Tree UI */
+.tree-node {
+    @apply flex items-center p-2 rounded-md hover:bg-slate-800/50 cursor-pointer transition-colors border border-transparent hover:border-slate-700;
+}
+.tree-children {
+    @apply ml-6 border-l border-slate-700 pl-4 space-y-1 mt-1;
+}

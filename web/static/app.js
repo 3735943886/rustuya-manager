@@ -124,12 +124,31 @@ function connectWS() {
         if (msg.type === 'mqtt') {
             // Bridge response/error via MQTT topic
             if (msg.topic_type === 'response') {
-                const text = msg.payload?.message || JSON.stringify(msg.payload);
+                const p = msg.payload || {};
+                let text = p.message;
+                if (!text) {
+                    if (p.action === 'status') {
+                        const count = Object.keys(p.devices || {}).length;
+                        text = `Status updated (${count} devices)`;
+                    } else if (p.action === 'remove') {
+                        text = `Device removed: ${p.id}`;
+                    } else {
+                        text = JSON.stringify(p);
+                    }
+                }
                 showToast(`Bridge: ${text}`, 'success');
                 addLog(`Bridge OK — ${text}`, 'success');
             } else if (msg.topic_type === 'error') {
                 const p = msg.payload || {};
-                const errMsg = p.errorMsg || p.message || p.error || JSON.stringify(p);
+                let errMsg = p.errorMsg || p.message || p.error;
+                if (!errMsg) {
+                    if (p.action === 'status') {
+                        const count = Object.keys(p.devices || {}).length;
+                        errMsg = `Status updated (${count} devices)`;
+                    } else {
+                        errMsg = JSON.stringify(p);
+                    }
+                }
                 const namePart = p.name ? `[${p.name}] ` : '';
                 const idPart   = p.id   ? `(${p.id}) ` : '';
                 const text     = `${namePart}${idPart}${errMsg}`;
@@ -275,10 +294,13 @@ function requestStatusUpdate() {
 // =============================================================================
 // Sync panels
 // =============================================================================
-function syncItemRow(label, id, btnText, btnClass, onClickExpr) {
+function syncItemRow(label, id, btnText, btnClass, onClickExpr, onEditExpr) {
     return `<div class="flex justify-between items-center text-sm border-b border-slate-700/50 pb-2 mb-2 last:border-0">
         <span class="text-white">${label}</span>
-        <button onclick="${onClickExpr}" class="${btnClass} px-3 py-1.5 rounded transition-colors border text-sm font-medium">${btnText}</button>
+        <div class="flex gap-2">
+            ${onEditExpr ? `<button onclick="${onEditExpr}" title="Edit before adding" class="px-2 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors border border-slate-600"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
+            <button onclick="${onClickExpr}" class="${btnClass} px-3 py-1.5 rounded transition-colors border text-sm font-medium">${btnText}</button>
+        </div>
     </div>`;
 }
 
@@ -377,7 +399,7 @@ function submitDeviceBridgeAdd(dev) {
         Object.assign(payload, {
             key:     dev.key || dev.local_key || dev.localkey,
             ip:      isPrivateIP(dev.ip) ? dev.ip : 'Auto',
-            version: dev.version || '3.3',
+            version: dev.version || 'Auto',
         });
     }
     sendCommand('add', payload);
@@ -581,6 +603,31 @@ function openEditDeviceModal(id) {
     showModal('device-modal');
 }
 
+function openDeviceImportModal(dev) {
+    currentDeviceId = null; // New device (no bridge ID yet)
+    document.getElementById('modal-title').innerText = 'Import Device';
+    document.getElementById('dev-id').value = dev.id;
+    document.getElementById('dev-id').readOnly = true; // ID is fixed from cloud
+    document.getElementById('dev-name').value = dev.name || '';
+
+    const isZigbee = !!(dev.sub || dev.parent || dev.parent_id || dev.node_id || dev.cid);
+    document.querySelector(`input[name="dev-type"][value="${isZigbee ? 'Zigbee/BLE' : 'WiFi'}"]`).checked = true;
+    toggleDeviceFields();
+
+    if (isZigbee) {
+        document.getElementById('dev-node').value   = dev.cid || dev.node_id || '';
+        document.getElementById('dev-parent').value = dev.parent_id || dev.parent || '';
+    } else {
+        document.getElementById('dev-key').value     = dev.key || dev.local_key || dev.localkey || '';
+        document.getElementById('dev-ip').value      = isPrivateIP(dev.ip) ? dev.ip : '';
+        document.getElementById('dev-version').value = dev.version || 'Auto';
+        if (!document.getElementById('dev-ip').value) {
+            document.getElementById('dev-ip').placeholder = 'Auto (Local Discovery)';
+        }
+    }
+    showModal('device-modal');
+}
+
 function openWizardModal() {
     ['device-modal', 'sync-modal'].forEach(id => document.getElementById(id).classList.add('hidden'));
     document.getElementById('wizard-modal').classList.remove('hidden');
@@ -602,6 +649,12 @@ function closeModal() {
 
 function showConfirm({ title = 'Are you sure?', message = '', okText = 'Confirm', cancelText = 'Cancel' }) {
     return new Promise((resolve) => {
+        // Hide other modals to prevent overlap
+        ['device-modal', 'wizard-modal', 'sync-modal'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden', 'scale-95');
+        });
+
         const modal = document.getElementById('confirm-modal');
         const overlay = document.getElementById('modal-overlay');
         const titleEl = document.getElementById('confirm-title');

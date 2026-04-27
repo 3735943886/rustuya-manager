@@ -8,7 +8,7 @@ let cloud_devices = {};
 let currentSyncData = { missing: [], mismatched: [], orphaned: [], synced: [] };
 let currentDeviceId = null;
 let currentFilter = 'all';          // 'all' | 'online' | 'offline' | 'subdevice'
-// liveValues removed
+let liveValues = {};                // { [device_id]: { [dp]: value } }
 let deviceErrors = {};              // { [device_id]: "error message" }
 let activityLog = [];               // ring buffer, max 100 entries
 const MAX_LOG = 100;
@@ -179,6 +179,21 @@ function connectWS() {
                     deviceErrors[p.id] = text;
                 } else if (p.errorCode === 0 && p.id) {
                     delete deviceErrors[p.id];
+                }
+            } else if (msg.topic_type === 'event') {
+                // Accumulate live DPS values (exclude metadata keys)
+                const META_KEYS = new Set(['id', 'name', 'cid']);
+                const did = msg.payload?.id;
+                if (did && msg.payload) {
+                    const raw = msg.payload.dps || msg.payload;
+                    if (typeof raw === 'object' && !Array.isArray(raw)) {
+                        const ts = new Date().toLocaleTimeString();
+                        liveValues[did] = { ...(liveValues[did] ?? {}) };
+                        for (const [dp, v] of Object.entries(raw)) {
+                            if (!META_KEYS.has(dp)) liveValues[did][dp] = { value: v, ts };
+                        }
+                        if (currentDeviceId === did) updateDetailsLiveValues(did);
+                    }
                 }
             }
         }
@@ -495,6 +510,8 @@ function renderDashboard() {
             ? `<i class="fa-solid fa-level-up-alt fa-rotate-90 text-slate-600 mr-2 opacity-70"></i>`
             : '';
 
+        const hasLive = !!liveValues[dev.id];
+
         const tr = document.createElement('tr');
         tr.onclick   = () => openDetails(dev.id);
         tr.className = 'border-b border-slate-700/50 hover:bg-slate-800/40 transition-colors cursor-pointer group';
@@ -512,7 +529,7 @@ function renderDashboard() {
             </td>
             <td class="py-4 px-5 text-sm font-medium text-white">
                 ${dev.name || 'Unnamed Device'}
-                ${deviceErrors[dev.id] ? `<span class="ml-2 text-xs text-red-500 font-normal animate-pulse">● error</span>` : ''}
+                ${deviceErrors[dev.id] ? `<span class="ml-2 text-xs text-red-500 font-normal animate-pulse">● error</span>` : (hasLive ? `<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>` : '')}
             </td>
             <td class="py-4 px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors">${dev.id}</td>
             <td class="py-4 px-5 text-right">
@@ -752,6 +769,40 @@ function renderDetailRow(key, val) {
     </div>`;
 }
 
+function updateDetailsLiveValues(id) {
+    const el  = document.getElementById('live-values-body');
+    const sec = document.getElementById('live-values-section');
+    if (!el || !sec) return;
+
+    const error = deviceErrors[id];
+    const vals  = liveValues[id];
+
+    if (error) {
+        sec.classList.remove('hidden');
+        el.innerHTML = `
+            <div class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <div class="text-red-400 text-xs font-bold mb-1 flex items-center">
+                    <i class="fa-solid fa-triangle-exclamation mr-2"></i> DEVICE ERROR
+                </div>
+                <div class="text-red-300 text-xs leading-relaxed">${error}</div>
+            </div>`;
+        return;
+    }
+
+    if (!vals || !Object.keys(vals).length) {
+        sec.classList.add('hidden');
+        return;
+    }
+    sec.classList.remove('hidden');
+    el.innerHTML = Object.entries(vals).map(([dp, { value, ts }]) =>
+        `<div class="flex justify-between items-center text-xs py-1.5 border-b border-slate-700/50 last:border-0 gap-2">
+            <span class="text-slate-400 font-mono shrink-0">${dp}</span>
+            <span class="text-emerald-400 font-semibold">${JSON.stringify(value)}</span>
+            <span class="text-slate-600 font-mono text-[10px] shrink-0">${ts}</span>
+         </div>`
+    ).join('');
+}
+
 function openDetails(id) {
     const panel = document.getElementById('details-panel');
     if (currentDeviceId === id && !panel.classList.contains('translate-x-full')) {
@@ -769,6 +820,8 @@ function openDetails(id) {
         .filter(([k, v]) => !HIDDEN_DETAIL_KEYS.has(k) && v !== null && v !== undefined && typeof v !== 'object')
         .map(([k, v]) => renderDetailRow(k, v))
         .join('');
+
+    updateDetailsLiveValues(id);
 
 
     document.getElementById('btn-edit').onclick   = () => { closeDetails(); openEditDeviceModal(id); };

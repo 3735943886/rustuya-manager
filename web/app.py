@@ -178,13 +178,14 @@ def classify_mqtt_topic(topic: str) -> str:
     return "event"
 
 
-def handle_mqtt_message(topic: str, payload, topic_type: str) -> tuple[bool, dict | None]:
+def handle_mqtt_message(topic: str, payload, topic_type: str) -> tuple[bool, dict | None, bool]:
     """
     Process a decoded MQTT payload and update devices_map in place.
-    Returns: (devices_updated, updated_devices_snapshot | None)
+    Returns: (devices_updated, updated_devices_snapshot | None, should_refresh_status)
     """
+    should_refresh = False
     if not isinstance(payload, dict):
-        return False, None
+        return False, None, False
 
     action = payload.get("action")
     did    = payload.get("id")
@@ -205,18 +206,20 @@ def handle_mqtt_message(topic: str, payload, topic_type: str) -> tuple[bool, dic
             if did in state.devices_map:
                 logger.info("Removing device %s from local state", did)
                 del state.devices_map[did]
-                return True, dict(state.devices_map)
+                return True, dict(state.devices_map), True
         
-        # Important: We don't update devices_map for "add" response payloads 
-        # to avoid polluting device state with "status: ok" or "action: add".
-        return False, None
+        if action == "add" and is_success:
+            logger.info("Device add successful, triggering status refresh")
+            return False, None, True
+            
+        return False, None, False
 
     # 2. Handle "error" or "event" topics
     if did and topic_type in ("error", "event"):
         # If the payload contains an "action", it's likely a bridge response/error 
         # about a specific command (like "add", "remove"), NOT a device state update.
         if "action" in payload:
-            return False, None
+            return False, None, False
 
         # Ignore junk keys to keep devices_map clean
         ignore = {"errorCode", "errorMsg", "payloadStr"}
@@ -235,10 +238,10 @@ def handle_mqtt_message(topic: str, payload, topic_type: str) -> tuple[bool, dic
             logger.info("Discovered device from %s: %s (%s)", topic_type, filtered.get("name", "Unknown"), did)
             state.devices_map[did] = filtered
             
-        return True, dict(state.devices_map)
+        return True, dict(state.devices_map), False
 
 
-    return False, None
+    return False, None, False
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +275,15 @@ async def mqtt_listener() -> None:
                         payload = message.payload.decode()
 
                     topic_type = classify_mqtt_topic(topic)
-                    devices_updated, updated_devices = handle_mqtt_message(topic, payload, topic_type)
+                    devices_updated, updated_devices, should_refresh = handle_mqtt_message(topic, payload, topic_type)
+
+                    if should_refresh:
+                        status_topic = (
+                            cfg.mqtt_command_topic
+                            .replace("{action}", "status")
+                            .replace("{root}", cfg.root_topic)
+                        )
+                        await client.publish(status_topic, json.dumps({"action": "status"}))
 
                     await broadcast({
                         "type":            "mqtt",

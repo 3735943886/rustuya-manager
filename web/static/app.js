@@ -467,26 +467,28 @@ function passesFilter(dev) {
 // Dashboard rendering
 // =============================================================================
 function renderStatusCell(dev) {
-    const error = deviceErrors[dev.id];
-    if (error) {
-        return `<span class="status-dot bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></span>
-                <span class="text-sm font-medium text-red-500">Error</span>`;
-    }
+    const errorMsg = deviceErrors[dev.id];
     const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
+    const online = dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0;
+    
+    // Check if status is a non-zero error code
+    const isErrorCode = !online && !isSubDevice && typeof dev.status === 'string' && /^\d+$/.test(dev.status);
+    
+    if (errorMsg || isErrorCode) {
+        let text = 'Error';
+        if (isErrorCode) text = `Error ${dev.status}`;
+        
+        return `<span class="status-dot bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></span>
+                <span class="text-sm font-medium text-red-500">${text}</span>`;
+    }
+
     if (isSubDevice) {
         return `<span class="status-dot" style="background:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,0.25)"></span>
                 <span class="text-sm font-medium text-blue-400">Sub-device</span>`;
     }
-    const online = dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0;
-    
-    // Check if status is a non-zero error code
-    let statusText = online ? 'Online' : 'Offline';
-    if (!online && typeof dev.status === 'string' && /^\d+$/.test(dev.status)) {
-        statusText = `Error ${dev.status}`;
-    }
 
     return `<span class="status-dot ${online ? 'status-online' : 'status-offline'}"></span>
-            <span class="text-sm font-medium ${online ? 'text-slate-300' : 'text-slate-500'}">${statusText}</span>`;
+            <span class="text-sm font-medium ${online ? 'text-slate-300' : 'text-slate-500'}">${online ? 'Online' : 'Offline'}</span>`;
 }
 
 function renderDashboard() {
@@ -780,31 +782,40 @@ function renderDetailRow(key, val) {
 }
 
 function updateDetailsLiveValues(id) {
-    const el  = document.getElementById('live-values-body');
-    const sec = document.getElementById('live-values-section');
-    if (!el || !sec) return;
+    const liveEl   = document.getElementById('live-values-body');
+    const liveSec  = document.getElementById('live-values-section');
+    const errEl    = document.getElementById('device-error-body');
+    const errSec   = document.getElementById('device-error-section');
+    if (!liveEl || !liveSec || !errEl || !errSec) return;
 
-    const error = deviceErrors[id];
-    const vals  = liveValues[id];
+    const dev = devices_map[id];
+    const online = dev && (dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0);
+    const isErrorCode = dev && !online && typeof dev.status === 'string' && /^\d+$/.test(dev.status);
+    
+    const errorMsg = deviceErrors[id];
+    const hasError = errorMsg || isErrorCode;
 
-    if (error) {
-        sec.classList.remove('hidden');
-        el.innerHTML = `
-            <div class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-                <div class="text-red-400 text-xs font-bold mb-1 flex items-center">
-                    <i class="fa-solid fa-triangle-exclamation mr-2"></i> DEVICE ERROR
-                </div>
-                <div class="text-red-300 text-xs leading-relaxed">${error}</div>
+    if (hasError) {
+        errSec.classList.remove('hidden');
+        liveSec.classList.add('hidden'); // Hide live values on error
+        
+        let text = errorMsg || `Error Code: ${dev.status}`;
+        errEl.innerHTML = `
+            <div class="text-red-300 text-xs leading-relaxed flex items-center gap-2">
+                <i class="fa-solid fa-triangle-exclamation text-red-500"></i>
+                ${text}
             </div>`;
         return;
     }
 
+    errSec.classList.add('hidden');
+    const vals = liveValues[id];
     if (!vals || !Object.keys(vals).length) {
-        sec.classList.add('hidden');
+        liveSec.classList.add('hidden');
         return;
     }
-    sec.classList.remove('hidden');
-    el.innerHTML = Object.entries(vals).map(([dp, { value, ts }]) =>
+    liveSec.classList.remove('hidden');
+    liveEl.innerHTML = Object.entries(vals).map(([dp, { value, ts }]) =>
         `<div class="flex justify-between items-center text-xs py-1.5 border-b border-slate-700/50 last:border-0 gap-2">
             <span class="text-slate-400 font-mono shrink-0">${dp}</span>
             <span class="text-emerald-400 font-semibold">${JSON.stringify(value)}</span>

@@ -196,7 +196,7 @@ def handle_mqtt_message(topic: str, payload, topic_type: str) -> tuple[bool, dic
         devs = extract_devices(payload)
         if devs is not None:
             state.devices_map = devs
-            return True, dict(state.devices_map)
+            return True, dict(state.devices_map), False
         
         # Specific action confirmations
         status = str(payload.get("status", "")).lower()

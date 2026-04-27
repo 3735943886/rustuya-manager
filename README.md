@@ -1,67 +1,52 @@
-# Rustuya Manager
+# Rustuya Manager Web
 
-A management tool for rustuya-bridge to ensure efficient synchronization of Tuya devices.
+A modern, real-time web management dashboard for **[rustuya-bridge](https://github.com/3735943886/rustuya-bridge)**, designed to ensure efficient synchronization and monitoring of Tuya devices.
 
 ## Overview
 
-Rustuya Manager is a management tool developed with AI assistance that provides a centralized dashboard and interactive CLI to synchronize device information between the Tuya Cloud (via `tuyadevices.json`) and an active Rustuya Bridge. 
+Rustuya Manager Web provides a centralized, interactive dashboard to synchronize device information between the Tuya Cloud and an active Rustuya Bridge. Built with **FastAPI** and **WebSockets**, it offers a responsive interface for managing your local smart home infrastructure with ease.
 
 > [!TIP]
-> Use **[tuyawizard](https://github.com/3735943886/tuyawizard)** to easily generate the latest `tuyadevices.json` from your Tuya Cloud account.
+> The built-in **Tuya Wizard** allows you to log in via QR code and fetch your latest device configurations directly from the cloud without manual JSON editing.
 
 ## Key Features
 
-- AI-Assisted Implementation: Developed with the help of AI for robust data consistency and precise synchronization.
-- Status Dashboard: Categorizes devices by status:
-    - Synced: Data matches perfectly between cloud and bridge.
-    - Key Mismatch: Device encryption keys updated in the cloud.
-    - Missing (New): New devices found in cloud not yet added to bridge.
-    - Orphaned: Devices removed from cloud but still present in bridge.
-- Automatic Topic Resolution: Dynamically resolves MQTT topics based on your bridge configuration (config.json).
-- Flexible UI Modes: Supports a visually enhanced experience with the `rich` library, or a clean Plain Text mode if dependencies are missing.
-- Selective Sync: Allows manual or automatic updating of specific device categories.
+- **Real-Time Dashboard**: Monitor device connectivity, live DPS (Data Point) values, and error logs via persistent WebSocket connections.
+- **Granular Sync Status**: Automatically detects discrepancies between cloud and bridge:
+    - <span style="color: #fb7185">**Missing**</span>: New devices found in cloud not yet added to bridge.
+    - <span style="color: #fbbf24">**Mismatch**</span>: Existing devices with outdated encryption keys or metadata.
+    - <span style="color: #94a3b8">**Orphaned**</span>: Devices present in bridge but removed from cloud.
+- **Tuya Wizard**: Seamless QR code login flow to refresh `tuyadevices.json` directly from the web UI.
+- **Topology View**: Visual tree representation to understand device-parent relationships (e.g., Zigbee/BLE sub-devices).
+- **Auto Topic Resolution**: Dynamically adapts to your `config.json` MQTT topic templates.
 
 ## Quick Start
 
 ### 1. Prerequisites
 - Python 3.9 or later
-- Reachable MQTT Broker
+- Reachable MQTT Broker (e.g., Mosquitto)
 
 ### 2. Installation
-Install the necessary MQTT client:
+Clone the repository and install the dependencies:
 ```bash
-pip install paho-mqtt
-```
-Optional: Install 'rich' for an enhanced UI:
-```bash
-pip install rich
+pip install -r requirements.txt
 ```
 
 ### 3. Usage
-Execute the manager script in your root directory:
+Run the FastAPI application:
 ```bash
-python3 rustuya-manager.py
+uvicorn web.app:app --host 0.0.0.0 --port 8000
 ```
-
-Advanced Usage:
-```bash
-python3 rustuya-manager.py --config ./config.json --cloud ./tuyadevices.json --broker 192.168.1.100
-```
+Open your browser and navigate to `http://localhost:8000`.
 
 ## Configuration
 
-The manager integrates directly with your existing **rustuya-bridge** configuration. It uses the exact same `config.json` structure and automatically extracts:
+The manager integrates directly with your **rustuya-bridge** configuration. It reads `config.json` from the parent directory and automatically extracts:
 
-- mqtt_broker: Connection address and port.
-- mqtt_root_topic: Base topic for the bridge.
-- mqtt_command_topic: Template for bridge API commands.
-- mqtt_event_topic: Template for device events.
-- mqtt_message_topic: Template for bridge responses.
-
-If config.json is not present, the tool will use default settings (localhost, root: rustuya) and display a warning.
-
-## Development Note
-This tool was built with the assistance of AI.
+- `mqtt_broker`: Connection address and port.
+- `mqtt_root_topic`: Base topic for the bridge (default: `rustuya`).
+- `mqtt_command_topic`: Template for bridge API commands.
+- `mqtt_message_topic`: Template for bridge responses.
 
 ## License
 MIT

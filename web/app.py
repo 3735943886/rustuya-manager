@@ -134,20 +134,29 @@ def classify_mqtt_topic(topic: str) -> str:
     cfg = state.config
     root = cfg.root_topic
     
-    # 1. Event topic check (Live messages)
-    # We strip the placeholder to check the base path
+    # Normalize by adding leading slash for easier matching
+    t = f"/{topic}"
+    r = f"/{root}"
+
+    # 1. Response check (e.g., rustuya/response or rustuya/response/id)
+    if f"{r}/response" in t:
+        return "response"
+        
+    # 2. Error check (e.g., rustuya/error or rustuya/error/id)
+    if f"{r}/error" in t:
+        return "error"
+
+    # 3. Scanner check
+    if "/scanner" in t:
+        return "scanner"
+
+    # 4. Event topic check (Live messages)
+    # Pattern e.g.: rustuya/event/{type} -> rustuya/event/
     event_base = cfg.mqtt_event_topic.replace("{root}", root).replace("{type}", "")
-    if topic.startswith(event_base):
+    if topic.startswith(event_base) or f"{r}/event" in t:
         return "event"
 
-    # 2. Standard bridge topics
-    if topic.endswith("/response") or f"{root}/response/" in topic:
-        return "response"
-    if topic.endswith("/error") or f"{root}/error/" in topic:
-        return "error"
-    if "/scanner" in topic:
-        return "scanner"
-        
+    # 5. Default fallback
     return "event"
 
 

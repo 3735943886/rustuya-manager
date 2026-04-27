@@ -191,6 +191,8 @@ function connectWS() {
                 } else if (p.errorCode === 0 && p.id) {
                     delete deviceErrors[p.id];
                 }
+
+                if (currentDeviceId === p.id) updateDetailsLiveValues(p.id);
             } else if (msg.topic_type === 'event') {
                 // Accumulate live DPS values (exclude metadata keys)
                 if (msg.payload?.action) return; // Ignore bridge responses mistakenly classified as events
@@ -304,6 +306,7 @@ function updateSyncStateAndRender() {
     updateStatsCards();
     renderSyncPanels();
     renderDashboard();
+    if (currentDeviceId) updateDetailsLiveValues(currentDeviceId);
 }
 
 // =============================================================================
@@ -361,12 +364,13 @@ function renderSyncPanels() {
         countId: 'count-mismatch', sectionId: 'section-mismatch', bodyId: 'body-mismatch',
         items: currentSyncData.mismatched,
         renderRow: (item) => {
+            const did = item.cloud.id;
             const row = syncItemRow(
-                `${item.cloud.name} <span class="text-slate-500 font-mono text-xs">(${item.id})</span>`,
-                item.id, 'Push to Bridge',
+                `${item.cloud.name} <span class="text-slate-500 font-mono text-xs">(${did})</span>`,
+                did, 'Push to Bridge',
                 'text-amber-400 hover:text-white bg-amber-500/10 hover:bg-amber-500/30 border-amber-500/20',
-                `resolveSingle('mismatched', '${item.id}', event)`,
-                `openDeviceImportModal(cloud_devices['${item.id}'])`
+                `resolveSingle('mismatched', '${did}', event)`,
+                `openDeviceImportModal(cloud_devices['${did}'])`
             );
             return `<div class="mb-2 last:mb-0">${row}<div class="text-[10px] text-amber-500/70 -mt-1.5 mb-2 px-1">Conflicts: ${item.reasons.join(', ')}</div></div>`;
         }

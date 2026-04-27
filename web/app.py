@@ -168,8 +168,20 @@ def handle_mqtt_message(topic: str, payload) -> tuple[bool, dict | None]:
         return True, dict(state.devices_map)
 
     did = payload.get("id")
-    if did and did in state.devices_map:
-        state.devices_map[did].update(payload)
+    if did:
+        # Map errorCode to a standard status for the UI
+        if "errorCode" in payload:
+            ecode = payload["errorCode"]
+            # 0 is "Connection Successful" -> online, others (905, 914, etc) -> offline
+            payload["status"] = "online" if ecode == 0 else "offline"
+
+        if did in state.devices_map:
+            state.devices_map[did].update(payload)
+        else:
+            # Auto-discover or sync device from bridge reporting
+            logger.info("Discovered/Synced device from bridge: %s (%s)", payload.get("name", "Unknown"), did)
+            state.devices_map[did] = payload
+            
         return True, dict(state.devices_map)
 
     return False, None

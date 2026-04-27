@@ -128,9 +128,13 @@ function connectWS() {
                 showToast(`Bridge: ${text}`, 'success');
                 addLog(`Bridge OK — ${text}`, 'success');
             } else if (msg.topic_type === 'error') {
-                const text = msg.payload?.message || JSON.stringify(msg.payload);
-                showToast(`Bridge error: ${text}`, 'error');
-                addLog(`Bridge ERR — ${text}`, 'error');
+                const text = msg.payload?.errorMsg || msg.payload?.message || msg.payload?.error || JSON.stringify(msg.payload);
+                const isRealError = msg.payload?.errorCode !== 0 && msg.payload?.status !== 'success';
+                const level = isRealError ? 'error' : 'success';
+                const prefix = isRealError ? 'Bridge ERR' : 'Bridge OK';
+                
+                showToast(`Bridge: ${text}`, level);
+                addLog(`${prefix} — ${text}`, level);
             } else if (msg.topic_type === 'event') {
                 // Accumulate live DPS values (exclude metadata keys)
                 const META_KEYS = new Set(['id', 'name', 'cid']);

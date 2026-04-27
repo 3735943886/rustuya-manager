@@ -116,38 +116,59 @@ def extract_devices(payload: dict) -> dict | None:
     return {}
 
 
-def _topic_prefix(template: str | None, root: str) -> str:
-    """Resolve template and return static prefix before the first '{' variable."""
+def _match_template(template: str | None, root: str, topic: str) -> dict[str, str] | None:
+    """
+    Match topic against a template segment by segment.
+    {var} segments capture the corresponding topic segment.
+    Literal segments must match exactly.
+    Extra topic segments beyond the template ARE allowed (sub-paths).
+    Returns captured variables dict, or None if no match.
+    """
     if not template:
-        return ""
-    return template.replace("{root}", root).split("{")[0].rstrip("/")
+        return None
+    tmpl_parts  = template.replace("{root}", root).split("/")
+    topic_parts = topic.split("/")
+    if len(topic_parts) < len(tmpl_parts):
+        return None
+    captured: dict[str, str] = {}
+    for tmpl_seg, topic_seg in zip(tmpl_parts, topic_parts):
+        if tmpl_seg.startswith("{") and tmpl_seg.endswith("}"):
+            captured[tmpl_seg[1:-1]] = topic_seg
+        elif tmpl_seg != topic_seg:
+            return None
+    return captured
 
 
 def classify_mqtt_topic(topic: str) -> str:
     """
-    Classify an incoming MQTT topic.
-    Returns: 'event' | 'response' | 'error' | 'scanner'
+    Strict template-based MQTT topic classification.
+    Returns: 'event' | 'response' | 'error' | 'scanner' | 'command' | 'unknown'
 
-    Event template: {root}/extra/device/{type}
-      {type} = active | passive  → device live data  → 'event'
-      {type} = response | error  → bridge own message → 'response' / 'error'
-    Everything else → '/error' in topic → 'error', otherwise 'response'.
+    Matches the incoming topic against configured templates in priority order:
+      1. mqtt_scanner_topic  → 'scanner'
+      2. mqtt_command_topic  → 'command'  (our own publishes; skip on echo)
+      3. mqtt_event_topic    → 'event' | 'response' | 'error'
+           determined by the captured {type} variable:
+             'response' → 'response', 'error' → 'error', anything else → 'event'
+    No match → 'unknown' (silently ignored).
     """
     cfg  = state.config
     root = cfg.root_topic
 
-    if cfg.mqtt_scanner_topic:
-        pfx = _topic_prefix(cfg.mqtt_scanner_topic, root)
-        if pfx and (topic == pfx or topic.startswith(pfx + "/")):
-            return "scanner"
+    if _match_template(cfg.mqtt_scanner_topic, root, topic) is not None:
+        return "scanner"
 
-    event_pfx = _topic_prefix(cfg.mqtt_event_topic, root) + "/"
-    if topic.startswith(event_pfx):
-        type_seg = topic[len(event_pfx):].split("/")[0]
-        if type_seg not in ("response", "error"):
-            return "event"
+    if _match_template(cfg.mqtt_command_topic, root, topic) is not None:
+        return "command"
 
-    return "error" if "/error" in topic else "response"
+    m = _match_template(cfg.mqtt_event_topic, root, topic)
+    if m is not None:
+        t = m.get("type", "")
+        if t == "response": return "response"
+        if t == "error":    return "error"
+        return "event"
+
+    return "unknown"
 
 
 def handle_mqtt_message(
@@ -228,8 +249,11 @@ async def mqtt_listener() -> None:
                     except Exception:
                         payload = message.payload.decode()
 
-                    topic_type                          = classify_mqtt_topic(topic)
-                    devices_updated, snapshot, refresh  = handle_mqtt_message(topic, payload, topic_type)
+                    topic_type                         = classify_mqtt_topic(topic)
+                    if topic_type in ("command", "unknown"):
+                        continue  # command: our own echo; unknown: unrecognised topic
+
+                    devices_updated, snapshot, refresh = handle_mqtt_message(topic, payload, topic_type)
 
                     if refresh:
                         await client.publish(

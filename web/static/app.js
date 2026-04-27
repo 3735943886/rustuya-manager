@@ -313,10 +313,27 @@ function updateSyncStateAndRender() {
 // Stats
 // =============================================================================
 function updateStatsCards() {
+    const missing    = currentSyncData.missing.length;
+    const mismatched = currentSyncData.mismatched.length;
+    const orphaned   = currentSyncData.orphaned.length;
+    const total      = missing + mismatched + orphaned;
+
     document.getElementById('stat-total').innerText     = Object.keys(devices_map).length;
     document.getElementById('stat-cloud').innerText     = Object.keys(cloud_devices).length;
     document.getElementById('stat-synced').innerText    = currentSyncData.synced.length;
-    document.getElementById('stat-conflicts').innerText = currentSyncData.missing.length + currentSyncData.mismatched.length;
+    document.getElementById('stat-conflicts').innerText = total;
+
+    const detailEl = document.getElementById('stat-issues-detail');
+    if (detailEl) {
+        const parts = [];
+        if (missing > 0)    parts.push(`<span class="text-rose-400 font-medium">${missing} Missing</span>`);
+        if (mismatched > 0) parts.push(`<span class="text-amber-400 font-medium">${mismatched} Mismatch</span>`);
+        if (orphaned > 0)   parts.push(`<span class="text-slate-400 font-medium">${orphaned} Orphan</span>`);
+        
+        detailEl.innerHTML = parts.length > 0 
+            ? parts.join('<span class="text-slate-600 opacity-50">/</span>') 
+            : '<span class="text-slate-500 italic">No issues found</span>';
+    }
 }
 
 function requestStatusUpdate() {

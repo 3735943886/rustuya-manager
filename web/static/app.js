@@ -654,7 +654,7 @@ function openEditDeviceModal(id) {
     } else {
         document.getElementById('dev-key').value     = dev.key || dev.local_key || '';
         document.getElementById('dev-ip').value      = dev.ip  || '';
-        document.getElementById('dev-version').value = dev.version || 'Auto';
+        document.getElementById('dev-version').value = dev.version || '';
     }
     showModal('device-modal');
 }
@@ -676,9 +676,9 @@ function openDeviceImportModal(dev) {
     } else {
         document.getElementById('dev-key').value     = dev.key || dev.local_key || dev.localkey || '';
         document.getElementById('dev-ip').value      = isPrivateIP(dev.ip) ? dev.ip : '';
-        document.getElementById('dev-version').value = dev.version || 'Auto';
+        document.getElementById('dev-version').value = dev.version || '';
         if (!document.getElementById('dev-ip').value) {
-            document.getElementById('dev-ip').placeholder = 'Auto (Local Discovery)';
+            document.getElementById('dev-ip').placeholder = 'Auto Discovery';
         }
     }
     showModal('device-modal');

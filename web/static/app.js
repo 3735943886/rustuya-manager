@@ -160,6 +160,12 @@ function connectWS() {
                 
                 showToast(`Bridge: ${text}`, level);
                 addLog(`${prefix} — ${text}`, level);
+
+                if (isRealError && p.id) {
+                    deviceErrors[p.id] = text;
+                } else if (p.errorCode === 0 && p.id) {
+                    delete deviceErrors[p.id];
+                }
             } else if (msg.topic_type === 'event') {
                 // Accumulate live DPS values (exclude metadata keys)
                 const META_KEYS = new Set(['id', 'name', 'cid']);
@@ -748,7 +754,21 @@ function updateDetailsLiveValues(id) {
     const sec = document.getElementById('live-values-section');
     if (!el || !sec) return;
 
-    const vals = liveValues[id];
+    const error = deviceErrors[id];
+    const vals  = liveValues[id];
+
+    if (error) {
+        sec.classList.remove('hidden');
+        el.innerHTML = `
+            <div class="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <div class="text-red-400 text-xs font-bold mb-1 flex items-center">
+                    <i class="fa-solid fa-triangle-exclamation mr-2"></i> DEVICE ERROR
+                </div>
+                <div class="text-red-300 text-xs leading-relaxed">${error}</div>
+            </div>`;
+        return;
+    }
+
     if (!vals || !Object.keys(vals).length) {
         sec.classList.add('hidden');
         return;

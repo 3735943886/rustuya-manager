@@ -127,47 +127,32 @@ def _topic_prefix(template: str | None, root: str) -> str:
 
 def classify_mqtt_topic(topic: str) -> str:
     """
-    Classify an incoming MQTT topic based on the configured topic templates.
-    Returns: 'response' | 'error' | 'scanner' | 'event'
+    Classify an incoming MQTT topic.
+    Returns: 'event' | 'response' | 'error' | 'scanner'
 
-    NOTE: event and command topics are checked BEFORE the generic message topic
-    override because mqtt_message_topic (e.g. "{root}/{level}/{id}") resolves to
-    a very short prefix (just the root) that would otherwise swallow every topic.
+    Event template: {root}/extra/device/{type}
+      {type} = active | passive  → device live data  → 'event'
+      {type} = response | error  → bridge message    → 'response' / 'error'
+    Everything else: '/error' in topic → 'error', otherwise 'response'.
     """
     cfg = state.config
     root = cfg.root_topic
 
-    # 1. Scanner topic
+    # Scanner
     if cfg.mqtt_scanner_topic:
-        scanner_prefix = _topic_prefix(cfg.mqtt_scanner_topic, root)
-        if topic == scanner_prefix or topic.startswith(f"{scanner_prefix}/"):
+        pfx = _topic_prefix(cfg.mqtt_scanner_topic, root)
+        if pfx and (topic == pfx or topic.startswith(pfx + "/")):
             return "scanner"
 
-    # 2. Event topic – check BEFORE message topic override to avoid false matches
-    event_prefix = _topic_prefix(cfg.mqtt_event_topic, root)
-    if event_prefix and topic.startswith(event_prefix + "/") or topic == event_prefix:
-        return "event"
+    # Event topic: classify by {type} segment
+    event_pfx = _topic_prefix(cfg.mqtt_event_topic, root) + "/"
+    if topic.startswith(event_pfx):
+        type_seg = topic[len(event_pfx):].split("/")[0]
+        if type_seg not in ("response", "error"):
+            return "event"
 
-    # 3. Command topic prefix – bridge echoes responses / errors here
-    command_prefix = _topic_prefix(cfg.mqtt_command_topic, root)
-    if command_prefix and (topic.startswith(command_prefix + "/") or topic == command_prefix):
-        return "error" if "/error" in topic else "response"
-
-    # 4. Explicit message topic override (may have a very broad prefix like root only)
-    if cfg.mqtt_message_topic:
-        msg_prefix = _topic_prefix(cfg.mqtt_message_topic, root)
-        if msg_prefix and (topic.startswith(msg_prefix + "/") or topic == msg_prefix):
-            return "error" if "/error" in topic else "response"
-
-    # 5. Legacy fallback for standard sub-topic naming
-    parts = topic.split("/")
-    if len(parts) >= 2 and parts[0] == root:
-        if parts[1] == "response": return "response"
-        if parts[1] == "error":    return "error"
-        if parts[1] == "event":    return "event"
-        if parts[1] == "scanner":  return "scanner"
-
-    return "event"
+    # Everything else is a bridge response or error
+    return "error" if "/error" in topic else "response"
 
 
 def handle_mqtt_message(topic: str, payload, topic_type: str) -> tuple[bool, dict | None, bool]:

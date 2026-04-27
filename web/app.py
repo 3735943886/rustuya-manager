@@ -138,43 +138,34 @@ def classify_mqtt_topic(topic: str) -> str:
     cfg = state.config
     root = cfg.root_topic
     
-    # 1. Custom message topic check (response/error)
+    # 1. Custom template prefix matching
     if cfg.mqtt_message_topic:
-        # Template might be e.g. "{root}/{level}/{id}"
-        # We check if it matches the prefix or general structure
         msg_base = cfg.mqtt_message_topic.replace("{root}", root).split("{")[0].rstrip('/')
         if msg_base and topic.startswith(msg_base):
             if "/error" in topic: return "error"
             return "response"
 
-    # 2. Custom scanner topic check
     if cfg.mqtt_scanner_topic:
         scanner_base = cfg.mqtt_scanner_topic.replace("{root}", root)
         if topic == scanner_base or topic.startswith(f"{scanner_base}/"):
             return "scanner"
 
-    # Normalize by adding leading slash for easier matching
+    # 2. Strict path matching (root/response/..., root/error/...)
+    parts = topic.split('/')
+    if len(parts) >= 2 and parts[0] == root:
+        if parts[1] == "response": return "response"
+        if parts[1] == "error":    return "error"
+        if parts[1] == "event":    return "event"
+        if parts[1] == "scanner":  return "scanner"
+
+    # 3. Substring fallback (Normalize by adding leading slash)
     t = f"/{topic}"
     r = f"/{root}"
+    if f"{r}/response" in t: return "response"
+    if f"{r}/error" in t:    return "error"
+    if f"{r}/event" in t:    return "event"
+    if "/scanner" in t or topic == "scanner": return "scanner"
 
-    # 3. Response check (e.g., rustuya/response or rustuya/response/id)
-    if f"{r}/response" in t:
-        return "response"
-        
-    # 4. Error check (e.g., rustuya/error or rustuya/error/id)
-    if f"{r}/error" in t:
-        return "error"
-
-    # 5. Scanner check
-    if "/scanner" in t or topic == "scanner":
-        return "scanner"
-
-    # 6. Event topic check (Live messages)
-    event_base = cfg.mqtt_event_topic.replace("{root}", root).replace("{type}", "")
-    if topic.startswith(event_base) or f"{r}/event" in t:
-        return "event"
-
-    # 7. Default fallback
     return "event"
 
 

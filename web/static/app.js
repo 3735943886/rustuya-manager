@@ -171,9 +171,14 @@ function connectWS() {
                 const isRealError = p.errorCode !== 0 && p.status !== 'success';
                 const level = isRealError ? 'error' : 'success';
                 const prefix = isRealError ? 'Bridge ERR' : 'Bridge OK';
-                
-                showToast(`Bridge: ${text}`, level);
-                addLog(`${prefix} — ${text}`, level);
+
+                // Suppress duplicate errors for the same device
+                const isDuplicate = p.id && isRealError && deviceErrors[p.id] === text;
+
+                if (!isDuplicate) {
+                    showToast(`Bridge: ${text}`, level);
+                    addLog(`${prefix} — ${text}`, level);
+                }
 
                 if (isRealError && p.id) {
                     deviceErrors[p.id] = text;
@@ -182,6 +187,8 @@ function connectWS() {
                 }
             } else if (msg.topic_type === 'event') {
                 // Accumulate live DPS values (exclude metadata keys)
+                if (msg.payload?.action) return; // Ignore bridge responses mistakenly classified as events
+                
                 const META_KEYS = new Set(['id', 'name', 'cid']);
                 const did = msg.payload?.id;
                 if (did && msg.payload) {

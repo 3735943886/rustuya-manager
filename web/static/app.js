@@ -9,6 +9,7 @@ let currentSyncData = { missing: [], mismatched: [], orphaned: [], synced: [] };
 let currentDeviceId = null;
 let currentFilter = 'all';          // 'all' | 'online' | 'offline' | 'subdevice'
 let liveValues = {};                // { [device_id]: { [dp]: value } }
+let deviceErrors = {};              // { [device_id]: "error message" }
 let activityLog = [];               // ring buffer, max 100 entries
 const MAX_LOG = 100;
 

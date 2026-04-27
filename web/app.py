@@ -160,7 +160,7 @@ def classify_mqtt_topic(topic: str) -> str:
     return "event"
 
 
-def handle_mqtt_message(topic: str, payload) -> tuple[bool, dict | None]:
+def handle_mqtt_message(topic: str, payload, topic_type: str) -> tuple[bool, dict | None]:
     """
     Process a decoded MQTT payload and update devices_map in place.
     Returns: (devices_updated, updated_devices_snapshot | None)
@@ -168,44 +168,50 @@ def handle_mqtt_message(topic: str, payload) -> tuple[bool, dict | None]:
     if not isinstance(payload, dict):
         return False, None
 
-    # 1. Handle deletion confirmation from bridge
     action = payload.get("action")
-    status = str(payload.get("status", "")).lower()
     did    = payload.get("id")
 
-    # Check for various success indicators: "success", "ok", or boolean True
-    is_success = status in ("success", "ok") or payload.get("status") is True
-
-    if action == "remove" and is_success and did:
-        if did in state.devices_map:
-            logger.info("Removing device %s from local state", did)
-            del state.devices_map[did]
-            return True, dict(state.devices_map)
-
-    # 2. Handle device list update
-    devs = extract_devices(payload)
-    if devs is not None:
-        # Replace map only if it looks like a full list or a status response
-        if len(devs) > 1 or payload.get("action") == "status":
+    # 1. Handle "response" topic
+    if topic_type == "response":
+        # Full device list update
+        devs = extract_devices(payload)
+        if devs is not None:
             state.devices_map = devs
-        else:
-            state.devices_map.update(devs)
-        return True, dict(state.devices_map)
+            return True, dict(state.devices_map)
+        
+        # Specific action confirmations
+        status = str(payload.get("status", "")).lower()
+        is_success = status in ("success", "ok") or payload.get("status") is True
+        
+        if action == "remove" and is_success and did:
+            if did in state.devices_map:
+                logger.info("Removing device %s from local state", did)
+                del state.devices_map[did]
+                return True, dict(state.devices_map)
+        
+        # Important: We don't update devices_map for "add" response payloads 
+        # to avoid polluting device state with "status: ok" or "action: add".
+        return False, None
 
-    did = payload.get("id")
+    # 2. Handle "error" or "event" topics
     if did:
+        # Ignore junk keys to keep devices_map clean
+        ignore = {"action", "errorCode", "errorMsg", "payloadStr"}
+
         # Map errorCode to a standard status for the UI
-        if "errorCode" in payload:
+        if topic_type == "error" and "errorCode" in payload:
             ecode = payload["errorCode"]
-            # 0 is "Connection Successful" -> online, others (905, 914, etc) -> offline
             payload["status"] = "online" if ecode == 0 else "offline"
 
+        filtered = {k: v for k, v in payload.items() if k not in ignore}
+
         if did in state.devices_map:
-            state.devices_map[did].update(payload)
+            # Update existing device (live values from events or status from errors)
+            state.devices_map[did].update(filtered)
         else:
             # Auto-discover or sync device from bridge reporting
-            logger.info("Discovered/Synced device from bridge: %s (%s)", payload.get("name", "Unknown"), did)
-            state.devices_map[did] = payload
+            logger.info("Discovered device from %s: %s (%s)", topic_type, filtered.get("name", "Unknown"), did)
+            state.devices_map[did] = filtered
             
         return True, dict(state.devices_map)
 
@@ -243,7 +249,7 @@ async def mqtt_listener() -> None:
                         payload = message.payload.decode()
 
                     topic_type = classify_mqtt_topic(topic)
-                    devices_updated, updated_devices = handle_mqtt_message(topic, payload)
+                    devices_updated, updated_devices = handle_mqtt_message(topic, payload, topic_type)
 
                     await broadcast({
                         "type":            "mqtt",

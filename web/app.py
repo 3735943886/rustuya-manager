@@ -109,14 +109,23 @@ async def send_to(websocket: WebSocket, message: dict) -> None:
 # ---------------------------------------------------------------------------
 def extract_devices(payload: dict) -> dict | None:
     """Extract device list/dict from various payload shapes."""
-    devs = payload.get("devices") or payload.get("data", {}).get("devices")
-    if not devs:
+    # Check explicitly for existence of "devices" key to handle empty results
+    has_devices = "devices" in payload
+    devs = payload.get("devices")
+
+    if not has_devices and "data" in payload and isinstance(payload["data"], dict):
+        if "devices" in payload["data"]:
+            has_devices = True
+            devs = payload["data"]["devices"]
+
+    if not has_devices:
         return None
+
     if isinstance(devs, list):
         return {d["id"]: d for d in devs if "id" in d}
     if isinstance(devs, dict):
         return devs
-    return None
+    return {}
 
 
 def classify_mqtt_topic(topic: str) -> str:

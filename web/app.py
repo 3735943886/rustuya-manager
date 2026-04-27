@@ -51,12 +51,15 @@ class AppConfig:
         self.mqtt_message_topic = data.get("mqtt_message_topic")
         self.mqtt_scanner_topic = data.get("mqtt_scanner_topic")
 
-    def resolve_command_topic(self, action: str) -> str:
-        return (
+    def resolve_command_topic(self, action: str, device_id: str | None = None) -> str:
+        res = (
             self.mqtt_command_topic
             .replace("{root}",   self.root_topic)
             .replace("{action}", action)
         )
+        if device_id:
+            res = res.replace("{id}", device_id)
+        return res
 
 
 # ---------------------------------------------------------------------------
@@ -121,15 +124,26 @@ def _match_template(template: str | None, root: str, topic: str) -> dict[str, st
     Match topic against a template segment by segment.
     {var} segments capture the corresponding topic segment.
     Literal segments must match exactly.
-    Extra topic segments beyond the template ARE allowed (sub-paths).
     Returns captured variables dict, or None if no match.
+    Strictly enforces segment count (no sub-paths allowed unless template ends with /#).
     """
     if not template:
         return None
-    tmpl_parts  = template.replace("{root}", root).split("/")
-    topic_parts = topic.split("/")
-    if len(topic_parts) < len(tmpl_parts):
-        return None
+    
+    tmpl = template.replace("{root}", root)
+    if tmpl.endswith("/#"):
+        tmpl_parts = tmpl[:-2].split("/")
+        topic_parts = topic.split("/")
+        if len(topic_parts) < len(tmpl_parts):
+            return None
+        # Match only the prefix
+        topic_parts = topic_parts[:len(tmpl_parts)]
+    else:
+        tmpl_parts  = tmpl.split("/")
+        topic_parts = topic.split("/")
+        if len(topic_parts) != len(tmpl_parts):
+            return None
+            
     captured: dict[str, str] = {}
     for tmpl_seg, topic_seg in zip(tmpl_parts, topic_parts):
         if tmpl_seg.startswith("{") and tmpl_seg.endswith("}"):
@@ -139,40 +153,56 @@ def _match_template(template: str | None, root: str, topic: str) -> dict[str, st
     return captured
 
 
-def classify_mqtt_topic(topic: str) -> str:
+def classify_mqtt_topic(topic: str) -> tuple[str, dict[str, str]]:
     """
     Strict template-based MQTT topic classification.
-    Returns: 'event' | 'response' | 'error' | 'scanner' | 'command' | 'unknown'
-
-    Matches the incoming topic against configured templates in priority order:
-      1. mqtt_scanner_topic  → 'scanner'
-      2. mqtt_command_topic  → 'command'  (our own publishes; skip on echo)
-      3. mqtt_event_topic    → 'event' | 'response' | 'error'
-           determined by the captured {type} variable:
-             'response' → 'response', 'error' → 'error', anything else → 'event'
-    No match → 'unknown' (silently ignored).
+    Returns: (topic_type, captured_vars)
+    topic_type: 'event' | 'response' | 'error' | 'scanner' | 'command' | 'unknown'
     """
     cfg  = state.config
     root = cfg.root_topic
 
-    if _match_template(cfg.mqtt_scanner_topic, root, topic) is not None:
-        return "scanner"
+    # 1. Scanner results
+    m = _match_template(cfg.mqtt_scanner_topic, root, topic)
+    if m is not None:
+        return "scanner", m
+    # Fallback scanner: {root}/scanner
+    m = _match_template("{root}/scanner", root, topic)
+    if m is not None:
+        return "scanner", m
 
-    if _match_template(cfg.mqtt_command_topic, root, topic) is not None:
-        return "command"
+    # 2. Command topics (our own publishes)
+    m = _match_template(cfg.mqtt_command_topic, root, topic)
+    if m is not None:
+        return "command", m
 
+    # 3. Message/Response/Error topics
+    m = _match_template(cfg.mqtt_message_topic, root, topic)
+    if m is not None:
+        # Template can have {level} or {type}
+        t = m.get("level") or m.get("type") or "response"
+        return (t if t in ("response", "error") else "response"), m
+    
+    # Fallback message: {root}/{level}/{id}
+    m = _match_template("{root}/{level}/{id}", root, topic)
+    if m is not None:
+        lvl = m.get("level", "")
+        if lvl in ("response", "error"):
+            return lvl, m
+
+    # 4. Event topics
     m = _match_template(cfg.mqtt_event_topic, root, topic)
     if m is not None:
-        t = m.get("type", "")
-        if t == "response": return "response"
-        if t == "error":    return "error"
-        return "event"
+        t = m.get("type", "event")
+        if t in ("response", "error"):
+            return t, m
+        return "event", m
 
-    return "unknown"
+    return "unknown", {}
 
 
 def handle_mqtt_message(
-    topic: str, payload: object, topic_type: str
+    topic: str, payload: object, topic_type: str, captured_vars: dict[str, str]
 ) -> tuple[bool, dict | None, bool]:
     """
     Update devices_map from an MQTT message.
@@ -182,7 +212,7 @@ def handle_mqtt_message(
         return False, None, False
 
     action = payload.get("action")
-    did    = payload.get("id")
+    did    = payload.get("id") or captured_vars.get("id")
 
     if topic_type == "response":
         devs = extract_devices(payload)
@@ -249,11 +279,11 @@ async def mqtt_listener() -> None:
                     except Exception:
                         payload = message.payload.decode()
 
-                    topic_type                         = classify_mqtt_topic(topic)
+                    topic_type, captured_vars          = classify_mqtt_topic(topic)
                     if topic_type in ("command", "unknown"):
                         continue  # command: our own echo; unknown: unrecognised topic
 
-                    devices_updated, snapshot, refresh = handle_mqtt_message(topic, payload, topic_type)
+                    devices_updated, snapshot, refresh = handle_mqtt_message(topic, payload, topic_type, captured_vars)
 
                     if refresh:
                         await client.publish(
@@ -348,7 +378,7 @@ async def handle_ws_command(cmd: dict, websocket: WebSocket) -> None:
         action = "remove" if action == "delete" else action
         payload["action"] = action
         if state.mqtt_client:
-            pub_topic = state.config.resolve_command_topic(action)
+            pub_topic = state.config.resolve_command_topic(action, device_id=payload.get("id"))
             await state.mqtt_client.publish(pub_topic, json.dumps(payload))
         else:
             await send_to(websocket, {

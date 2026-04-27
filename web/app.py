@@ -143,9 +143,28 @@ def handle_mqtt_message(topic: str, payload) -> tuple[bool, dict | None]:
     if not isinstance(payload, dict):
         return False, None
 
+    # 1. Handle deletion confirmation from bridge
+    action = payload.get("action")
+    status = str(payload.get("status", "")).lower()
+    did    = payload.get("id")
+
+    # Check for various success indicators: "success", "ok", or boolean True
+    is_success = status in ("success", "ok") or payload.get("status") is True
+
+    if action == "remove" and is_success and did:
+        if did in state.devices_map:
+            logger.info("Removing device %s from local state", did)
+            del state.devices_map[did]
+            return True, dict(state.devices_map)
+
+    # 2. Handle device list update
     devs = extract_devices(payload)
     if devs is not None:
-        state.devices_map.update(devs)
+        # Replace map only if it looks like a full list or a status response
+        if len(devs) > 1 or payload.get("action") == "status":
+            state.devices_map = devs
+        else:
+            state.devices_map.update(devs)
         return True, dict(state.devices_map)
 
     did = payload.get("id")

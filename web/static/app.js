@@ -682,7 +682,12 @@ function openDetails(id) {
     document.getElementById('btn-edit').onclick   = () => { closeDetails(); openEditDeviceModal(id); };
     document.getElementById('btn-delete').onclick = () => {
         if (confirm(`Are you sure you want to delete ${dev.name || id}?`)) {
-            sendCommand('delete', { id });
+            sendCommand('remove', { id });
+            // Preemptive UI removal for better responsiveness
+            if (devices_map[id]) {
+                delete devices_map[id];
+                updateSyncStateAndRender();
+            }
             closeDetails();
         }
     };

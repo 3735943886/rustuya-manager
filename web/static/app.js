@@ -678,7 +678,7 @@ function openDeviceImportModal(dev) {
         document.getElementById('dev-ip').value      = isPrivateIP(dev.ip) ? dev.ip : '';
         document.getElementById('dev-version').value = dev.version || '';
         if (!document.getElementById('dev-ip').value) {
-            document.getElementById('dev-ip').placeholder = 'Auto Discovery';
+            document.getElementById('dev-ip').placeholder = 'Auto';
         }
     }
     showModal('device-modal');

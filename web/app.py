@@ -219,10 +219,6 @@ async def mqtt_listener() -> None:
                 logger.info("MQTT connected: %s:%d", cfg.mqtt_broker, cfg.mqtt_port)
                 await broadcast({"type": "mqtt_status", "connected": True})
 
-                await client.publish(
-                    cfg.resolve_command_topic("status"),
-                    json.dumps({"action": "status"}),
-                )
                 await client.subscribe(f"{cfg.root_topic}/#")
 
                 async for message in client.messages:

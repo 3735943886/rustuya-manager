@@ -20,7 +20,6 @@ logger = logging.getLogger("rustuya-web")
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR.parent
-CONFIG_PATH = DATA_DIR / "config.json"
 CLOUD_PATH  = DATA_DIR / "tuyadevices.json"
 CREDS_PATH  = DATA_DIR / "tuyacreds.json"
 
@@ -38,31 +37,20 @@ class AppConfig:
     mqtt_message_topic: str | None = None
     mqtt_scanner_topic: str | None = None
 
-    @classmethod
-    def load(cls) -> "AppConfig":
-        cfg = cls()
-        if not CONFIG_PATH.exists():
-            return cfg
-        try:
-            with CONFIG_PATH.open() as f:
-                data = json.load(f)
+    def update_from_dict(self, data: dict):
+        broker_full = data.get("mqtt_broker", "localhost:1883")
+        if "://" in broker_full:
+            broker_full = broker_full.split("://")[-1]
+        parts = broker_full.split(":")
+        self.mqtt_broker = parts[0]
+        if len(parts) > 1:
+            self.mqtt_port = int(parts[1])
             
-            broker_full = data.get("mqtt_broker", "localhost:1883")
-            if "://" in broker_full:
-                broker_full = broker_full.split("://")[-1]
-            parts = broker_full.split(":")
-            cfg.mqtt_broker = parts[0]
-            if len(parts) > 1:
-                cfg.mqtt_port = int(parts[1])
-                
-            cfg.root_topic          = data.get("mqtt_root_topic", "rustuya")
-            cfg.mqtt_command_topic  = data.get("mqtt_command_topic", "{root}/command")
-            cfg.mqtt_event_topic    = data.get("mqtt_event_topic",   "{root}/event/{type}")
-            cfg.mqtt_message_topic  = data.get("mqtt_message_topic")
-            cfg.mqtt_scanner_topic  = data.get("mqtt_scanner_topic")
-        except Exception as e:
-            logger.error("Error loading config: %s", e)
-        return cfg
+        self.root_topic         = data.get("mqtt_root_topic", "rustuya")
+        self.mqtt_command_topic = data.get("mqtt_command_topic", "{root}/command")
+        self.mqtt_event_topic   = data.get("mqtt_event_topic",   "{root}/event/{type}")
+        self.mqtt_message_topic = data.get("mqtt_message_topic")
+        self.mqtt_scanner_topic = data.get("mqtt_scanner_topic")
 
 
 # ---------------------------------------------------------------------------
@@ -398,9 +386,47 @@ async def handle_ws_command(cmd: dict, websocket: WebSocket) -> None:
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
+async def fetch_config_from_mqtt() -> AppConfig:
+    """Connect to default MQTT broker and fetch retained config message."""
+    # Use default values for discovery
+    temp_cfg = AppConfig()
+    discovery_topic = "rustuya/bridge/config"
+    
+    logger.info("Attempting to fetch config from MQTT topic: %s", discovery_topic)
+    
+    try:
+        async with aiomqtt.Client(hostname=temp_cfg.mqtt_broker, port=temp_cfg.mqtt_port) as client:
+            await client.subscribe(discovery_topic)
+            # Wait for retained message
+            async with asyncio.timeout(5.0):
+                async for message in client.messages:
+                    if str(message.topic) == discovery_topic:
+                        data = json.loads(message.payload.decode())
+                        logger.info("Configuration received from MQTT: %s", data)
+                        temp_cfg.update_from_dict(data)
+                        return temp_cfg
+            
+            # If the loop finishes without returning, it means no message was received
+            raise RuntimeError(f"No configuration message received on {discovery_topic}")
+    except asyncio.TimeoutError:
+        logger.error("Timeout waiting for configuration message on %s. Is rustuya-bridge running?", discovery_topic)
+        raise RuntimeError(f"Configuration not found on {discovery_topic}")
+    except Exception as e:
+        logger.error("Error fetching config from MQTT: %s", e)
+        raise
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    state.config = AppConfig.load()
+    try:
+        # Wait for config before starting anything else
+        state.config = await fetch_config_from_mqtt()
+    except Exception as e:
+        logger.critical("Failed to initialize configuration: %s. Application exiting.", e)
+        # We can't easily exit FastAPI lifespan gracefully here without it hanging or showing errors,
+        # but failing to set state.config or raising will prevent app from being fully functional.
+        # In a real-world scenario, we might want a more robust way to signal startup failure.
+        raise
+
     task = asyncio.create_task(mqtt_listener())
     yield
     task.cancel()

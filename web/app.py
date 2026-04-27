@@ -194,19 +194,23 @@ def handle_mqtt_message(topic: str, payload, topic_type: str) -> tuple[bool, dic
         return False, None
 
     # 2. Handle "error" or "event" topics
-    if did:
+    if did and topic_type in ("error", "event"):
+        # If the payload contains an "action", it's likely a bridge response/error 
+        # about a specific command (like "add", "remove"), NOT a device state update.
+        if "action" in payload:
+            return False, None
+
         # Ignore junk keys to keep devices_map clean
-        ignore = {"action", "errorCode", "errorMsg", "payloadStr"}
+        ignore = {"errorCode", "errorMsg", "payloadStr"}
+        filtered = {k: v for k, v in payload.items() if k not in ignore}
 
         # Map errorCode to a standard status for the UI
         if topic_type == "error" and "errorCode" in payload:
             ecode = payload["errorCode"]
-            payload["status"] = "online" if ecode == 0 else "offline"
-
-        filtered = {k: v for k, v in payload.items() if k not in ignore}
+            filtered["status"] = "online" if ecode == 0 else "offline"
 
         if did in state.devices_map:
-            # Update existing device (live values from events or status from errors)
+            # Update existing device (status from errors or properties from events)
             state.devices_map[did].update(filtered)
         else:
             # Auto-discover or sync device from bridge reporting
@@ -214,6 +218,7 @@ def handle_mqtt_message(topic: str, payload, topic_type: str) -> tuple[bool, dic
             state.devices_map[did] = filtered
             
         return True, dict(state.devices_map)
+
 
     return False, None
 

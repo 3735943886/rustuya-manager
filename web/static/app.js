@@ -730,8 +730,19 @@ function showConfirm({ title = 'Are you sure?', message = '', okText = 'Confirm'
         const onOk = () => { cleanup(true); };
         const onCancel = () => { cleanup(false); };
 
+        const onKeyDown = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                onOk();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                onCancel();
+            }
+        };
+
         const cleanup = (result) => {
             modal.classList.add('scale-95');
+            window.removeEventListener('keydown', onKeyDown);
             setTimeout(() => {
                 modal.classList.add('hidden');
                 overlay.classList.add('opacity-0', 'pointer-events-none');
@@ -741,6 +752,7 @@ function showConfirm({ title = 'Are you sure?', message = '', okText = 'Confirm'
             cancelBtn.removeEventListener('click', onCancel);
         };
 
+        window.addEventListener('keydown', onKeyDown);
         okBtn.addEventListener('click', onOk);
         cancelBtn.addEventListener('click', onCancel);
     });
@@ -776,7 +788,7 @@ function populateParentsSelect() {
     const prevVal = select.value;
     select.innerHTML = '<option value="">Select Parent...</option>';
     Object.values(devices_map)
-        .filter(d => !d.parent && !d.sub)
+        .filter(d => !d.parent && !d.sub && !d.parent_id && !d.cid && d.status !== 'subdevice')
         .forEach(d => {
             const opt = document.createElement('option');
             opt.value = d.id;

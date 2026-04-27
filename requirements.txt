@@ -4,11 +4,13 @@
 # Web framework & server
 fastapi
 uvicorn
-starlette
 jinja2
 
 # WebSocket & MQTT
 aiomqtt
+websockets
 
 # Tuya authentication & device wizard
+cryptography
+pillow
 tuyawizard

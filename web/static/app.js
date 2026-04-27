@@ -745,8 +745,18 @@ function handleWizardEvent(status) {
     spinnerEl.classList.toggle('hidden', hasQr);
 
     if (hasQr) {
-        document.getElementById('wizard-qr-img').src =
-            `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(status.url)}`;
+        try {
+            // Generate QR code locally
+            const typeNumber = 0; // auto
+            const errorCorrectionLevel = 'L';
+            const qr = qrcode(typeNumber, errorCorrectionLevel);
+            qr.addData(status.url);
+            qr.make();
+            document.getElementById('wizard-qr-img').src = qr.createDataURL(6); // scale=6 for decent size
+        } catch (err) {
+            console.error('QR Gen Error:', err);
+            showToast('Local QR generation failed.', 'error');
+        }
         return;
     }
 

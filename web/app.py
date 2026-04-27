@@ -3,6 +3,8 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+import io
+import base64
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
@@ -213,9 +215,9 @@ async def mqtt_listener() -> None:
 async def run_wizard(user_code: str) -> None:
     from tuyawizard.wizard import TuyaWizard, postprocess_devices
 
-    async def update_wizard(step: str, *, url: str | None = None, running: bool = True,
-                             error: str | None = None, **extra):
-        status = {"running": running, "step": step, "url": url}
+    async def update_wizard(step: str, *, url: str | None = None, qr_image: str | None = None, 
+                             running: bool = True, error: str | None = None, **extra):
+        status = {"running": running, "step": step, "url": url, "qr_image": qr_image}
         if error is not None:
             status["error"] = error
         await broadcast({"type": "wizard", "status": status, **extra})

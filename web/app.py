@@ -35,6 +35,8 @@ class AppConfig:
     root_topic: str = "rustuya"
     mqtt_command_topic: str = "{root}/command"
     mqtt_event_topic: str = "{root}/event/{type}"
+    mqtt_message_topic: str | None = None
+    mqtt_scanner_topic: str | None = None
 
     @classmethod
     def load(cls) -> "AppConfig":
@@ -56,6 +58,8 @@ class AppConfig:
             cfg.root_topic          = data.get("mqtt_root_topic", "rustuya")
             cfg.mqtt_command_topic  = data.get("mqtt_command_topic", "{root}/command")
             cfg.mqtt_event_topic    = data.get("mqtt_event_topic",   "{root}/event/{type}")
+            cfg.mqtt_message_topic  = data.get("mqtt_message_topic")
+            cfg.mqtt_scanner_topic  = data.get("mqtt_scanner_topic")
         except Exception as e:
             logger.error("Error loading config: %s", e)
         return cfg
@@ -134,29 +138,43 @@ def classify_mqtt_topic(topic: str) -> str:
     cfg = state.config
     root = cfg.root_topic
     
+    # 1. Custom message topic check (response/error)
+    if cfg.mqtt_message_topic:
+        # Template might be e.g. "{root}/{level}/{id}"
+        # We check if it matches the prefix or general structure
+        msg_base = cfg.mqtt_message_topic.replace("{root}", root).split("{")[0].rstrip('/')
+        if msg_base and topic.startswith(msg_base):
+            if "/error" in topic: return "error"
+            return "response"
+
+    # 2. Custom scanner topic check
+    if cfg.mqtt_scanner_topic:
+        scanner_base = cfg.mqtt_scanner_topic.replace("{root}", root)
+        if topic == scanner_base or topic.startswith(f"{scanner_base}/"):
+            return "scanner"
+
     # Normalize by adding leading slash for easier matching
     t = f"/{topic}"
     r = f"/{root}"
 
-    # 1. Response check (e.g., rustuya/response or rustuya/response/id)
+    # 3. Response check (e.g., rustuya/response or rustuya/response/id)
     if f"{r}/response" in t:
         return "response"
         
-    # 2. Error check (e.g., rustuya/error or rustuya/error/id)
+    # 4. Error check (e.g., rustuya/error or rustuya/error/id)
     if f"{r}/error" in t:
         return "error"
 
-    # 3. Scanner check
-    if "/scanner" in t:
+    # 5. Scanner check
+    if "/scanner" in t or topic == "scanner":
         return "scanner"
 
-    # 4. Event topic check (Live messages)
-    # Pattern e.g.: rustuya/event/{type} -> rustuya/event/
+    # 6. Event topic check (Live messages)
     event_base = cfg.mqtt_event_topic.replace("{root}", root).replace("{type}", "")
     if topic.startswith(event_base) or f"{r}/event" in t:
         return "event"
 
-    # 5. Default fallback
+    # 7. Default fallback
     return "event"
 
 
@@ -207,7 +225,7 @@ def handle_mqtt_message(topic: str, payload, topic_type: str) -> tuple[bool, dic
         # Map errorCode to a standard status for the UI
         if topic_type == "error" and "errorCode" in payload:
             ecode = payload["errorCode"]
-            filtered["status"] = "online" if ecode == 0 else "offline"
+            filtered["status"] = "online" if ecode == 0 else str(ecode)
 
         if did in state.devices_map:
             # Update existing device (status from errors or properties from events)

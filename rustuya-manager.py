@@ -88,6 +88,7 @@ class Device:
     key: Optional[str] = None
     ip: str = "Auto"
     version: str = "Auto"
+    status: str = "offline"
     raw_data: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -99,6 +100,7 @@ class Device:
         key = data.get('local_key') or data.get('key')
         ip = data.get('ip') or "Auto"
         version = data.get('version') or data.get('ver') or "Auto"
+        status = data.get('status', 'offline')
         
         is_sub = (data.get('sub') is True or cid is not None)
         if ip != "Auto" and not parent_id:
@@ -107,7 +109,7 @@ class Device:
         return cls(
             id=did, name=name, type="SubDevice" if is_sub else "WiFi",
             cid=cid, parent_id=parent_id, key=key, ip=ip, version=version,
-            raw_data=data
+            status=str(status), raw_data=data
         )
 
     def get_routing_info(self) -> str:
@@ -250,12 +252,26 @@ class RustuyaManager:
         cols = [{"name": "Type", "style": "dim"}, {"name": "ID / Routing", "style": "cyan", "no_wrap": True}, 
                 {"name": "Name", "style": "white"}, {"name": "Status", "justify": "center"}, {"name": "Details", "style": "dim"}]
         rows = []
-        for d in self.mismatched: rows.append([d['dev'].type, d['dev'].id, d['dev'].name, "[yellow]MISMATCH[/yellow]", d['reason']])
-        for d in self.missing: rows.append([d.type, f"{d.id}\n[dim]{d.get_routing_info()}[/dim]", d.name, "[green]MISSING[/green]", f"Key: {Device.shorten(d.key)}"])
-        for d in self.orphaned: rows.append([d.type, d.id, d.name, "[red]ORPHANE[/red]", ""])
-        for d in self.synced: rows.append([d.type, d.id, d.name, "[blue]SYNCED[/blue]", ""])
+        for d in self.mismatched:
+            status = self._format_status(d['dev'])
+            rows.append([d['dev'].type, d['dev'].id, d['dev'].name, f"[yellow]MISMATCH[/yellow] {status}", d['reason']])
+        for d in self.missing:
+            rows.append([d.type, f"{d.id}\n[dim]{d.get_routing_info()}[/dim]", d.name, "[green]MISSING[/green]", f"Key: {Device.shorten(d.key)}"])
+        for d in self.orphaned:
+            status = self._format_status(d)
+            rows.append([d.type, d.id, d.name, f"[red]ORPHANE[/red] {status}", ""])
+        for d in self.synced:
+            status = self._format_status(d)
+            rows.append([d.type, d.id, d.name, f"[blue]SYNCED[/blue] {status}", ""])
         ui.table("Rustuya Device Dashboard", cols, rows)
         ui.panel(f"Summary: {len(self.synced)} Synced, {len(self.mismatched)} Mismatch, {len(self.missing)} Missing, {len(self.orphaned)} Orphaned", title="Sync Status")
+
+    def _format_status(self, dev: Device) -> str:
+        s = dev.status
+        if s in ('online', '0', 'true'): return "[green]●[/green]"
+        if s in ('subdevice', 'no parent', 'invalid subdevice'): return "[blue]○[/blue]"
+        if s.isdigit(): return f"[red]ERR:{s}[/red]"
+        return "[dim]●[/dim]"
 
     def publish_action(self, action: str, dev: Device):
         if not self.mqtt_client:

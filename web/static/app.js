@@ -455,8 +455,11 @@ function passesFilter(dev) {
     if (currentFilter === 'all') return true;
     const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
     if (currentFilter === 'subdevice') return isSubDevice;
-    if (currentFilter === 'online')    return !isSubDevice && (dev.status === undefined || dev.status === 'online' || dev.status === true);
-    if (currentFilter === 'offline')   return !isSubDevice && dev.status === 'offline';
+    if (currentFilter === 'online')    return !isSubDevice && (dev.status === undefined || dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0);
+    if (currentFilter === 'offline') {
+        const isOffline = dev.status === 'offline' || (typeof dev.status === 'string' && /^\d+$/.test(dev.status) && dev.status !== '0');
+        return !isSubDevice && isOffline;
+    }
     return true;
 }
 
@@ -474,9 +477,16 @@ function renderStatusCell(dev) {
         return `<span class="status-dot" style="background:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,0.25)"></span>
                 <span class="text-sm font-medium text-blue-400">Sub-device</span>`;
     }
-    const online = dev.status === 'online' || dev.status === true;
+    const online = dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0;
+    
+    // Check if status is a non-zero error code
+    let statusText = online ? 'Online' : 'Offline';
+    if (!online && typeof dev.status === 'string' && /^\d+$/.test(dev.status)) {
+        statusText = `Error ${dev.status}`;
+    }
+
     return `<span class="status-dot ${online ? 'status-online' : 'status-offline'}"></span>
-            <span class="text-sm font-medium ${online ? 'text-slate-300' : 'text-slate-500'}">${online ? 'Online' : 'Offline'}</span>`;
+            <span class="text-sm font-medium ${online ? 'text-slate-300' : 'text-slate-500'}">${statusText}</span>`;
 }
 
 function renderDashboard() {

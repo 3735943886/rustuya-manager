@@ -118,41 +118,50 @@ def extract_devices(payload: dict) -> dict | None:
     return {}
 
 
+def _topic_prefix(template: str | None, root: str) -> str:
+    """Resolve a topic template and return the static prefix before any '{' variable."""
+    if not template:
+        return ""
+    return template.replace("{root}", root).split("{")[0].rstrip("/")
+
+
 def classify_mqtt_topic(topic: str) -> str:
     """
-    Classify an incoming MQTT topic based on patterns in config.json.
+    Classify an incoming MQTT topic based on the configured topic templates.
     Returns: 'response' | 'error' | 'scanner' | 'event'
     """
     cfg = state.config
     root = cfg.root_topic
-    
-    # 1. Custom template prefix matching
-    if cfg.mqtt_message_topic:
-        msg_base = cfg.mqtt_message_topic.replace("{root}", root).split("{")[0].rstrip('/')
-        if msg_base and topic.startswith(msg_base):
-            if "/error" in topic: return "error"
-            return "response"
 
+    # 1. Scanner topic
     if cfg.mqtt_scanner_topic:
-        scanner_base = cfg.mqtt_scanner_topic.replace("{root}", root)
-        if topic == scanner_base or topic.startswith(f"{scanner_base}/"):
+        scanner_prefix = _topic_prefix(cfg.mqtt_scanner_topic, root)
+        if topic == scanner_prefix or topic.startswith(f"{scanner_prefix}/"):
             return "scanner"
 
-    # 2. Strict path matching (root/response/..., root/error/...)
-    parts = topic.split('/')
+    # 2. Explicit message topic override
+    if cfg.mqtt_message_topic:
+        msg_prefix = _topic_prefix(cfg.mqtt_message_topic, root)
+        if msg_prefix and topic.startswith(msg_prefix):
+            return "error" if "/error" in topic else "response"
+
+    # 3. Event topic – matches configured event template prefix
+    event_prefix = _topic_prefix(cfg.mqtt_event_topic, root)
+    if event_prefix and topic.startswith(event_prefix):
+        return "event"
+
+    # 4. Command topic prefix – bridge may echo responses here
+    command_prefix = _topic_prefix(cfg.mqtt_command_topic, root)
+    if command_prefix and topic.startswith(command_prefix):
+        return "error" if "/error" in topic else "response"
+
+    # 5. Legacy fallback for standard sub-topic naming
+    parts = topic.split("/")
     if len(parts) >= 2 and parts[0] == root:
         if parts[1] == "response": return "response"
         if parts[1] == "error":    return "error"
         if parts[1] == "event":    return "event"
         if parts[1] == "scanner":  return "scanner"
-
-    # 3. Substring fallback (Normalize by adding leading slash)
-    t = f"/{topic}"
-    r = f"/{root}"
-    if f"{r}/response" in t: return "response"
-    if f"{r}/error" in t:    return "error"
-    if f"{r}/event" in t:    return "event"
-    if "/scanner" in t or topic == "scanner": return "scanner"
 
     return "event"
 

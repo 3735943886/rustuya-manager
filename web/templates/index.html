@@ -87,86 +87,80 @@
 
             <!-- Dashboard Section -->
             <section id="dashboard" class="section h-full flex flex-col gap-6">
-                <!-- Overview Section -->
-                <div class="shrink-0 space-y-4">
-                    <div class="flex items-center gap-2 text-slate-400 text-xs font-semibold uppercase tracking-wider">
-                        <i class="fa-solid fa-chart-simple"></i>
-                        <span>System Overview</span>
+                <!-- Stats Cards -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 shrink-0">
+                    <!-- Total Devices -->
+                    <div class="stat-card group relative overflow-hidden">
+                        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <i class="fa-solid fa-diagram-project text-5xl"></i>
+                        </div>
+                        <div class="relative z-10">
+                            <div class="flex items-center gap-3 text-slate-400 mb-2">
+                                <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400">
+                                    <i class="fa-solid fa-microchip"></i>
+                                </div>
+                                <h3 class="font-medium text-sm">Bridge Devices</h3>
+                            </div>
+                            <div class="flex items-baseline gap-2">
+                                <span id="stat-total" class="text-3xl font-bold text-white">0</span>
+                                <span class="text-xs text-slate-500">local nodes</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-                        <!-- Total Devices -->
-                        <div class="stat-card group relative overflow-hidden">
-                            <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                <i class="fa-solid fa-diagram-project text-5xl"></i>
+
+                    <!-- Cloud Devices -->
+                    <div class="stat-card group relative overflow-hidden">
+                        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <i class="fa-solid fa-cloud text-5xl text-brandBlue"></i>
+                        </div>
+                        <div class="relative z-10">
+                            <div class="flex items-center gap-3 text-slate-400 mb-2">
+                                <div class="w-8 h-8 rounded-lg bg-brandBlue/10 flex items-center justify-center text-brandBlue">
+                                    <i class="fa-solid fa-cloud"></i>
+                                </div>
+                                <h3 class="font-medium text-sm">Cloud Assets</h3>
                             </div>
-                            <div class="relative z-10">
-                                <div class="flex items-center gap-3 text-slate-400 mb-2">
-                                    <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400">
-                                        <i class="fa-solid fa-microchip"></i>
-                                    </div>
-                                    <h3 class="font-medium text-sm">Bridge Devices</h3>
-                                </div>
-                                <div class="flex items-baseline gap-2">
-                                    <span id="stat-total" class="text-3xl font-bold text-white">0</span>
-                                    <span class="text-xs text-slate-500">local nodes</span>
-                                </div>
+                            <div class="flex items-baseline gap-2">
+                                <span id="stat-cloud" class="text-3xl font-bold text-white">0</span>
+                                <span class="text-xs text-slate-500">tuya cloud</span>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- Cloud Devices -->
-                        <div class="stat-card group relative overflow-hidden">
-                            <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                <i class="fa-solid fa-cloud text-5xl text-brandBlue"></i>
+                    <!-- Synced -->
+                    <div class="stat-card group relative overflow-hidden">
+                        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <i class="fa-solid fa-check-double text-5xl text-emerald-500"></i>
+                        </div>
+                        <div class="relative z-10">
+                            <div class="flex items-center gap-3 text-slate-400 mb-2">
+                                <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                                    <i class="fa-solid fa-check-circle"></i>
+                                </div>
+                                <h3 class="font-medium text-sm">Synchronized</h3>
                             </div>
-                            <div class="relative z-10">
-                                <div class="flex items-center gap-3 text-slate-400 mb-2">
-                                    <div class="w-8 h-8 rounded-lg bg-brandBlue/10 flex items-center justify-center text-brandBlue">
-                                        <i class="fa-solid fa-cloud"></i>
-                                    </div>
-                                    <h3 class="font-medium text-sm">Cloud Assets</h3>
-                                </div>
-                                <div class="flex items-baseline gap-2">
-                                    <span id="stat-cloud" class="text-3xl font-bold text-white">0</span>
-                                    <span class="text-xs text-slate-500">tuya cloud</span>
-                                </div>
+                            <div class="flex items-baseline gap-2">
+                                <span id="stat-synced" class="text-3xl font-bold text-white">0</span>
+                                <span class="text-xs text-slate-500">verified</span>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- Synced -->
-                        <div class="stat-card group relative overflow-hidden">
-                            <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                <i class="fa-solid fa-check-double text-5xl text-emerald-500"></i>
-                            </div>
-                            <div class="relative z-10">
-                                <div class="flex items-center gap-3 text-slate-400 mb-2">
-                                    <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                                        <i class="fa-solid fa-check-circle"></i>
-                                    </div>
-                                    <h3 class="font-medium text-sm">Synchronized</h3>
-                                </div>
-                                <div class="flex items-baseline gap-2">
-                                    <span id="stat-synced" class="text-3xl font-bold text-white">0</span>
-                                    <span class="text-xs text-slate-500">verified</span>
-                                </div>
-                            </div>
+                    <!-- Conflicts -->
+                    <div class="stat-card group relative overflow-hidden">
+                        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <i class="fa-solid fa-triangle-exclamation text-5xl text-amber-500"></i>
                         </div>
-
-                        <!-- Conflicts -->
-                        <div class="stat-card group relative overflow-hidden">
-                            <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                <i class="fa-solid fa-triangle-exclamation text-5xl text-amber-500"></i>
+                        <div class="relative z-10">
+                            <div class="flex items-center gap-3 text-slate-400 mb-2">
+                                <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
+                                    <i class="fa-solid fa-circle-exclamation"></i>
+                                </div>
+                                <h3 class="font-medium text-sm">Pending Issues</h3>
                             </div>
-                            <div class="relative z-10">
-                                <div class="flex items-center gap-3 text-slate-400 mb-2">
-                                    <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
-                                        <i class="fa-solid fa-circle-exclamation"></i>
-                                    </div>
-                                    <h3 class="font-medium text-sm">Pending Issues</h3>
-                                </div>
-                                <div class="flex items-baseline gap-2">
-                                    <span id="stat-conflicts" class="text-3xl font-bold text-white">0</span>
-                                    <span class="text-xs text-slate-500">need sync</span>
-                                </div>
+                            <div class="flex items-baseline gap-2">
+                                <span id="stat-conflicts" class="text-3xl font-bold text-white">0</span>
+                                <span class="text-xs text-slate-500">need sync</span>
                             </div>
                         </div>
                     </div>

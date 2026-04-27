@@ -317,25 +317,25 @@ function renderSyncPanels() {
         renderRow: (dev) => syncItemRow(
             `${dev.name} <span class="text-slate-500 font-mono text-xs">(${dev.id})</span>`,
             dev.id, 'Import to Bridge',
-            'text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-500/30 border-rose-500/20',
-            `resolveSingle('missing', '${dev.id}', event)`
+            'text-emerald-400 hover:text-white bg-emerald-500/10 hover:bg-emerald-500/30 border-emerald-500/20',
+            `resolveSingle('missing', '${dev.id}', event)`,
+            `openDeviceImportModal(cloud_devices['${dev.id}'])`
         ),
     });
 
     renderSyncSection({
         countId: 'count-mismatch', sectionId: 'section-mismatch', bodyId: 'body-mismatch',
         items: currentSyncData.mismatched,
-        renderRow: ({ cloud: dev, reasons }) => `
-            <div class="flex flex-col text-sm border-b border-slate-700/50 pb-2 mb-2 last:border-0">
-                <div class="flex justify-between items-center">
-                    <span class="text-white">${dev.name} <span class="text-slate-500 font-mono text-xs">(${dev.id})</span></span>
-                    <button onclick="resolveSingle('mismatched', '${dev.id}', event)"
-                        class="text-amber-400 hover:text-white bg-amber-500/10 hover:bg-amber-500/30 border border-amber-500/20 px-3 py-1.5 rounded transition-colors text-sm font-medium">
-                        Push Config to Bridge
-                    </button>
-                </div>
-                <div class="text-xs text-slate-400 mt-1"><span class="text-amber-400">Conflicts:</span> ${reasons.join(', ')}</div>
-            </div>`,
+        renderRow: (item) => {
+            const row = syncItemRow(
+                `${item.cloud.name} <span class="text-slate-500 font-mono text-xs">(${item.id})</span>`,
+                item.id, 'Push to Bridge',
+                'text-amber-400 hover:text-white bg-amber-500/10 hover:bg-amber-500/30 border-amber-500/20',
+                `resolveSingle('mismatched', '${item.id}', event)`,
+                `openDeviceImportModal(cloud_devices['${item.id}'])`
+            );
+            return `<div class="mb-2 last:mb-0">${row}<div class="text-[10px] text-amber-500/70 -mt-1.5 mb-2 px-1">Conflicts: ${item.reasons.join(', ')}</div></div>`;
+        }
     });
 
     renderSyncSection({

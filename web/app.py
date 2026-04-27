@@ -30,15 +30,11 @@ CREDS_PATH  = DATA_DIR / "tuyacreds.json"
 # ---------------------------------------------------------------------------
 @dataclass
 class AppConfig:
-    mqtt_broker: str = "127.0.0.1"
+    mqtt_broker: str = "localhost"
     mqtt_port: int = 1883
     root_topic: str = "rustuya"
-    mqtt_command_topic: str = ""
-    mqtt_event_topic: str = ""
-
-    def __post_init__(self):
-        self.mqtt_command_topic = self.mqtt_command_topic or f"{self.root_topic}/command"
-        self.mqtt_event_topic   = self.mqtt_event_topic   or f"{self.root_topic}/event/{{type}}"
+    mqtt_command_topic: str = "{root}/command"
+    mqtt_event_topic: str = "{root}/event/{type}"
 
     @classmethod
     def load(cls) -> "AppConfig":
@@ -48,16 +44,18 @@ class AppConfig:
         try:
             with CONFIG_PATH.open() as f:
                 data = json.load(f)
-            broker_full = data.get("mqtt_broker", cfg.mqtt_broker)
+            
+            broker_full = data.get("mqtt_broker", "localhost:1883")
             if "://" in broker_full:
                 broker_full = broker_full.split("://")[-1]
             parts = broker_full.split(":")
             cfg.mqtt_broker = parts[0]
             if len(parts) > 1:
                 cfg.mqtt_port = int(parts[1])
-            cfg.root_topic          = data.get("mqtt_root_topic", cfg.root_topic)
-            cfg.mqtt_command_topic  = data.get("mqtt_command_topic", f"{cfg.root_topic}/command")
-            cfg.mqtt_event_topic    = data.get("mqtt_event_topic",   f"{cfg.root_topic}/event/{{type}}")
+                
+            cfg.root_topic          = data.get("mqtt_root_topic", "rustuya")
+            cfg.mqtt_command_topic  = data.get("mqtt_command_topic", "{root}/command")
+            cfg.mqtt_event_topic    = data.get("mqtt_event_topic",   "{root}/event/{type}")
         except Exception as e:
             logger.error("Error loading config: %s", e)
         return cfg
@@ -130,17 +128,26 @@ def extract_devices(payload: dict) -> dict | None:
 
 def classify_mqtt_topic(topic: str) -> str:
     """
-    Classify an incoming MQTT topic into a semantic type.
+    Classify an incoming MQTT topic based on patterns in config.json.
     Returns: 'response' | 'error' | 'scanner' | 'event'
     """
     cfg = state.config
     root = cfg.root_topic
-    if f"{root}/response/" in topic or topic.endswith("/response"):
+    
+    # 1. Event topic check (Live messages)
+    # We strip the placeholder to check the base path
+    event_base = cfg.mqtt_event_topic.replace("{root}", root).replace("{type}", "")
+    if topic.startswith(event_base):
+        return "event"
+
+    # 2. Standard bridge topics
+    if topic.endswith("/response") or f"{root}/response/" in topic:
         return "response"
-    if f"{root}/error/" in topic or topic.endswith("/error"):
+    if topic.endswith("/error") or f"{root}/error/" in topic:
         return "error"
-    if f"{root}/scanner" in topic:
+    if "/scanner" in topic:
         return "scanner"
+        
     return "event"
 
 

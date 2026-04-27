@@ -38,10 +38,10 @@ body {
 
 /* Stats Cards */
 .stat-card {
-    @apply bg-slate-800/40 rounded-xl p-5 border border-slate-700/50 backdrop-blur-sm transition-all duration-300;
+    @apply bg-slate-800 rounded-xl p-5 border border-slate-700 shadow-md transition-all duration-300;
 }
 .stat-card:hover {
-    @apply border-slate-600 shadow-lg transform -translate-y-1 bg-slate-800/60;
+    @apply border-slate-500 shadow-xl transform -translate-y-1 bg-slate-700/60;
 }
 
 /* Table Rows Hover */

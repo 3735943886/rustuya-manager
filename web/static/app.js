@@ -33,19 +33,19 @@ function showToast(message, level = 'info', duration = 3500) {
     };
 
     const toast = document.createElement('div');
-    toast.className = `flex items-center gap-3 px-4 py-3 rounded-lg border shadow-xl text-white text-sm
-                       transition-all duration-300 opacity-0 translate-y-2
+    toast.className = `flex items-start gap-3 px-4 py-3 rounded-lg border shadow-2xl text-white text-sm
+                       transition-all duration-300 opacity-0 -translate-y-4 max-w-md w-auto
                        ${colors[level] ?? colors.info}`;
-    toast.innerHTML = `<i class="fa-solid ${icons[level] ?? icons.info} flex-shrink-0"></i>
-                       <span>${message}</span>`;
+    toast.innerHTML = `<i class="fa-solid ${icons[level] ?? icons.info} mt-0.5 flex-shrink-0"></i>
+                       <span class="break-words overflow-hidden">${message}</span>`;
     container.appendChild(toast);
 
     requestAnimationFrame(() => {
-        toast.classList.remove('opacity-0', 'translate-y-2');
+        toast.classList.remove('opacity-0', '-translate-y-4');
     });
 
     setTimeout(() => {
-        toast.classList.add('opacity-0', 'translate-y-2');
+        toast.classList.add('opacity-0', '-translate-y-4');
         setTimeout(() => toast.remove(), 300);
     }, duration);
 }
@@ -128,8 +128,13 @@ function connectWS() {
                 showToast(`Bridge: ${text}`, 'success');
                 addLog(`Bridge OK — ${text}`, 'success');
             } else if (msg.topic_type === 'error') {
-                const text = msg.payload?.errorMsg || msg.payload?.message || msg.payload?.error || JSON.stringify(msg.payload);
-                const isRealError = msg.payload?.errorCode !== 0 && msg.payload?.status !== 'success';
+                const p = msg.payload || {};
+                const errMsg = p.errorMsg || p.message || p.error || JSON.stringify(p);
+                const namePart = p.name ? `[${p.name}] ` : '';
+                const idPart   = p.id   ? `(${p.id}) ` : '';
+                const text     = `${namePart}${idPart}${errMsg}`;
+
+                const isRealError = p.errorCode !== 0 && p.status !== 'success';
                 const level = isRealError ? 'error' : 'success';
                 const prefix = isRealError ? 'Bridge ERR' : 'Bridge OK';
                 
@@ -364,9 +369,10 @@ function isPrivateIP(ip) {
 
 function submitDeviceBridgeAdd(dev) {
     const payload = { id: dev.id, name: dev.name || 'Unnamed' };
-    if (dev.sub || dev.parent || dev.parent_id) {
-        payload.node_id = dev.node_id || dev.cid;
-        payload.parent  = dev.parent  || dev.parent_id;
+    // Sub-device check with standardized fields for the bridge (cid, parent_id)
+    if (dev.sub || dev.parent || dev.parent_id || dev.node_id || dev.cid) {
+        payload.cid       = dev.cid || dev.node_id;
+        payload.parent_id = dev.parent_id || dev.parent;
     } else {
         Object.assign(payload, {
             key:     dev.key || dev.local_key || dev.localkey,
@@ -587,10 +593,47 @@ function openWizardModal() {
 
 function closeModal() {
     document.getElementById('modal-overlay').classList.add('opacity-0', 'pointer-events-none');
-    ['device-modal', 'wizard-modal', 'sync-modal'].forEach(id => {
+    ['device-modal', 'wizard-modal', 'sync-modal', 'confirm-modal'].forEach(id => {
         const el = document.getElementById(id);
         el.classList.add('scale-95');
         setTimeout(() => el.classList.add('hidden'), 300);
+    });
+}
+
+function showConfirm({ title = 'Are you sure?', message = '', okText = 'Confirm', cancelText = 'Cancel' }) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('confirm-modal');
+        const overlay = document.getElementById('modal-overlay');
+        const titleEl = document.getElementById('confirm-title');
+        const msgEl = document.getElementById('confirm-message');
+        const okBtn = document.getElementById('confirm-ok-btn');
+        const cancelBtn = document.getElementById('confirm-cancel-btn');
+
+        titleEl.innerText = title;
+        msgEl.innerText = message;
+        okBtn.innerText = okText;
+        cancelBtn.innerText = cancelText;
+
+        overlay.classList.remove('opacity-0', 'pointer-events-none');
+        modal.classList.remove('hidden');
+        setTimeout(() => modal.classList.remove('scale-95'), 10);
+
+        const onOk = () => { cleanup(true); };
+        const onCancel = () => { cleanup(false); };
+
+        const cleanup = (result) => {
+            modal.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                overlay.classList.add('opacity-0', 'pointer-events-none');
+                resolve(result);
+            }, 200);
+            okBtn.removeEventListener('click', onOk);
+            cancelBtn.removeEventListener('click', onCancel);
+        };
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
     });
 }
 
@@ -684,8 +727,13 @@ function openDetails(id) {
     updateDetailsLiveValues(id);
 
     document.getElementById('btn-edit').onclick   = () => { closeDetails(); openEditDeviceModal(id); };
-    document.getElementById('btn-delete').onclick = () => {
-        if (confirm(`Are you sure you want to delete ${dev.name || id}?`)) {
+    document.getElementById('btn-delete').onclick = async () => {
+        const confirmed = await showConfirm({
+            title: 'Delete Device',
+            message: `Are you sure you want to delete ${dev.name || id}? This will remove it from the bridge configuration.`,
+            okText: 'Delete',
+        });
+        if (confirmed) {
             sendCommand('remove', { id });
             // Preemptive UI removal for better responsiveness
             if (devices_map[id]) {
@@ -723,7 +771,7 @@ function showSection(sectionId) {
 // =============================================================================
 function startWizard() {
     const code = document.getElementById('wizard-code').value;
-    if (!code) { alert('Please enter a User Code.'); return; }
+    if (!code) { showToast('Please enter a User Code.', 'warning'); return; }
     document.getElementById('wizard-input-step').classList.add('hidden');
     document.getElementById('wizard-loading-step').classList.remove('hidden');
     document.getElementById('wizard-spinner').classList.remove('hidden');

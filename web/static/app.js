@@ -196,11 +196,12 @@ function connectWS() {
             } else if (msg.topic_type === 'event') {
                 // Accumulate live DPS values (exclude metadata keys)
                 if (msg.payload?.action) return; // Ignore bridge responses mistakenly classified as events
-                
-                const META_KEYS = new Set(['id', 'name', 'cid']);
+
+                const META_KEYS = new Set(['id', 'name', 'cid', 'data']);
                 const did = msg.payload?.id;
                 if (did && msg.payload) {
-                    const raw = msg.payload.dps || msg.payload;
+                    // Bridge may use 'dps', 'data', or flat payload for DPS values
+                    const raw = msg.payload.dps ?? msg.payload.data ?? msg.payload;
                     if (typeof raw === 'object' && !Array.isArray(raw)) {
                         const ts = new Date().toLocaleTimeString();
                         liveValues[did] = { ...(liveValues[did] ?? {}) };
@@ -208,6 +209,7 @@ function connectWS() {
                             if (!META_KEYS.has(dp)) liveValues[did][dp] = { value: v, ts };
                         }
                         if (currentDeviceId === did) updateDetailsLiveValues(did);
+                        renderDashboard(); // refresh ● live badge
                     }
                 }
             }

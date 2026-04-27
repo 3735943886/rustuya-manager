@@ -129,6 +129,10 @@ def classify_mqtt_topic(topic: str) -> str:
     """
     Classify an incoming MQTT topic based on the configured topic templates.
     Returns: 'response' | 'error' | 'scanner' | 'event'
+
+    NOTE: event and command topics are checked BEFORE the generic message topic
+    override because mqtt_message_topic (e.g. "{root}/{level}/{id}") resolves to
+    a very short prefix (just the root) that would otherwise swallow every topic.
     """
     cfg = state.config
     root = cfg.root_topic
@@ -139,21 +143,21 @@ def classify_mqtt_topic(topic: str) -> str:
         if topic == scanner_prefix or topic.startswith(f"{scanner_prefix}/"):
             return "scanner"
 
-    # 2. Explicit message topic override
-    if cfg.mqtt_message_topic:
-        msg_prefix = _topic_prefix(cfg.mqtt_message_topic, root)
-        if msg_prefix and topic.startswith(msg_prefix):
-            return "error" if "/error" in topic else "response"
-
-    # 3. Event topic – matches configured event template prefix
+    # 2. Event topic – check BEFORE message topic override to avoid false matches
     event_prefix = _topic_prefix(cfg.mqtt_event_topic, root)
-    if event_prefix and topic.startswith(event_prefix):
+    if event_prefix and topic.startswith(event_prefix + "/") or topic == event_prefix:
         return "event"
 
-    # 4. Command topic prefix – bridge may echo responses here
+    # 3. Command topic prefix – bridge echoes responses / errors here
     command_prefix = _topic_prefix(cfg.mqtt_command_topic, root)
-    if command_prefix and topic.startswith(command_prefix):
+    if command_prefix and (topic.startswith(command_prefix + "/") or topic == command_prefix):
         return "error" if "/error" in topic else "response"
+
+    # 4. Explicit message topic override (may have a very broad prefix like root only)
+    if cfg.mqtt_message_topic:
+        msg_prefix = _topic_prefix(cfg.mqtt_message_topic, root)
+        if msg_prefix and (topic.startswith(msg_prefix + "/") or topic == msg_prefix):
+            return "error" if "/error" in topic else "response"
 
     # 5. Legacy fallback for standard sub-topic naming
     parts = topic.split("/")

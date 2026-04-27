@@ -75,12 +75,26 @@ function renderActivityLog() {
 
 function toggleLogPanel() {
     document.getElementById('log-panel').classList.toggle('translate-x-full');
+    
+    // Toggle backdrop
+    const isVisible = !document.getElementById('log-panel').classList.contains('translate-x-full');
+    if (isVisible) {
+        const backdrop = document.getElementById('panel-backdrop');
+        if (backdrop) {
+            backdrop.classList.remove('hidden');
+            setTimeout(() => backdrop.classList.remove('opacity-0'), 10);
+        }
+    } else {
+        hidePanelBackdrop();
+    }
+
     // Close details if open
     document.getElementById('details-panel').classList.add('translate-x-full');
 }
 
 function closeLogPanel() {
     document.getElementById('log-panel').classList.add('translate-x-full');
+    hidePanelBackdrop();
 }
 
 // =============================================================================
@@ -450,12 +464,17 @@ function passesFilter(dev) {
 // Dashboard rendering
 // =============================================================================
 function renderStatusCell(dev) {
+    const error = deviceErrors[dev.id];
+    if (error) {
+        return `<span class="status-dot bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></span>
+                <span class="text-sm font-medium text-red-500">Error</span>`;
+    }
     const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
     if (isSubDevice) {
         return `<span class="status-dot" style="background:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,0.25)"></span>
                 <span class="text-sm font-medium text-blue-400">Sub-device</span>`;
     }
-    const online = dev.status === undefined || dev.status === 'online' || dev.status === true;
+    const online = dev.status === 'online' || dev.status === true;
     return `<span class="status-dot ${online ? 'status-online' : 'status-offline'}"></span>
             <span class="text-sm font-medium ${online ? 'text-slate-300' : 'text-slate-500'}">${online ? 'Online' : 'Offline'}</span>`;
 }
@@ -509,7 +528,7 @@ function renderDashboard() {
             </td>
             <td class="py-4 px-5 text-sm font-medium text-white">
                 ${dev.name || 'Unnamed Device'}
-                ${hasLive ? `<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>` : ''}
+                ${deviceErrors[dev.id] ? `<span class="ml-2 text-xs text-red-500 font-normal animate-pulse">● error</span>` : (hasLive ? `<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>` : '')}
             </td>
             <td class="py-4 px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors">${dev.id}</td>
             <td class="py-4 px-5 text-right">
@@ -793,6 +812,9 @@ function openDetails(id) {
     if (!dev) return;
     currentDeviceId = id;
 
+    const statusEl = document.getElementById('details-status');
+    if (statusEl) statusEl.innerHTML = renderStatusCell(dev);
+
     document.getElementById('details-content').innerHTML = Object.entries(dev)
         .filter(([k, v]) => !HIDDEN_DETAIL_KEYS.has(k) && v !== null && v !== undefined && typeof v !== 'object')
         .map(([k, v]) => renderDetailRow(k, v))
@@ -819,13 +841,36 @@ function openDetails(id) {
     };
 
     panel.classList.remove('translate-x-full');
+    
+    // Show backdrop
+    const backdrop = document.getElementById('panel-backdrop');
+    if (backdrop) {
+        backdrop.classList.remove('hidden');
+        setTimeout(() => backdrop.classList.remove('opacity-0'), 10);
+    }
+
     // Close log panel if open
     document.getElementById('log-panel')?.classList.add('translate-x-full');
 }
 
 function closeDetails() {
-    document.getElementById('details-panel').classList.add('translate-x-full');
+    const panel = document.getElementById('details-panel');
+    if (panel) panel.classList.add('translate-x-full');
     currentDeviceId = null;
+    hidePanelBackdrop();
+}
+
+function closeAllSidePanels() {
+    closeDetails();
+    closeLogPanel();
+}
+
+function hidePanelBackdrop() {
+    const backdrop = document.getElementById('panel-backdrop');
+    if (backdrop) {
+        backdrop.classList.add('opacity-0');
+        setTimeout(() => backdrop.classList.add('hidden'), 300);
+    }
 }
 
 // =============================================================================

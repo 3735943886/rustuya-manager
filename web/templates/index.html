@@ -222,6 +222,9 @@
 <!-- Toast Container -->
 <div id="toast-container" class="fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none w-full max-w-xl" aria-live="polite"></div>
 
+<!-- Side Panel Backdrop (Click outside to close) -->
+<div id="panel-backdrop" class="fixed inset-0 bg-black/10 backdrop-blur-[1px] z-[30] hidden transition-opacity duration-300 opacity-0" onclick="closeAllSidePanels()"></div>
+
 <!-- Modals Overlay -->
 <div id="modal-overlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
 

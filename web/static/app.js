@@ -20,6 +20,12 @@ function showToast(message, level = 'info', duration = 3500) {
     const container = document.getElementById('toast-container');
     if (!container) return;
 
+    // Limit maximum toasts on screen
+    const MAX_TOASTS = 5;
+    while (container.children.length >= MAX_TOASTS) {
+        container.children[0].remove();
+    }
+
     const colors = {
         success: 'bg-emerald-600 border-emerald-500',
         error:   'bg-red-700    border-red-600',
@@ -644,7 +650,7 @@ function openEditDeviceModal(id) {
     } else {
         document.getElementById('dev-key').value     = dev.key || dev.local_key || '';
         document.getElementById('dev-ip').value      = dev.ip  || '';
-        document.getElementById('dev-version').value = dev.version || '';
+        document.getElementById('dev-version').value = dev.version || 'Auto';
     }
     showModal('device-modal');
 }

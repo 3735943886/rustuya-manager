@@ -1,0 +1,47 @@
+# --- Stage 1: Build stage (includes compilation tools) ---
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Install minimal system packages for building
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libjpeg-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+
+# --- Stage 2: Runtime stage (final image) ---
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy only the python packages installed in stage 1
+COPY --from=builder /root/.local /root/.local
+# Copy source code
+COPY . .
+
+# Environment variables
+ENV PATH=/root/.local/bin:$PATH
+ENV PYTHONUNBUFFERED=1
+ENV TZ=Asia/Seoul
+ENV DATA_DIR=/data
+
+# Create data directory
+RUN mkdir -p /data && chmod 777 /data
+
+# Install minimal shared libraries for runtime (for Pillow)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libjpeg62-turbo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Define volume for data persistence
+VOLUME ["/data"]
+
+# Port and execution command
+EXPOSE 8373
+CMD ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8373"]

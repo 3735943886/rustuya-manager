@@ -14,11 +14,12 @@ import aiomqtt
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rustuya-web")
 
+import os
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 BASE_DIR   = Path(__file__).resolve().parent
-DATA_DIR   = BASE_DIR.parent
+DATA_DIR   = Path(os.getenv("DATA_DIR", BASE_DIR.parent))
 CLOUD_PATH = DATA_DIR / "tuyadevices.json"
 CREDS_PATH = DATA_DIR / "tuyacreds.json"
 

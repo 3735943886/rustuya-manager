@@ -18,7 +18,6 @@ Rustuya Manager Web provides a centralized, interactive dashboard to synchronize
     - <span style="color: #94a3b8">**Orphaned**</span>: Devices present in bridge but removed from cloud.
 - **Tuya Wizard**: Seamless QR code login flow to refresh `tuyadevices.json` directly from the web UI.
 - **Topology View**: Visual tree representation to understand device-parent relationships (e.g., Zigbee/BLE sub-devices).
-- **Auto Topic Resolution**: Dynamically adapts to your `config.json` MQTT topic templates.
 
 ## Quick Start
 
@@ -38,15 +37,6 @@ Run the FastAPI application:
 uvicorn web.app:app --host 0.0.0.0 --port 8000
 ```
 Open your browser and navigate to `http://localhost:8000`.
-
-## Configuration
-
-The manager integrates directly with your **rustuya-bridge** configuration. It reads `config.json` from the parent directory and automatically extracts:
-
-- `mqtt_broker`: Connection address and port.
-- `mqtt_root_topic`: Base topic for the bridge (default: `rustuya`).
-- `mqtt_command_topic`: Template for bridge API commands.
-- `mqtt_message_topic`: Template for bridge responses.
 
 ## License
 MIT

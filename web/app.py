@@ -87,15 +87,32 @@ class AppConfig:
         }
 
         for k, v in replacements.items():
-            res = res.replace(k, str(v))
+            val = str(v)
+            if not val:
+                # If variable is empty, also try to remove preceding slash to avoid double slashes
+                res = res.replace(f"/{k}", "")
+            res = res.replace(k, val)
         return res
 
     def resolve_command_topic(self, action: str, device_id: str | None = None) -> str:
-        return self.replace_vars(
-            self.mqtt_command_topic,
-            action=action,
-            id=device_id or ""
+        """
+        Resolve command topic using the GLOBAL root.
+        Bridge subscribes to commands using the global root.
+        """
+        res = (
+            self.mqtt_command_topic
+            .replace("{root}",   self.root_topic)
+            .replace("{action}", action)
         )
+        if device_id:
+            res = res.replace("{id}", device_id)
+        else:
+            # Clean up {id} if not provided
+            res = res.replace("/{id}", "").replace("{id}", "")
+        
+        # Support other common vars if present in template
+        res = res.replace("{timestamp}", str(int(time.time())))
+        return res
 
 
 # ---------------------------------------------------------------------------

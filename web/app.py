@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -34,9 +35,9 @@ class AppConfig:
     mqtt_port:           int       = 1883
     root_topic:          str       = "rustuya"
     mqtt_command_topic:  str       = "{root}/command"
-    mqtt_event_topic:    str       = "{root}/event/{type}"
-    mqtt_message_topic:  str | None = None
-    mqtt_scanner_topic:  str | None = None
+    mqtt_event_topic:    str       = "{root}/event/{type}/{id}"
+    mqtt_message_topic:  str       = "{root}/{level}/{id}"
+    mqtt_scanner_topic:  str       = "{root}/scanner"
 
     def update_from_dict(self, data: dict) -> None:
         broker = data.get("mqtt_broker", "localhost:1883")
@@ -47,19 +48,54 @@ class AppConfig:
         self.mqtt_port          = int(rest[0]) if rest else 1883
         self.root_topic         = data.get("mqtt_root_topic",    "rustuya")
         self.mqtt_command_topic = data.get("mqtt_command_topic", "{root}/command")
-        self.mqtt_event_topic   = data.get("mqtt_event_topic",   "{root}/event/{type}")
-        self.mqtt_message_topic = data.get("mqtt_message_topic")
-        self.mqtt_scanner_topic = data.get("mqtt_scanner_topic")
+        self.mqtt_event_topic   = data.get("mqtt_event_topic",   "{root}/event/{type}/{id}")
+        self.mqtt_message_topic = data.get("mqtt_message_topic", "{root}/{level}/{id}")
+        self.mqtt_scanner_topic = data.get("mqtt_scanner_topic", "{root}/scanner")
+
+    def replace_vars(self, template: str, **vars) -> str:
+        """
+        Mirror rustuya-bridge's replace_vars logic.
+        Recalculates {root} from mqtt_event_topic.
+        """
+        # Recalculate root from event topic like bridge does
+        # e.g. rustuya/event/{type}/{id} -> rustuya/{id}
+        root_topic = (
+            self.mqtt_event_topic
+            .replace("{root}",   self.root_topic)
+            .replace("/{type}",  "")
+            .replace("/event",   "")
+            .rstrip("/")
+        )
+
+        res = template.replace("{root}", root_topic)
+        
+        value = vars.get("value")
+        if value is None:
+            value = vars.get("dps_str", "")
+
+        replacements = {
+            "{id}":        vars.get("id", ""),
+            "{name}":      vars.get("name", ""),
+            "{cid}":       vars.get("cid", ""),
+            "{level}":     vars.get("level", ""),
+            "{type}":      vars.get("type", ""),
+            "{dp}":        vars.get("dp", ""),
+            "{value}":     value,
+            "{dps}":       vars.get("dps_str", ""),
+            "{action}":    vars.get("action", ""),
+            "{timestamp}": vars.get("timestamp") or int(time.time()),
+        }
+
+        for k, v in replacements.items():
+            res = res.replace(k, str(v))
+        return res
 
     def resolve_command_topic(self, action: str, device_id: str | None = None) -> str:
-        res = (
-            self.mqtt_command_topic
-            .replace("{root}",   self.root_topic)
-            .replace("{action}", action)
+        return self.replace_vars(
+            self.mqtt_command_topic,
+            action=action,
+            id=device_id or ""
         )
-        if device_id:
-            res = res.replace("{id}", device_id)
-        return res
 
 
 # ---------------------------------------------------------------------------
@@ -159,39 +195,28 @@ def classify_mqtt_topic(topic: str) -> tuple[str, dict[str, str]]:
     Returns: (topic_type, captured_vars)
     topic_type: 'event' | 'response' | 'error' | 'scanner' | 'command' | 'unknown'
     """
-    cfg  = state.config
-    root = cfg.root_topic
+    cfg         = state.config
+    global_root = cfg.root_topic
+    recalc_root = cfg.replace_vars("{root}")  # e.g. "rustuya/{id}"
 
-    # 1. Scanner results
-    m = _match_template(cfg.mqtt_scanner_topic, root, topic)
-    if m is not None:
-        return "scanner", m
-    # Fallback scanner: {root}/scanner
-    m = _match_template("{root}/scanner", root, topic)
+    # 1. Scanner results (Uses recalculated root)
+    m = _match_template(cfg.mqtt_scanner_topic, recalc_root, topic)
     if m is not None:
         return "scanner", m
 
-    # 2. Command topics (our own publishes)
-    m = _match_template(cfg.mqtt_command_topic, root, topic)
+    # 2. Command topics (Our own publishes - uses global root)
+    m = _match_template(cfg.mqtt_command_topic, global_root, topic)
     if m is not None:
         return "command", m
 
-    # 3. Message/Response/Error topics
-    m = _match_template(cfg.mqtt_message_topic, root, topic)
+    # 3. Message/Response/Error topics (Uses recalculated root)
+    m = _match_template(cfg.mqtt_message_topic, recalc_root, topic)
     if m is not None:
-        # Template can have {level} or {type}
         t = m.get("level") or m.get("type") or "response"
         return (t if t in ("response", "error") else "response"), m
     
-    # Fallback message: {root}/{level}/{id}
-    m = _match_template("{root}/{level}/{id}", root, topic)
-    if m is not None:
-        lvl = m.get("level", "")
-        if lvl in ("response", "error"):
-            return lvl, m
-
-    # 4. Event topics
-    m = _match_template(cfg.mqtt_event_topic, root, topic)
+    # 4. Event topics (Uses global root as it is the base for recalculation)
+    m = _match_template(cfg.mqtt_event_topic, global_root, topic)
     if m is not None:
         t = m.get("type", "event")
         if t in ("response", "error"):
@@ -208,13 +233,16 @@ def handle_mqtt_message(
     Update devices_map from an MQTT message.
     Returns: (devices_updated, snapshot | None, should_request_status)
     """
-    if not isinstance(payload, dict):
+    did    = captured_vars.get("id")
+    action = None
+    if isinstance(payload, dict):
+        action = payload.get("action")
+        did    = payload.get("id") or did
+
+    if not did:
         return False, None, False
 
-    action = payload.get("action")
-    did    = payload.get("id") or captured_vars.get("id")
-
-    if topic_type == "response":
+    if topic_type == "response" and isinstance(payload, dict):
         devs = extract_devices(payload)
         if devs is not None:
             state.devices_map = devs
@@ -223,7 +251,7 @@ def handle_mqtt_message(
         status     = str(payload.get("status", "")).lower()
         is_success = status in ("success", "ok") or payload.get("status") is True
 
-        if action == "remove" and is_success and did:
+        if action == "remove" and is_success:
             state.devices_map.pop(did, None)
             logger.info("Removed device %s from local state", did)
             return True, dict(state.devices_map), True
@@ -234,21 +262,32 @@ def handle_mqtt_message(
 
         return False, None, False
 
-    if topic_type in ("error", "event") and did:
+    if topic_type in ("error", "event"):
         if action:  # bridge command echo, not a device update
             return False, None, False
 
-        JUNK = {"errorCode", "errorMsg", "payloadStr"}
-        filtered = {k: v for k, v in payload.items() if k not in JUNK}
-
-        if topic_type == "error" and "errorCode" in payload:
-            filtered["status"] = "online" if payload["errorCode"] == 0 else str(payload["errorCode"])
+        filtered = {}
+        if "dp" in captured_vars:
+            # Per-DP mode: topic contains {dp} and potentially {value}
+            dp = captured_vars["dp"]
+            # Priority: payload > captured value segment
+            val = payload if payload is not None and payload != "" else captured_vars.get("value")
+            filtered = {dp: val}
+        elif isinstance(payload, dict):
+            # Bulk mode: payload contains dict of DPs
+            JUNK = {"errorCode", "errorMsg", "payloadStr", "id", "action"}
+            filtered = {k: v for k, v in payload.items() if k not in JUNK}
+            if topic_type == "error" and "errorCode" in payload:
+                filtered["status"] = "online" if payload["errorCode"] == 0 else str(payload["errorCode"])
+        else:
+            # Unknown payload format for event/error
+            return False, None, False
 
         if did in state.devices_map:
             state.devices_map[did].update(filtered)
         else:
             logger.info("Discovered device via %s: %s (%s)", topic_type, filtered.get("name", "?"), did)
-            state.devices_map[did] = filtered
+            state.devices_map[did] = {**filtered, "id": did}
 
         return True, dict(state.devices_map), False
 

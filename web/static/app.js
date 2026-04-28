@@ -198,7 +198,7 @@ function connectWS() {
                 if (msg.payload?.action) return; // Ignore bridge responses mistakenly classified as events
 
                 const META_KEYS = new Set(['id', 'name', 'cid', 'data']);
-                const did = msg.payload?.id;
+                const did = msg.payload?.id || msg.id;
                 if (did && msg.payload) {
                     // Bridge may use 'dps', 'data', or flat payload for DPS values
                     const raw = msg.payload.dps ?? msg.payload.data ?? msg.payload;

@@ -242,7 +242,10 @@ def handle_mqtt_message(
     action = None
     if isinstance(payload, dict):
         action = payload.get("action")
-        did    = payload.get("id") or did
+        # Ensure payload has id for frontend compatibility
+        if not payload.get("id") and did:
+            payload["id"] = did
+        did = payload.get("id") or did
 
     if not did:
         return False, None, False
@@ -271,7 +274,7 @@ def handle_mqtt_message(
         if action:  # bridge command echo, not a device update
             return False, None, False
 
-        filtered = {}
+        filtered = {"status": "online"} if topic_type == "event" else {}
         if "dp" in captured_vars:
             # Per-DP mode: topic contains {dp} and potentially {value}
             dp = captured_vars["dp"]
@@ -340,6 +343,7 @@ async def mqtt_listener() -> None:
                         "topic_type":      topic_type,
                         "topic":           topic,
                         "payload":         payload,
+                        "id":              captured_vars.get("id"),
                         "devices_updated": devices_updated,
                         "devices":         snapshot,
                     })

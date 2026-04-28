@@ -55,19 +55,9 @@ class AppConfig:
     def replace_vars(self, template: str, **vars) -> str:
         """
         Mirror rustuya-bridge's replace_vars logic.
-        Recalculates {root} from mqtt_event_topic.
+        Uses the global root_topic for {root} replacement.
         """
-        # Recalculate root from event topic like bridge does
-        # e.g. rustuya/event/{type}/{id} -> rustuya/{id}
-        root_topic = (
-            self.mqtt_event_topic
-            .replace("{root}",   self.root_topic)
-            .replace("/{type}",  "")
-            .replace("/event",   "")
-            .rstrip("/")
-        )
-
-        res = template.replace("{root}", root_topic)
+        res = template.replace("{root}", self.root_topic)
         
         value = vars.get("value")
         if value is None:
@@ -215,32 +205,7 @@ def classify_mqtt_topic(topic: str) -> tuple[str, dict[str, str]]:
     cfg         = state.config
     global_root = cfg.root_topic
     
-    # Calculate recalc_root template (preserving placeholders like {id})
-    recalc_root = (
-        cfg.mqtt_event_topic
-        .replace("{root}",   cfg.root_topic)
-        .replace("/{type}",  "")
-        .replace("/event",   "")
-        .rstrip("/")
-    )
-
-    # 1. Scanner results (Uses recalculated root)
-    m = _match_template(cfg.mqtt_scanner_topic, recalc_root, topic)
-    if m is not None:
-        return "scanner", m
-
-    # 2. Command topics (Our own publishes - uses global root)
-    m = _match_template(cfg.mqtt_command_topic, global_root, topic)
-    if m is not None:
-        return "command", m
-
-    # 3. Message/Response/Error topics (Uses recalculated root)
-    m = _match_template(cfg.mqtt_message_topic, recalc_root, topic)
-    if m is not None:
-        t = m.get("level") or m.get("type") or "response"
-        return (t if t in ("response", "error") else "response"), m
-    
-    # 4. Event topics (Uses global root as it is the base for recalculation)
+    # 1. Event topics (Uses global root)
     m = _match_template(cfg.mqtt_event_topic, global_root, topic)
     if m is not None:
         t = m.get("type", "event")
@@ -248,6 +213,21 @@ def classify_mqtt_topic(topic: str) -> tuple[str, dict[str, str]]:
             return t, m
         return "event", m
 
+    # 2. Scanner results (Uses global root)
+    m = _match_template(cfg.mqtt_scanner_topic, global_root, topic)
+    if m is not None:
+        return "scanner", m
+
+    # 3. Command topics (Our own publishes - uses global root)
+    m = _match_template(cfg.mqtt_command_topic, global_root, topic)
+    if m is not None:
+        return "command", m
+
+    # 4. Message/Response/Error topics (Uses global root)
+    m = _match_template(cfg.mqtt_message_topic, global_root, topic)
+    if m is not None:
+        t = m.get("level") or m.get("type") or "response"
+        return (t if t in ("response", "error") else "response"), m
     return "unknown", {}
 
 

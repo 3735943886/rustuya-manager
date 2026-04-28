@@ -214,7 +214,15 @@ def classify_mqtt_topic(topic: str) -> tuple[str, dict[str, str]]:
     """
     cfg         = state.config
     global_root = cfg.root_topic
-    recalc_root = cfg.replace_vars("{root}")  # e.g. "rustuya/{id}"
+    
+    # Calculate recalc_root template (preserving placeholders like {id})
+    recalc_root = (
+        cfg.mqtt_event_topic
+        .replace("{root}",   cfg.root_topic)
+        .replace("/{type}",  "")
+        .replace("/event",   "")
+        .rstrip("/")
+    )
 
     # 1. Scanner results (Uses recalculated root)
     m = _match_template(cfg.mqtt_scanner_topic, recalc_root, topic)

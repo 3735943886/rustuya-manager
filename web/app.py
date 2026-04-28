@@ -52,57 +52,27 @@ class AppConfig:
         self.mqtt_message_topic = data.get("mqtt_message_topic", "{root}/{level}/{id}")
         self.mqtt_scanner_topic = data.get("mqtt_scanner_topic", "{root}/scanner")
 
-    def replace_vars(self, template: str, **vars) -> str:
-        """
-        Mirror rustuya-bridge's replace_vars logic.
-        Uses the global root_topic for {root} replacement.
-        """
+    def format(self, template: str, **kwargs) -> str:
+        """Universal topic/payload formatter with global root and common defaults."""
         res = template.replace("{root}", self.root_topic)
-        
-        value = vars.get("value")
-        if value is None:
-            value = vars.get("dps_str", "")
-
-        replacements = {
-            "{id}":        vars.get("id", ""),
-            "{name}":      vars.get("name", ""),
-            "{cid}":       vars.get("cid", ""),
-            "{level}":     vars.get("level", ""),
-            "{type}":      vars.get("type", ""),
-            "{dp}":        vars.get("dp", ""),
-            "{value}":     value,
-            "{dps}":       vars.get("dps_str", ""),
-            "{action}":    vars.get("action", ""),
-            "{timestamp}": vars.get("timestamp") or int(time.time()),
+        ctx = {
+            "id": "", "name": "", "cid": "", "level": "", "type": "",
+            "dp": "", "action": "", "timestamp": int(time.time()),
+            "value": kwargs.get("value") or kwargs.get("dps_str", ""),
+            "dps":   kwargs.get("dps_str", ""),
+            **kwargs
         }
-
-        for k, v in replacements.items():
-            val = str(v)
-            if not val:
-                # If variable is empty, also try to remove preceding slash to avoid double slashes
-                res = res.replace(f"/{k}", "")
-            res = res.replace(k, val)
+        for k, v in ctx.items():
+            key = f"{{{k}}}"
+            if key in res:
+                val = str(v)
+                if not val: res = res.replace(f"/{key}", "")
+                res = res.replace(key, val)
         return res
 
     def resolve_command_topic(self, action: str, device_id: str | None = None) -> str:
-        """
-        Resolve command topic using the GLOBAL root.
-        Bridge subscribes to commands using the global root.
-        """
-        res = (
-            self.mqtt_command_topic
-            .replace("{root}",   self.root_topic)
-            .replace("{action}", action)
-        )
-        if device_id:
-            res = res.replace("{id}", device_id)
-        else:
-            # Clean up {id} if not provided
-            res = res.replace("/{id}", "").replace("{id}", "")
-        
-        # Support other common vars if present in template
-        res = res.replace("{timestamp}", str(int(time.time())))
-        return res
+        """Resolve command topic using standardized formatter."""
+        return self.format(self.mqtt_command_topic, action=action, id=device_id)
 
 
 # ---------------------------------------------------------------------------
@@ -163,31 +133,20 @@ def extract_devices(payload: dict) -> dict | None:
 
 
 def _match_template(template: str | None, root: str, topic: str) -> dict[str, str] | None:
-    """
-    Match topic against a template segment by segment.
-    {var} segments capture the corresponding topic segment.
-    Literal segments must match exactly.
-    Returns captured variables dict, or None if no match.
-    Strictly enforces segment count (no sub-paths allowed unless template ends with /#).
-    """
-    if not template:
-        return None
+    """Match topic against template segment-by-segment and capture {vars}."""
+    if not template: return None
+    tmpl_parts  = template.replace("{root}", root).split("/")
+    topic_parts = topic.split("/")
     
-    tmpl = template.replace("{root}", root)
-    if tmpl.endswith("/#"):
-        tmpl_parts = tmpl[:-2].split("/")
-        topic_parts = topic.split("/")
-        if len(topic_parts) < len(tmpl_parts):
-            return None
-        # Match only the prefix
+    # MQTT wildcard support (only /# at the end)
+    if tmpl_parts[-1] == "#":
+        tmpl_parts = tmpl_parts[:-1]
+        if len(topic_parts) < len(tmpl_parts): return None
         topic_parts = topic_parts[:len(tmpl_parts)]
-    else:
-        tmpl_parts  = tmpl.split("/")
-        topic_parts = topic.split("/")
-        if len(topic_parts) != len(tmpl_parts):
-            return None
+    elif len(topic_parts) != len(tmpl_parts):
+        return None
             
-    captured: dict[str, str] = {}
+    captured = {}
     for tmpl_seg, topic_seg in zip(tmpl_parts, topic_parts):
         if tmpl_seg.startswith("{") and tmpl_seg.endswith("}"):
             captured[tmpl_seg[1:-1]] = topic_seg
@@ -197,37 +156,27 @@ def _match_template(template: str | None, root: str, topic: str) -> dict[str, st
 
 
 def classify_mqtt_topic(topic: str) -> tuple[str, dict[str, str]]:
-    """
-    Strict template-based MQTT topic classification.
-    Returns: (topic_type, captured_vars)
-    topic_type: 'event' | 'response' | 'error' | 'scanner' | 'command' | 'unknown'
-    """
-    cfg         = state.config
-    global_root = cfg.root_topic
+    """Strict template-based classification: 'event'|'response'|'error'|'scanner'|'command'."""
+    cfg = state.config
     
-    # 1. Event topics (Uses global root)
-    m = _match_template(cfg.mqtt_event_topic, global_root, topic)
-    if m is not None:
-        t = m.get("type", "event")
-        if t in ("response", "error"):
-            return t, m
-        return "event", m
-
-    # 2. Scanner results (Uses global root)
-    m = _match_template(cfg.mqtt_scanner_topic, global_root, topic)
-    if m is not None:
-        return "scanner", m
-
-    # 3. Command topics (Our own publishes - uses global root)
-    m = _match_template(cfg.mqtt_command_topic, global_root, topic)
-    if m is not None:
-        return "command", m
-
-    # 4. Message/Response/Error topics (Uses global root)
-    m = _match_template(cfg.mqtt_message_topic, global_root, topic)
-    if m is not None:
-        t = m.get("level") or m.get("type") or "response"
-        return (t if t in ("response", "error") else "response"), m
+    # Rule-based matching in order of priority
+    rules = [
+        (cfg.mqtt_event_topic,   "event"),
+        (cfg.mqtt_message_topic, "message"),
+        (cfg.mqtt_scanner_topic, "scanner"),
+        (cfg.mqtt_command_topic, "command"),
+    ]
+    
+    for template, base_type in rules:
+        m = _match_template(template, cfg.root_topic, topic)
+        if m is None: continue
+        
+        # Resolve specific subtype
+        sub = m.get("level") or m.get("type") or base_type
+        if sub in ("response", "error"): return sub, m
+        if base_type == "event":         return "event", m
+        return ("response" if base_type == "message" else base_type), m
+            
     return "unknown", {}
 
 

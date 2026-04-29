@@ -44,10 +44,6 @@ services:
       - "8373:8373"
     volumes:
       - ./data:/data
-    environment:
-      - TZ=Asia/Seoul
-      - MQTT_BROKER=localhost:1883
-      - LOG_LEVEL=info
 ```
 
 Run the container:
@@ -62,7 +58,6 @@ docker run -d \
   --restart unless-stopped \
   -p 8373:8373 \
   -v $(pwd)/data:/data \
-  -e MQTT_BROKER=localhost:1883 \
   ghcr.io/3735943886/rustuya-manager:latest
 ```
 

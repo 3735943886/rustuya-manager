@@ -14,3 +14,6 @@ websockets
 cryptography
 pillow
 tuyawizard
+
+# Rustuya Bridge
+git+https://github.com/3735943886/rustuya-bridge.git#subdirectory=python

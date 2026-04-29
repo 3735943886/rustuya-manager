@@ -10,6 +10,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import aiomqtt
+from pyrustuyabridge import PyBridgeServer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rustuya-web")
@@ -411,10 +412,57 @@ async def fetch_config_from_mqtt() -> AppConfig:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 1. Prepare kwargs for the internal rustuya-bridge from environment variables
+    bridge_kwargs = {}
+    
+    env_mapping = {
+        "MQTT_BROKER": "mqtt_broker",
+        "STATE_FILE": "state_file",
+        "CONFIG": "config_path",
+        "LOG_LEVEL": "log_level",
+        "MQTT_ROOT_TOPIC": "mqtt_root_topic",
+        "MQTT_COMMAND_TOPIC": "mqtt_command_topic",
+        "MQTT_EVENT_TOPIC": "mqtt_event_topic",
+        "MQTT_CLIENT_ID": "mqtt_client_id",
+        "MQTT_MESSAGE_TOPIC": "mqtt_message_topic",
+        "MQTT_PAYLOAD_TEMPLATE": "mqtt_payload_template",
+        "MQTT_SCANNER_TOPIC": "mqtt_scanner_topic"
+    }
+    
+    for env_key, kwarg_key in env_mapping.items():
+        if val := os.getenv(env_key):
+            bridge_kwargs[kwarg_key] = val
+            
+    # Set fallback defaults for essential paths if not provided
+    bridge_kwargs.setdefault("mqtt_broker", "localhost")
+    bridge_kwargs.setdefault("state_file", str(DATA_DIR / "rustuya.json"))
+    bridge_kwargs.setdefault("config_path", str(DATA_DIR / "config.json"))
+    bridge_kwargs.setdefault("log_level", "info")
+
+    # Handle special types
+    if "MQTT_RETAIN" in os.environ:
+        bridge_kwargs["mqtt_retain"] = os.environ["MQTT_RETAIN"].lower() in ("true", "1", "yes", "t")
+        
+    if "SAVE_DEBOUNCE_SECS" in os.environ:
+        try:
+            bridge_kwargs["save_debounce_secs"] = int(os.environ["SAVE_DEBOUNCE_SECS"])
+        except ValueError:
+            pass
+
+    bridge = PyBridgeServer(**bridge_kwargs)
+    bridge_task = asyncio.create_task(bridge.start_async())
+    logger.info("Internal rustuya-bridge started.")
+
+    # 2. Wait for config to be published via MQTT and start listener
     state.config = await fetch_config_from_mqtt()
     task = asyncio.create_task(mqtt_listener())
+    
     yield
+    
+    # 3. Shutdown
     task.cancel()
+    bridge_task.cancel()
+    logger.info("Internal rustuya-bridge stopped.")
 
 
 app = FastAPI(lifespan=lifespan)

@@ -36,6 +36,8 @@ class AppConfig:
     mqtt_broker:         str       = "localhost"
     mqtt_port:           int       = 1883
     mqtt_root_topic:     str       = "rustuya"
+    mqtt_user:           str | None = None
+    mqtt_password:       str | None = None
     mqtt_command_topic:  str       = "{root}/command"
     mqtt_event_topic:    str       = "{root}/event/{type}/{id}"
     mqtt_message_topic:  str       = "{root}/{level}/{id}"
@@ -52,6 +54,8 @@ class AppConfig:
                 self.mqtt_port = int(rest[0])
                 
         self.mqtt_root_topic    = data.get("mqtt_root_topic",    self.mqtt_root_topic)
+        self.mqtt_user          = data.get("mqtt_user",          self.mqtt_user)
+        self.mqtt_password      = data.get("mqtt_password",      self.mqtt_password)
         self.mqtt_command_topic = data.get("mqtt_command_topic", self.mqtt_command_topic)
         self.mqtt_event_topic   = data.get("mqtt_event_topic",   self.mqtt_event_topic)
         self.mqtt_message_topic = data.get("mqtt_message_topic", self.mqtt_message_topic)
@@ -278,7 +282,12 @@ async def mqtt_listener() -> None:
     while True:
         cfg = state.config
         try:
-            async with aiomqtt.Client(hostname=cfg.mqtt_broker, port=cfg.mqtt_port) as client:
+            async with aiomqtt.Client(
+                hostname=cfg.mqtt_broker, 
+                port=cfg.mqtt_port,
+                username=cfg.mqtt_user,
+                password=cfg.mqtt_password
+            ) as client:
                 state.mqtt_client    = client
                 state.mqtt_connected = True
                 logger.info("MQTT connected: %s:%d", cfg.mqtt_broker, cfg.mqtt_port)
@@ -422,7 +431,12 @@ async def fetch_config_from_mqtt() -> AppConfig:
     """Subscribe to the bridge config topic and return parsed AppConfig."""
     cfg = AppConfig()
     logger.info("Fetching config from %s", CONFIG_DISCOVERY_TOPIC)
-    async with aiomqtt.Client(hostname=cfg.mqtt_broker, port=cfg.mqtt_port) as client:
+    async with aiomqtt.Client(
+        hostname=cfg.mqtt_broker, 
+        port=cfg.mqtt_port,
+        username=cfg.mqtt_user,
+        password=cfg.mqtt_password
+    ) as client:
         await client.subscribe(CONFIG_DISCOVERY_TOPIC)
         async with asyncio.timeout(5.0):
             async for message in client.messages:
@@ -444,6 +458,8 @@ async def lifespan(app: FastAPI):
         "STATE_FILE": "state_file",
         "CONFIG": "config_path",
         "LOG_LEVEL": "log_level",
+        "MQTT_USER": "mqtt_user",
+        "MQTT_PASSWORD": "mqtt_password",
         "MQTT_ROOT_TOPIC": "mqtt_root_topic",
         "MQTT_COMMAND_TOPIC": "mqtt_command_topic",
         "MQTT_EVENT_TOPIC": "mqtt_event_topic",

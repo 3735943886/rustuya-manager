@@ -72,9 +72,9 @@ Open your browser and navigate to `http://localhost:8373`.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MQTT_BROKER` | Address of your MQTT broker | `localhost` |
-| `TZ` | Timezone | `Asia/Seoul` |
-| `DATA_DIR` | Path to store config & device states | `/data` |
+| `MQTT_BROKER` | Address of your MQTT broker | `localhost:1883` |
+| `MQTT_USER` | MQTT username (optional) | `None` |
+| `MQTT_PASSWORD` | MQTT password (optional) | `None` |
 | `LOG_LEVEL` | Bridge logging level (`debug`, `info`, `warn`) | `info` |
 
 ## Manual Installation (Development)

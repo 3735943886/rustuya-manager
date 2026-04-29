@@ -450,7 +450,12 @@ async def lifespan(app: FastAPI):
             pass
 
     bridge = PyBridgeServer(**bridge_kwargs)
-    bridge_task = asyncio.create_task(bridge.start_async())
+
+    # Wrap in a coroutine to avoid TypeError since start_async returns a Future
+    async def start_bridge():
+        await bridge.start_async()
+
+    bridge_task = asyncio.create_task(start_bridge())
     logger.info("Internal rustuya-bridge started.")
 
     # 2. Wait for config to be published via MQTT and start listener

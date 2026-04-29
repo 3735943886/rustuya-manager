@@ -40,9 +40,10 @@ ENV DATA_DIR=/data
 # Create data directory
 RUN mkdir -p /data && chmod 777 /data
 
-# Install minimal shared libraries for runtime (for Pillow)
+# Install minimal shared libraries for runtime (for Pillow) and tzdata for timezone support
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg62-turbo \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Define volume for data persistence

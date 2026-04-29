@@ -35,28 +35,31 @@ BRIDGE_ACTIONS = {"add", "remove", "status", "query", "get", "delete"}
 class AppConfig:
     mqtt_broker:         str       = "localhost"
     mqtt_port:           int       = 1883
-    root_topic:          str       = "rustuya"
+    mqtt_root_topic:     str       = "rustuya"
     mqtt_command_topic:  str       = "{root}/command"
     mqtt_event_topic:    str       = "{root}/event/{type}/{id}"
     mqtt_message_topic:  str       = "{root}/{level}/{id}"
     mqtt_scanner_topic:  str       = "{root}/scanner"
 
     def update_from_dict(self, data: dict) -> None:
-        broker = data.get("mqtt_broker", "localhost:1883")
-        if "://" in broker:
-            broker = broker.split("://")[-1]
-        host, *rest = broker.split(":")
-        self.mqtt_broker        = host
-        self.mqtt_port          = int(rest[0]) if rest else 1883
-        self.root_topic         = data.get("mqtt_root_topic",    "rustuya")
-        self.mqtt_command_topic = data.get("mqtt_command_topic", "{root}/command")
-        self.mqtt_event_topic   = data.get("mqtt_event_topic",   "{root}/event/{type}/{id}")
-        self.mqtt_message_topic = data.get("mqtt_message_topic", "{root}/{level}/{id}")
-        self.mqtt_scanner_topic = data.get("mqtt_scanner_topic", "{root}/scanner")
+        broker = data.get("mqtt_broker")
+        if broker:
+            if "://" in broker:
+                broker = broker.split("://")[-1]
+            host, *rest = broker.split(":")
+            self.mqtt_broker = host
+            if rest:
+                self.mqtt_port = int(rest[0])
+                
+        self.mqtt_root_topic    = data.get("mqtt_root_topic",    self.mqtt_root_topic)
+        self.mqtt_command_topic = data.get("mqtt_command_topic", self.mqtt_command_topic)
+        self.mqtt_event_topic   = data.get("mqtt_event_topic",   self.mqtt_event_topic)
+        self.mqtt_message_topic = data.get("mqtt_message_topic", self.mqtt_message_topic)
+        self.mqtt_scanner_topic = data.get("mqtt_scanner_topic", self.mqtt_scanner_topic)
 
     def format(self, template: str, **kwargs) -> str:
         """Universal topic/payload formatter with global root and common defaults."""
-        res = template.replace("{root}", self.root_topic)
+        res = template.replace("{root}", self.mqtt_root_topic)
         ctx = {
             "id": "", "name": "", "cid": "", "level": "", "type": "",
             "dp": "", "action": "", "timestamp": int(time.time()),
@@ -85,6 +88,7 @@ class AppState:
     config:               AppConfig         = field(default_factory=AppConfig)
     devices_map:          dict              = field(default_factory=dict)
     websocket_connections: set[WebSocket]   = field(default_factory=set)
+    background_tasks:     set[asyncio.Task] = field(default_factory=set)
     mqtt_client:          aiomqtt.Client | None = None
     mqtt_connected:       bool              = False
 
@@ -103,11 +107,12 @@ async def broadcast(message: dict) -> None:
         *(ws.send_text(payload) for ws in state.websocket_connections),
         return_exceptions=True,
     )
-    dead = {
+    dead = [
         ws for ws, r in zip(list(state.websocket_connections), results)
         if isinstance(r, Exception)
-    }
-    state.websocket_connections -= dead
+    ]
+    for ws in dead:
+        state.websocket_connections.discard(ws)
 
 
 async def send_to(websocket: WebSocket, message: dict) -> None:
@@ -122,13 +127,17 @@ async def send_to(websocket: WebSocket, message: dict) -> None:
 # ---------------------------------------------------------------------------
 def extract_devices(payload: dict) -> dict | None:
     """Extract device list/dict from various payload shapes."""
-    devs = payload.get("devices") or payload.get("data", {}).get("devices")
-    if "devices" not in payload and not (
-        isinstance(payload.get("data"), dict) and "devices" in payload["data"]
-    ):
+    devs = payload.get("devices")
+    if devs is None:
+        data = payload.get("data")
+        if isinstance(data, dict):
+            devs = data.get("devices")
+            
+    if devs is None:
         return None
+        
     if isinstance(devs, list):
-        return {d["id"]: d for d in devs if "id" in d}
+        return {d["id"]: d for d in devs if isinstance(d, dict) and "id" in d}
     if isinstance(devs, dict):
         return devs
     return {}
@@ -170,7 +179,7 @@ def classify_mqtt_topic(topic: str) -> tuple[str, dict[str, str]]:
     ]
     
     for template, base_type in rules:
-        m = _match_template(template, cfg.root_topic, topic)
+        m = _match_template(template, cfg.mqtt_root_topic, topic)
         if m is None: continue
         
         # Resolve specific subtype
@@ -253,14 +262,21 @@ def handle_mqtt_message(
     return False, None, False
 
 
+def decode_payload(message) -> object:
+    try:
+        return json.loads(message.payload.decode())
+    except Exception:
+        return message.payload.decode()
+
+
 # ---------------------------------------------------------------------------
 # MQTT listener
 # ---------------------------------------------------------------------------
 async def mqtt_listener() -> None:
-    cfg             = state.config
     reconnect_delay = 5
 
     while True:
+        cfg = state.config
         try:
             async with aiomqtt.Client(hostname=cfg.mqtt_broker, port=cfg.mqtt_port) as client:
                 state.mqtt_client    = client
@@ -268,14 +284,11 @@ async def mqtt_listener() -> None:
                 logger.info("MQTT connected: %s:%d", cfg.mqtt_broker, cfg.mqtt_port)
                 await broadcast({"type": "mqtt_status", "connected": True})
 
-                await client.subscribe(f"{cfg.root_topic}/#")
+                await client.subscribe(f"{cfg.mqtt_root_topic}/#")
 
                 async for message in client.messages:
                     topic = str(message.topic)
-                    try:
-                        payload = json.loads(message.payload.decode())
-                    except Exception:
-                        payload = message.payload.decode()
+                    payload = decode_payload(message)
 
                     topic_type, captured_vars          = classify_mqtt_topic(topic)
                     if topic_type in ("command", "unknown"):
@@ -341,9 +354,14 @@ async def run_wizard(user_code: str) -> None:
         await asyncio.to_thread(postprocess_devices, tuyadevices, "all")
 
         await wizard_update("Saving devices...")
-        CLOUD_PATH.write_text(json.dumps(tuyadevices, indent=4, ensure_ascii=False), encoding="utf-8")
+        await asyncio.to_thread(
+            CLOUD_PATH.write_text, 
+            json.dumps(tuyadevices, indent=4, ensure_ascii=False), 
+            encoding="utf-8"
+        )
 
-        await wizard_update("Done!", running=False, **load_init_data())
+        init_data = await load_init_data()
+        await wizard_update("Done!", running=False, **init_data)
 
     except Exception as e:
         logger.error("Wizard error: %s", e)
@@ -353,19 +371,23 @@ async def run_wizard(user_code: str) -> None:
 # ---------------------------------------------------------------------------
 # Init data / WS command
 # ---------------------------------------------------------------------------
-def _load_json(path: Path, default=None):
+async def _load_json(path: Path, default=None):
     try:
-        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+        if await asyncio.to_thread(path.exists):
+            content = await asyncio.to_thread(path.read_text, encoding="utf-8")
+            return json.loads(content)
+        return default
     except Exception as e:
         logger.error("Error reading %s: %s", path, e)
         return default
 
 
-def load_init_data() -> dict:
-    raw = _load_json(CLOUD_PATH, [])
+async def load_init_data() -> dict:
+    raw = await _load_json(CLOUD_PATH, [])
     items = raw if isinstance(raw, list) else list(raw.values())
-    cloud_devices = {d["id"]: d for d in items if "id" in d}
-    user_code     = (_load_json(CREDS_PATH, {}) or {}).get("user_code", "")
+    cloud_devices = {d["id"]: d for d in items if isinstance(d, dict) and "id" in d}
+    creds = await _load_json(CREDS_PATH, {})
+    user_code = creds.get("user_code", "") if isinstance(creds, dict) else ""
     return {"cloud_devices": cloud_devices, "user_code": user_code}
 
 
@@ -388,7 +410,9 @@ async def handle_ws_command(cmd: dict, websocket: WebSocket) -> None:
         return
 
     if action == "wizard_start":
-        asyncio.create_task(run_wizard(payload.get("user_code", "")))
+        task = asyncio.create_task(run_wizard(payload.get("user_code", "")))
+        state.background_tasks.add(task)
+        task.add_done_callback(state.background_tasks.discard)
 
 
 # ---------------------------------------------------------------------------
@@ -485,11 +509,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     state.websocket_connections.add(websocket)
     try:
+        init_data = await load_init_data()
         await websocket.send_text(json.dumps({
             "type":           "init",
             "devices":        state.devices_map,
             "mqtt_connected": state.mqtt_connected,
-            **load_init_data(),
+            **init_data,
         }))
         async for raw in websocket.iter_text():
             await handle_ws_command(json.loads(raw), websocket)

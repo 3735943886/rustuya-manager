@@ -9,7 +9,6 @@ config.json
 *.pyo
 
 # Virtual environments
-web/venv/
 .venv/
 
 # Env files

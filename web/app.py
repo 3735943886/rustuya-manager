@@ -291,6 +291,7 @@ def decode_payload(message) -> object:
 # ---------------------------------------------------------------------------
 async def mqtt_listener() -> None:
     reconnect_delay = 5
+    MAX_DELAY = 60
 
     while True:
         cfg = state.config
@@ -303,6 +304,7 @@ async def mqtt_listener() -> None:
             ) as client:
                 state.mqtt_client    = client
                 state.mqtt_connected = True
+                reconnect_delay      = 5  # Reset delay on successful connection
                 logger.info("MQTT connected: %s:%d", cfg.mqtt_broker, cfg.mqtt_port)
                 await broadcast({"type": "mqtt_status", "connected": True})
 
@@ -336,8 +338,10 @@ async def mqtt_listener() -> None:
 
         except aiomqtt.MqttError as e:
             logger.warning("MQTT error: %s — retrying in %ds", e, reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, MAX_DELAY)
         except Exception as e:
             logger.error("Unexpected MQTT error: %s", e)
+            reconnect_delay = min(reconnect_delay * 2, MAX_DELAY)
         finally:
             state.mqtt_client    = None
             state.mqtt_connected = False

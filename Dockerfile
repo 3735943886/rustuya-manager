@@ -6,8 +6,6 @@ WORKDIR /app
 # Install minimal system packages for building
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    libjpeg-dev \
-    zlib1g-dev \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -40,9 +38,8 @@ ENV DATA_DIR=/data
 # Create data directory
 RUN mkdir -p /data && chmod 777 /data
 
-# Install minimal shared libraries for runtime (for Pillow) and tzdata for timezone support
+# Install tzdata for timezone support
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libjpeg62-turbo \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 

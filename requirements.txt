@@ -12,7 +12,6 @@ websockets
 
 # Tuya authentication & device wizard
 cryptography
-pillow
 tuyawizard
 
 # Rustuya Bridge

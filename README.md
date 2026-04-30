@@ -41,8 +41,6 @@ services:
     container_name: rustuya-manager
     restart: unless-stopped
     network_mode: host
-    ports:
-      - "8373:8373"
     volumes:
       - ./data:/data
 ```
@@ -58,7 +56,6 @@ docker run -d \
   --name rustuya-manager \
   --restart unless-stopped \
   --network host \
-  -p 8373:8373 \
   -v $(pwd)/data:/data \
   ghcr.io/3735943886/rustuya-manager:latest
 ```

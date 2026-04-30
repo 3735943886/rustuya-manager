@@ -458,8 +458,7 @@ async def fetch_config_from_mqtt(cfg: AppConfig | None = None) -> tuple[AppConfi
                 hostname=cfg.mqtt_broker, 
                 port=cfg.mqtt_port,
                 username=cfg.mqtt_user,
-                password=cfg.mqtt_password,
-                connect_timeout=5.0
+                password=cfg.mqtt_password
             ) as client:
                 await client.subscribe(CONFIG_DISCOVERY_TOPIC)
                 async with asyncio.timeout(5.0):

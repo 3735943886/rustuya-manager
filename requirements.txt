@@ -16,4 +16,5 @@ pillow
 tuyawizard
 
 # Rustuya Bridge
+rustuya
 git+https://github.com/3735943886/rustuya-bridge.git#subdirectory=python

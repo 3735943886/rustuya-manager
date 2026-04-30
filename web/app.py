@@ -1,23 +1,23 @@
 import asyncio
 import json
 import logging
+import os
 import time
-from dataclasses import dataclass, field
-from pathlib import Path
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field, fields
+from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+import aiomqtt
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-import aiomqtt
 from pyrustuyabridge import PyBridgeServer
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("rustuya-web")
+logger = logging.getLogger("rustuya-manager")
 
-import os
 # ---------------------------------------------------------------------------
-# Paths
+# Constants & Paths
 # ---------------------------------------------------------------------------
 BASE_DIR   = Path(__file__).resolve().parent
 DATA_DIR   = Path(os.getenv("DATA_DIR", BASE_DIR.parent))
@@ -26,6 +26,22 @@ CREDS_PATH = DATA_DIR / "tuyacreds.json"
 
 CONFIG_DISCOVERY_TOPIC = "rustuya/bridge/config"
 BRIDGE_ACTIONS = {"add", "remove", "status", "query", "get", "delete"}
+
+ENV_TO_KWARG = {
+    "MQTT_BROKER": "mqtt_broker",
+    "STATE_FILE": "state_file",
+    "CONFIG": "config_path",
+    "LOG_LEVEL": "log_level",
+    "MQTT_USER": "mqtt_user",
+    "MQTT_PASSWORD": "mqtt_password",
+    "MQTT_ROOT_TOPIC": "mqtt_root_topic",
+    "MQTT_COMMAND_TOPIC": "mqtt_command_topic",
+    "MQTT_EVENT_TOPIC": "mqtt_event_topic",
+    "MQTT_CLIENT_ID": "mqtt_client_id",
+    "MQTT_MESSAGE_TOPIC": "mqtt_message_topic",
+    "MQTT_PAYLOAD_TEMPLATE": "mqtt_payload_template",
+    "MQTT_SCANNER_TOPIC": "mqtt_scanner_topic"
+}
 
 
 # ---------------------------------------------------------------------------
@@ -44,8 +60,7 @@ class AppConfig:
     mqtt_scanner_topic:  str       = "{root}/scanner"
 
     def update_from_dict(self, data: dict) -> None:
-        broker = data.get("mqtt_broker")
-        if broker:
+        if broker := data.get("mqtt_broker"):
             if "://" in broker:
                 broker = broker.split("://")[-1]
             host, *rest = broker.split(":")
@@ -53,13 +68,10 @@ class AppConfig:
             if rest:
                 self.mqtt_port = int(rest[0])
                 
-        self.mqtt_root_topic    = data.get("mqtt_root_topic",    self.mqtt_root_topic)
-        self.mqtt_user          = data.get("mqtt_user",          self.mqtt_user)
-        self.mqtt_password      = data.get("mqtt_password",      self.mqtt_password)
-        self.mqtt_command_topic = data.get("mqtt_command_topic", self.mqtt_command_topic)
-        self.mqtt_event_topic   = data.get("mqtt_event_topic",   self.mqtt_event_topic)
-        self.mqtt_message_topic = data.get("mqtt_message_topic", self.mqtt_message_topic)
-        self.mqtt_scanner_topic = data.get("mqtt_scanner_topic", self.mqtt_scanner_topic)
+        for f in fields(self):
+            name = f.name
+            if name not in ("mqtt_broker", "mqtt_port") and name in data:
+                setattr(self, name, data[name])
 
     def format(self, template: str, **kwargs) -> str:
         """Universal topic/payload formatter with global root and common defaults."""
@@ -103,27 +115,21 @@ state = AppState()
 # ---------------------------------------------------------------------------
 # WebSocket helpers
 # ---------------------------------------------------------------------------
-async def broadcast(message: dict) -> None:
-    if not state.websocket_connections:
-        return
-    payload = json.dumps(message)
-    results = await asyncio.gather(
-        *(ws.send_text(payload) for ws in state.websocket_connections),
-        return_exceptions=True,
-    )
-    dead = [
-        ws for ws, r in zip(list(state.websocket_connections), results)
-        if isinstance(r, Exception)
-    ]
-    for ws in dead:
+async def _send_raw(ws: WebSocket, payload: str) -> None:
+    try:
+        await ws.send_text(payload)
+    except Exception:
         state.websocket_connections.discard(ws)
 
 
-async def send_to(websocket: WebSocket, message: dict) -> None:
-    try:
-        await websocket.send_text(json.dumps(message))
-    except Exception:
-        state.websocket_connections.discard(websocket)
+async def broadcast(message: dict) -> None:
+    if state.websocket_connections:
+        payload = json.dumps(message)
+        await asyncio.gather(*(_send_raw(ws, payload) for ws in list(state.websocket_connections)))
+
+
+async def send_to(ws: WebSocket, message: dict) -> None:
+    await _send_raw(ws, json.dumps(message))
 
 
 # ---------------------------------------------------------------------------
@@ -132,10 +138,8 @@ async def send_to(websocket: WebSocket, message: dict) -> None:
 def extract_devices(payload: dict) -> dict | None:
     """Extract device list/dict from various payload shapes."""
     devs = payload.get("devices")
-    if devs is None:
-        data = payload.get("data")
-        if isinstance(data, dict):
-            devs = data.get("devices")
+    if devs is None and isinstance(data := payload.get("data"), dict):
+        devs = data.get("devices")
             
     if devs is None:
         return None
@@ -195,6 +199,57 @@ def classify_mqtt_topic(topic: str) -> tuple[str, dict[str, str]]:
     return "unknown", {}
 
 
+def _handle_response(did: str, action: str | None, payload: dict) -> tuple[bool, dict | None, bool]:
+    devs = extract_devices(payload)
+    if devs is not None:
+        state.devices_map = devs
+        return True, dict(state.devices_map), False
+
+    status = str(payload.get("status", "")).lower()
+    is_success = status in ("success", "ok") or payload.get("status") is True
+
+    if action == "remove" and is_success:
+        state.devices_map.pop(did, None)
+        logger.info("Removed device %s from local state", did)
+        return True, dict(state.devices_map), True
+
+    if action == "add" and is_success:
+        logger.info("Device add confirmed, refreshing status")
+        return False, None, True
+
+    return False, None, False
+
+
+def _handle_event_error(
+    did: str, topic_type: str, action: str | None, payload: object, captured_vars: dict[str, str]
+) -> tuple[bool, dict | None, bool]:
+    if action:  # bridge command echo, not a device update
+        return False, None, False
+
+    filtered = {"status": "online"} if topic_type == "event" else {}
+    if "dp" in captured_vars:
+        # Per-DP mode: topic contains {dp} and potentially {value}
+        dp = captured_vars["dp"]
+        val = payload if payload is not None and payload != "" else captured_vars.get("value")
+        filtered = {dp: val}
+    elif isinstance(payload, dict):
+        # Bulk mode: payload contains dict of DPs
+        JUNK = {"errorCode", "errorMsg", "payloadStr", "id", "action"}
+        filtered = {k: v for k, v in payload.items() if k not in JUNK}
+        if topic_type == "error" and "errorCode" in payload:
+            filtered["status"] = "online" if payload["errorCode"] == 0 else str(payload["errorCode"])
+    else:
+        return False, None, False
+
+    if did in state.devices_map:
+        state.devices_map[did].update(filtered)
+    else:
+        logger.info("Discovered device via %s: %s (%s)", topic_type, filtered.get("name", "?"), did)
+        state.devices_map[did] = {**filtered, "id": did}
+
+    return True, dict(state.devices_map), False
+
+
 def handle_mqtt_message(
     topic: str, payload: object, topic_type: str, captured_vars: dict[str, str]
 ) -> tuple[bool, dict | None, bool]:
@@ -202,7 +257,7 @@ def handle_mqtt_message(
     Update devices_map from an MQTT message.
     Returns: (devices_updated, snapshot | None, should_request_status)
     """
-    did    = captured_vars.get("id")
+    did = captured_vars.get("id")
     action = None
     if isinstance(payload, dict):
         action = payload.get("action")
@@ -215,62 +270,20 @@ def handle_mqtt_message(
         return False, None, False
 
     if topic_type == "response" and isinstance(payload, dict):
-        devs = extract_devices(payload)
-        if devs is not None:
-            state.devices_map = devs
-            return True, dict(state.devices_map), False
-
-        status     = str(payload.get("status", "")).lower()
-        is_success = status in ("success", "ok") or payload.get("status") is True
-
-        if action == "remove" and is_success:
-            state.devices_map.pop(did, None)
-            logger.info("Removed device %s from local state", did)
-            return True, dict(state.devices_map), True
-
-        if action == "add" and is_success:
-            logger.info("Device add confirmed, refreshing status")
-            return False, None, True
-
-        return False, None, False
+        return _handle_response(did, action, payload)
 
     if topic_type in ("error", "event"):
-        if action:  # bridge command echo, not a device update
-            return False, None, False
-
-        filtered = {"status": "online"} if topic_type == "event" else {}
-        if "dp" in captured_vars:
-            # Per-DP mode: topic contains {dp} and potentially {value}
-            dp = captured_vars["dp"]
-            # Priority: payload > captured value segment
-            val = payload if payload is not None and payload != "" else captured_vars.get("value")
-            filtered = {dp: val}
-        elif isinstance(payload, dict):
-            # Bulk mode: payload contains dict of DPs
-            JUNK = {"errorCode", "errorMsg", "payloadStr", "id", "action"}
-            filtered = {k: v for k, v in payload.items() if k not in JUNK}
-            if topic_type == "error" and "errorCode" in payload:
-                filtered["status"] = "online" if payload["errorCode"] == 0 else str(payload["errorCode"])
-        else:
-            # Unknown payload format for event/error
-            return False, None, False
-
-        if did in state.devices_map:
-            state.devices_map[did].update(filtered)
-        else:
-            logger.info("Discovered device via %s: %s (%s)", topic_type, filtered.get("name", "?"), did)
-            state.devices_map[did] = {**filtered, "id": did}
-
-        return True, dict(state.devices_map), False
+        return _handle_event_error(did, topic_type, action, payload, captured_vars)
 
     return False, None, False
 
 
 def decode_payload(message) -> object:
+    payload = message.payload.decode()
     try:
-        return json.loads(message.payload.decode())
+        return json.loads(payload)
     except Exception:
-        return message.payload.decode()
+        return payload
 
 
 # ---------------------------------------------------------------------------
@@ -382,9 +395,9 @@ async def run_wizard(user_code: str) -> None:
 # ---------------------------------------------------------------------------
 async def _load_json(path: Path, default=None):
     try:
-        if await asyncio.to_thread(path.exists):
-            content = await asyncio.to_thread(path.read_text, encoding="utf-8")
-            return json.loads(content)
+        content = await asyncio.to_thread(path.read_text, encoding="utf-8")
+        return json.loads(content)
+    except FileNotFoundError:
         return default
     except Exception as e:
         logger.error("Error reading %s: %s", path, e)
@@ -427,10 +440,10 @@ async def handle_ws_command(cmd: dict, websocket: WebSocket) -> None:
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
-async def fetch_config_from_mqtt() -> AppConfig:
-    """Subscribe to the bridge config topic and return parsed AppConfig."""
-    cfg = AppConfig()
-    logger.info("Fetching config from %s", CONFIG_DISCOVERY_TOPIC)
+async def fetch_config_from_mqtt(cfg: AppConfig | None = None) -> tuple[AppConfig, dict]:
+    """Subscribe to the bridge config topic and return parsed AppConfig and raw data."""
+    cfg = cfg or AppConfig()
+    logger.info("Fetching config from %s (via %s:%d)", CONFIG_DISCOVERY_TOPIC, cfg.mqtt_broker, cfg.mqtt_port)
     async with aiomqtt.Client(
         hostname=cfg.mqtt_broker, 
         port=cfg.mqtt_port,
@@ -444,34 +457,16 @@ async def fetch_config_from_mqtt() -> AppConfig:
                     data = json.loads(message.payload.decode())
                     logger.info("Config received: %s", data)
                     cfg.update_from_dict(data)
-                    return cfg
+                    return cfg, data
     raise RuntimeError(f"No config on {CONFIG_DISCOVERY_TOPIC} — is rustuya-bridge running?")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 1. Prepare kwargs for the internal rustuya-bridge from environment variables
-    bridge_kwargs = {}
-    
-    env_mapping = {
-        "MQTT_BROKER": "mqtt_broker",
-        "STATE_FILE": "state_file",
-        "CONFIG": "config_path",
-        "LOG_LEVEL": "log_level",
-        "MQTT_USER": "mqtt_user",
-        "MQTT_PASSWORD": "mqtt_password",
-        "MQTT_ROOT_TOPIC": "mqtt_root_topic",
-        "MQTT_COMMAND_TOPIC": "mqtt_command_topic",
-        "MQTT_EVENT_TOPIC": "mqtt_event_topic",
-        "MQTT_CLIENT_ID": "mqtt_client_id",
-        "MQTT_MESSAGE_TOPIC": "mqtt_message_topic",
-        "MQTT_PAYLOAD_TEMPLATE": "mqtt_payload_template",
-        "MQTT_SCANNER_TOPIC": "mqtt_scanner_topic"
+    bridge_kwargs = {
+        kwarg: os.environ[env] for env, kwarg in ENV_TO_KWARG.items() if env in os.environ
     }
-    
-    for env_key, kwarg_key in env_mapping.items():
-        if val := os.getenv(env_key):
-            bridge_kwargs[kwarg_key] = val
             
     # Set fallback defaults for essential paths if not provided
     bridge_kwargs.setdefault("mqtt_broker", "localhost")
@@ -498,8 +493,32 @@ async def lifespan(app: FastAPI):
     bridge_task = asyncio.create_task(start_bridge())
     logger.info("Internal rustuya-bridge started.")
 
-    # 2. Wait for config to be published via MQTT and start listener
-    state.config = await fetch_config_from_mqtt()
+    # 2. Prepare initial config for discovery (from file if exists, then env)
+    config_path = Path(bridge_kwargs.get("config_path", DATA_DIR / "config.json"))
+    init_cfg = AppConfig()
+    if config_path.exists():
+        try:
+            init_cfg.update_from_dict(json.loads(config_path.read_text(encoding="utf-8")))
+            logger.info("Pre-loaded broker settings from %s", config_path)
+        except Exception:
+            pass
+
+    # Env overrides (Priority: Env > File > Default)
+    explicit_env = {k: os.environ[e] for e, k in ENV_TO_KWARG.items() if e in os.environ}
+    init_cfg.update_from_dict(explicit_env)
+
+    # 3. Wait for config to be published via MQTT and start listener
+    state.config, config_data = await fetch_config_from_mqtt(init_cfg)
+    
+    # Save config to file if it doesn't exist
+    if not config_path.exists():
+        logger.info("Saving received config to %s", config_path)
+        await asyncio.to_thread(
+            config_path.write_text,
+            json.dumps(config_data, indent=4, ensure_ascii=False),
+            encoding="utf-8"
+        )
+
     task = asyncio.create_task(mqtt_listener())
     
     yield

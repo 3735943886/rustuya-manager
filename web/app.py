@@ -477,18 +477,34 @@ async def fetch_config_from_mqtt(cfg: AppConfig | None = None) -> tuple[AppConfi
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Prepare kwargs for the internal rustuya-bridge from environment variables
+    # 1. Determine config path
+    config_path = Path(os.environ.get("CONFIG", DATA_DIR / "config.json"))
+    
+    # 2. Start with defaults for bridge
     bridge_kwargs = {
+        "mqtt_broker": "localhost",
+        "state_file": str(DATA_DIR / "rustuya.json"),
+        "config_path": str(config_path),
+        "log_level": "info",
+    }
+    
+    # 3. Load from config.json if it exists
+    if config_path.exists():
+        try:
+            file_config = json.loads(config_path.read_text(encoding="utf-8"))
+            if isinstance(file_config, dict):
+                bridge_kwargs.update(file_config)
+                logger.info("Loaded bridge settings from %s", config_path)
+        except Exception as e:
+            logger.warning("Failed to read config file %s: %s", config_path, e)
+
+    # 4. Override with environment variables (Priority: Env > File)
+    env_overrides = {
         kwarg: os.environ[env] for env, kwarg in ENV_TO_KWARG.items() if env in os.environ
     }
-            
-    # Set fallback defaults for essential paths if not provided
-    bridge_kwargs.setdefault("mqtt_broker", "localhost")
-    bridge_kwargs.setdefault("state_file", str(DATA_DIR / "rustuya.json"))
-    bridge_kwargs.setdefault("config_path", str(DATA_DIR / "config.json"))
-    bridge_kwargs.setdefault("log_level", "info")
-
-    # Handle special types
+    bridge_kwargs.update(env_overrides)
+    
+    # Handle special types from env
     if "MQTT_RETAIN" in os.environ:
         bridge_kwargs["mqtt_retain"] = os.environ["MQTT_RETAIN"].lower() in ("true", "1", "yes", "t")
         
@@ -498,28 +514,18 @@ async def lifespan(app: FastAPI):
         except ValueError:
             pass
 
+    # 5. Initialize and start bridge
     bridge = PyBridgeServer(**bridge_kwargs)
 
-    # Wrap in a coroutine to avoid TypeError since start_async returns a Future
     async def start_bridge():
         await bridge.start_async()
 
     bridge_task = asyncio.create_task(start_bridge())
-    logger.info("Internal rustuya-bridge started.")
+    logger.info("Internal rustuya-bridge started with: %s", {k: v for k, v in bridge_kwargs.items() if "password" not in k})
 
-    # 2. Prepare initial config for discovery (from file if exists, then env)
-    config_path = Path(bridge_kwargs.get("config_path", DATA_DIR / "config.json"))
+    # 6. Prepare initial config for manager discovery
     init_cfg = AppConfig()
-    if config_path.exists():
-        try:
-            init_cfg.update_from_dict(json.loads(config_path.read_text(encoding="utf-8")))
-            logger.info("Pre-loaded broker settings from %s", config_path)
-        except Exception:
-            pass
-
-    # Env overrides (Priority: Env > File > Default)
-    explicit_env = {k: os.environ[e] for e, k in ENV_TO_KWARG.items() if e in os.environ}
-    init_cfg.update_from_dict(explicit_env)
+    init_cfg.update_from_dict(bridge_kwargs)
 
     # 3. Wait for config to be published via MQTT and start listener
     state.config, config_data = await fetch_config_from_mqtt(init_cfg)

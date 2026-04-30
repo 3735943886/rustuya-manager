@@ -27,6 +27,10 @@ CREDS_PATH = DATA_DIR / "tuyacreds.json"
 CONFIG_DISCOVERY_TOPIC = "rustuya/bridge/config"
 BRIDGE_ACTIONS = {"add", "remove", "status", "query", "get", "delete"}
 
+# MQTT Backoff Constants
+INITIAL_RETRY_DELAY_SECS = 10
+MAX_RETRY_DELAY_SECS = 1280
+
 ENV_TO_KWARG = {
     "MQTT_BROKER": "mqtt_broker",
     "STATE_FILE": "state_file",
@@ -290,8 +294,7 @@ def decode_payload(message) -> object:
 # MQTT listener
 # ---------------------------------------------------------------------------
 async def mqtt_listener() -> None:
-    reconnect_delay = 5
-    MAX_DELAY = 60
+    reconnect_delay = INITIAL_RETRY_DELAY_SECS
 
     while True:
         cfg = state.config
@@ -304,7 +307,7 @@ async def mqtt_listener() -> None:
             ) as client:
                 state.mqtt_client    = client
                 state.mqtt_connected = True
-                reconnect_delay      = 5  # Reset delay on successful connection
+                reconnect_delay      = INITIAL_RETRY_DELAY_SECS  # Reset delay on successful connection
                 logger.info("MQTT connected: %s:%d", cfg.mqtt_broker, cfg.mqtt_port)
                 await broadcast({"type": "mqtt_status", "connected": True})
 
@@ -336,17 +339,16 @@ async def mqtt_listener() -> None:
                         "devices":         snapshot,
                     })
 
-        except aiomqtt.MqttError as e:
-            logger.warning("MQTT error: %s — retrying in %ds", e, reconnect_delay)
-            reconnect_delay = min(reconnect_delay * 2, MAX_DELAY)
-        except Exception as e:
-            logger.error("Unexpected MQTT error: %s", e)
-            reconnect_delay = min(reconnect_delay * 2, MAX_DELAY)
-        finally:
+        except (aiomqtt.MqttError, Exception) as e:
+            level = logger.warning if isinstance(e, aiomqtt.MqttError) else logger.error
+            level("%s: %s — retrying in %ds", type(e).__name__, e, reconnect_delay)
+            
             state.mqtt_client    = None
             state.mqtt_connected = False
             await broadcast({"type": "mqtt_status", "connected": False})
+            
             await asyncio.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, MAX_RETRY_DELAY_SECS)
 
 
 # ---------------------------------------------------------------------------
@@ -445,24 +447,33 @@ async def handle_ws_command(cmd: dict, websocket: WebSocket) -> None:
 # FastAPI app
 # ---------------------------------------------------------------------------
 async def fetch_config_from_mqtt(cfg: AppConfig | None = None) -> tuple[AppConfig, dict]:
-    """Subscribe to the bridge config topic and return parsed AppConfig and raw data."""
+    """Subscribe to the bridge config topic and return parsed AppConfig and raw data with retry."""
     cfg = cfg or AppConfig()
-    logger.info("Fetching config from %s (via %s:%d)", CONFIG_DISCOVERY_TOPIC, cfg.mqtt_broker, cfg.mqtt_port)
-    async with aiomqtt.Client(
-        hostname=cfg.mqtt_broker, 
-        port=cfg.mqtt_port,
-        username=cfg.mqtt_user,
-        password=cfg.mqtt_password
-    ) as client:
-        await client.subscribe(CONFIG_DISCOVERY_TOPIC)
-        async with asyncio.timeout(5.0):
-            async for message in client.messages:
-                if str(message.topic) == CONFIG_DISCOVERY_TOPIC:
-                    data = json.loads(message.payload.decode())
-                    logger.info("Config received: %s", data)
-                    cfg.update_from_dict(data)
-                    return cfg, data
-    raise RuntimeError(f"No config on {CONFIG_DISCOVERY_TOPIC} — is rustuya-bridge running?")
+    reconnect_delay = INITIAL_RETRY_DELAY_SECS
+
+    while True:
+        try:
+            logger.info("Fetching config from %s (via %s:%d)...", CONFIG_DISCOVERY_TOPIC, cfg.mqtt_broker, cfg.mqtt_port)
+            async with aiomqtt.Client(
+                hostname=cfg.mqtt_broker, 
+                port=cfg.mqtt_port,
+                username=cfg.mqtt_user,
+                password=cfg.mqtt_password,
+                connect_timeout=5.0
+            ) as client:
+                await client.subscribe(CONFIG_DISCOVERY_TOPIC)
+                async with asyncio.timeout(5.0):
+                    async for message in client.messages:
+                        if str(message.topic) == CONFIG_DISCOVERY_TOPIC:
+                            data = json.loads(message.payload.decode())
+                            logger.info("Config received: %s", data)
+                            cfg.update_from_dict(data)
+                            return cfg, data
+        except (aiomqtt.MqttError, asyncio.TimeoutError, Exception) as e:
+            reason = "Timeout" if isinstance(e, asyncio.TimeoutError) else str(e)
+            logger.warning("Config fetch failed (%s). Retrying in %ds...", reason, reconnect_delay)
+            await asyncio.sleep(reconnect_delay)
+            reconnect_delay = min(reconnect_delay * 2, MAX_RETRY_DELAY_SECS)
 
 
 @asynccontextmanager

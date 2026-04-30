@@ -5,9 +5,9 @@ WORKDIR /app
 
 # Install minimal system packages for building
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
     git \
     curl \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Rust

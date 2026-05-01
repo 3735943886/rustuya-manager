@@ -563,24 +563,35 @@ function renderDashboard() {
         const tr = document.createElement('tr');
         tr.onclick   = () => openDetails(dev.id);
         tr.className = 'border-b border-slate-700/50 hover:bg-slate-800/40 transition-colors cursor-pointer group';
+        // Mobile: Status/Name/Actions cells hidden, show name+status badge inline in Type cell
+        const statusBadge = deviceErrors[dev.id]
+            ? `<span class="text-red-500 animate-pulse">● err</span>`
+            : hasLive ? `<span class="text-emerald-500">● live</span>` : '';
+        const mobileName = `<div class="sm:hidden text-xs text-slate-400 mt-0.5 truncate max-w-[140px]">
+            ${dev.name || 'Unnamed'}${statusBadge ? ' ' + statusBadge : ''}
+        </div>`;
+
         tr.innerHTML = `
-            <td class="py-4 px-5">
+            <td class="hidden sm:table-cell py-4 px-5">
                 <div class="flex items-center" style="padding-left:${indentPx}rem">
                     ${indentIcon}${renderStatusCell(dev)}
                 </div>
             </td>
-            <td class="py-4 px-5">
+            <td class="py-4 px-3 sm:px-5">
                 <div class="flex items-center text-slate-400 group-hover:text-brandBlue transition-colors">
-                    <i class="fa-solid ${iconType} mr-2 w-4 text-center"></i>
-                    <span class="text-sm font-medium">${typeStr}</span>
+                    <i class="fa-solid ${iconType} mr-2 w-4 text-center shrink-0"></i>
+                    <div class="min-w-0">
+                        <span class="text-sm font-medium">${typeStr}</span>
+                        ${mobileName}
+                    </div>
                 </div>
             </td>
-            <td class="py-4 px-5 text-sm font-medium text-white">
+            <td class="hidden sm:table-cell py-4 px-5 text-sm font-medium text-white">
                 ${dev.name || 'Unnamed Device'}
                 ${deviceErrors[dev.id] ? `<span class="ml-2 text-xs text-red-500 font-normal animate-pulse">● error</span>` : (hasLive ? `<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>` : '')}
             </td>
-            <td class="py-4 px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors">${dev.id}</td>
-            <td class="py-4 px-5 text-right">
+            <td class="py-4 px-3 sm:px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors max-w-[120px] sm:max-w-none truncate">${dev.id}</td>
+            <td class="hidden sm:table-cell py-4 px-5 text-right">
                 <button aria-label="Open device details"
                         class="text-slate-500 hover:text-white p-2 rounded hover:bg-slate-700 transition-colors"
                         onclick="event.stopPropagation(); openDetails('${dev.id}')">

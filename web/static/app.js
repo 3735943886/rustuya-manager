@@ -572,12 +572,12 @@ function renderDashboard() {
         </div>`;
 
         tr.innerHTML = `
-            <td class="hidden sm:table-cell py-4 px-5">
+            <td class="hidden sm:table-cell py-3 sm:py-4 px-5">
                 <div class="flex items-center" style="padding-left:${indentPx}rem">
                     ${indentIcon}${renderStatusCell(dev)}
                 </div>
             </td>
-            <td class="py-4 px-3 sm:px-5">
+            <td class="py-2.5 sm:py-4 px-3 sm:px-5">
                 <div class="flex items-center text-slate-400 group-hover:text-brandBlue transition-colors">
                     <i class="fa-solid ${iconType} mr-2 w-4 text-center shrink-0"></i>
                     <div class="min-w-0">
@@ -590,7 +590,7 @@ function renderDashboard() {
                 ${dev.name || 'Unnamed Device'}
                 ${deviceErrors[dev.id] ? `<span class="ml-2 text-xs text-red-500 font-normal animate-pulse">● error</span>` : (hasLive ? `<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>` : '')}
             </td>
-            <td class="py-4 px-3 sm:px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors max-w-[120px] sm:max-w-none truncate">${dev.id}</td>
+            <td class="py-2.5 sm:py-4 px-3 sm:px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors max-w-[120px] sm:max-w-none truncate">${dev.id}</td>
             <td class="hidden sm:table-cell py-4 px-5 text-right">
                 <button aria-label="Open device details"
                         class="text-slate-500 hover:text-white p-2 rounded hover:bg-slate-700 transition-colors"

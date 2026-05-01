@@ -38,7 +38,7 @@ body {
 
 /* Stats Cards */
 .stat-card {
-    @apply bg-slate-800/40 rounded-xl p-3 sm:p-5 border border-slate-700/50 backdrop-blur-sm transition-all duration-300;
+    @apply bg-slate-800/40 rounded-xl p-2 sm:p-5 border border-slate-700/50 backdrop-blur-sm transition-all duration-300;
 }
 .stat-card:hover {
     @apply border-slate-600 shadow-lg bg-slate-800/60;

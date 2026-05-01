@@ -28,14 +28,14 @@ function showToast(message, level = 'info', duration = 3500) {
 
     const colors = {
         success: 'bg-emerald-600 border-emerald-500',
-        error:   'bg-red-700    border-red-600',
-        info:    'bg-slate-700  border-slate-600',
+        error: 'bg-red-700    border-red-600',
+        info: 'bg-slate-700  border-slate-600',
         warning: 'bg-amber-600  border-amber-500',
     };
     const icons = {
         success: 'fa-circle-check',
-        error:   'fa-circle-xmark',
-        info:    'fa-circle-info',
+        error: 'fa-circle-xmark',
+        info: 'fa-circle-info',
         warning: 'fa-triangle-exclamation',
     };
 
@@ -81,7 +81,7 @@ function renderActivityLog() {
 
 function toggleLogPanel() {
     document.getElementById('log-panel').classList.toggle('translate-x-full');
-    
+
     // Toggle backdrop
     const isVisible = !document.getElementById('log-panel').classList.contains('translate-x-full');
     if (isVisible) {
@@ -171,8 +171,8 @@ function connectWS() {
                     }
                 }
                 const namePart = p.name ? `[${p.name}] ` : '';
-                const idPart   = p.id   ? `(${p.id}) ` : '';
-                const text     = `${namePart}${idPart}${errMsg}`;
+                const idPart = p.id ? `(${p.id}) ` : '';
+                const text = `${namePart}${idPart}${errMsg}`;
 
                 const isRealError = p.errorCode !== 0 && p.status !== 'success';
                 const level = isRealError ? 'error' : 'success';
@@ -217,7 +217,7 @@ function connectWS() {
 
         if (msg.type === 'init' || msg.devices_updated || msg.type === 'status') {
             if (msg.cloud_devices) cloud_devices = msg.cloud_devices;
-            if (msg.devices)       devices_map   = msg.devices;
+            if (msg.devices) devices_map = msg.devices;
             if (msg.mqtt_connected !== undefined) updateMqttBrokerStatus(msg.mqtt_connected);
             if (msg.type === 'init' && msg.user_code) {
                 const el = document.getElementById('wizard-code');
@@ -273,7 +273,7 @@ function updateMqttBrokerStatus(connected) {
 function computeSyncState() {
     const result = { missing: [], mismatched: [], orphaned: [], synced: [] };
     const bridge_ids = Object.keys(devices_map);
-    const cloud_ids  = Object.keys(cloud_devices);
+    const cloud_ids = Object.keys(cloud_devices);
 
     if (!cloud_ids.length) {
         result.synced = Object.values(devices_map);
@@ -315,25 +315,25 @@ function updateSyncStateAndRender() {
 // Stats
 // =============================================================================
 function updateStatsCards() {
-    const missing    = currentSyncData.missing.length;
+    const missing = currentSyncData.missing.length;
     const mismatched = currentSyncData.mismatched.length;
-    const orphaned   = currentSyncData.orphaned.length;
-    const total      = missing + mismatched + orphaned;
+    const orphaned = currentSyncData.orphaned.length;
+    const total = missing + mismatched + orphaned;
 
-    document.getElementById('stat-total').innerText     = Object.keys(devices_map).length;
-    document.getElementById('stat-cloud').innerText     = Object.keys(cloud_devices).length;
-    document.getElementById('stat-synced').innerText    = currentSyncData.synced.length;
+    document.getElementById('stat-total').innerText = Object.keys(devices_map).length;
+    document.getElementById('stat-cloud').innerText = Object.keys(cloud_devices).length;
+    document.getElementById('stat-synced').innerText = currentSyncData.synced.length;
     document.getElementById('stat-conflicts').innerText = total;
 
     const detailEl = document.getElementById('stat-issues-detail');
     if (detailEl) {
         const parts = [];
-        if (missing > 0)    parts.push(`<span class="text-rose-400 font-medium">${missing} Missing</span>`);
+        if (missing > 0) parts.push(`<span class="text-rose-400 font-medium">${missing} Missing</span>`);
         if (mismatched > 0) parts.push(`<span class="text-amber-400 font-medium">${mismatched} Mismatch</span>`);
-        if (orphaned > 0)   parts.push(`<span class="text-slate-400 font-medium">${orphaned} Orphan</span>`);
-        
-        detailEl.innerHTML = parts.length > 0 
-            ? parts.join('<span class="text-slate-600 opacity-50">/</span>') 
+        if (orphaned > 0) parts.push(`<span class="text-slate-400 font-medium">${orphaned} Orphan</span>`);
+
+        detailEl.innerHTML = parts.length > 0
+            ? parts.join('<span class="text-slate-600 opacity-50">/</span>')
             : '<span class="text-slate-500 italic">No issues found</span>';
     }
 }
@@ -415,9 +415,9 @@ function renderSyncPanels() {
 function resolveAll(category, e) {
     if (e) e.stopPropagation();
     const actions = {
-        missing:    (dev)  => submitDeviceBridgeAdd(dev),
+        missing: (dev) => submitDeviceBridgeAdd(dev),
         mismatched: (item) => submitDeviceBridgeAdd(item.cloud),
-        orphaned:   (dev)  => sendCommand('remove', { id: dev.id }),
+        orphaned: (dev) => sendCommand('remove', { id: dev.id }),
     };
     currentSyncData[category].forEach(actions[category]);
 }
@@ -432,9 +432,9 @@ function resolveSingle(category, id, e) {
 }
 
 // Legacy shims for HTML onclick
-const resolveMissing    = (e) => resolveAll('missing', e);
+const resolveMissing = (e) => resolveAll('missing', e);
 const resolveMismatched = (e) => resolveAll('mismatched', e);
-const resolveOrphans    = (e) => resolveAll('orphaned', e);
+const resolveOrphans = (e) => resolveAll('orphaned', e);
 
 function isPrivateIP(ip) {
     if (!ip || typeof ip !== 'string') return false;
@@ -450,12 +450,12 @@ function submitDeviceBridgeAdd(dev) {
     const payload = { id: dev.id, name: dev.name || 'Unnamed' };
     // Sub-device check with standardized fields for the bridge (cid, parent_id)
     if (dev.sub || dev.parent || dev.parent_id || dev.node_id || dev.cid) {
-        payload.cid       = dev.cid || dev.node_id;
+        payload.cid = dev.cid || dev.node_id;
         payload.parent_id = dev.parent_id || dev.parent;
     } else {
         Object.assign(payload, {
-            key:     dev.key || dev.local_key || dev.localkey,
-            ip:      isPrivateIP(dev.ip) ? dev.ip : 'Auto',
+            key: dev.key || dev.local_key || dev.localkey,
+            ip: isPrivateIP(dev.ip) ? dev.ip : 'Auto',
             version: dev.version || 'Auto',
         });
     }
@@ -467,11 +467,11 @@ function submitDeviceBridgeAdd(dev) {
 // =============================================================================
 function buildTree(devices) {
     const rootNodes = [];
-    const childMap  = {};
+    const childMap = {};
     for (const d of devices) {
         const parentId = d.parent || d.parent_id;
         if (parentId) (childMap[parentId] ??= []).push(d);
-        else           rootNodes.push(d);
+        else rootNodes.push(d);
     }
     return { rootNodes, childMap };
 }
@@ -491,7 +491,7 @@ function passesFilter(dev) {
     if (currentFilter === 'all') return true;
     const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
     if (currentFilter === 'subdevice') return isSubDevice;
-    if (currentFilter === 'online')    return !isSubDevice && (dev.status === undefined || dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0);
+    if (currentFilter === 'online') return !isSubDevice && (dev.status === undefined || dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0);
     if (currentFilter === 'offline') {
         const isOffline = dev.status === 'offline' || (typeof dev.status === 'string' && /^\d+$/.test(dev.status) && dev.status !== '0');
         return !isSubDevice && isOffline;
@@ -506,14 +506,14 @@ function renderStatusCell(dev) {
     const errorMsg = deviceErrors[dev.id];
     const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
     const online = dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0;
-    
+
     // Check if status is a non-zero error code
     const isErrorCode = !online && !isSubDevice && typeof dev.status === 'string' && /^\d+$/.test(dev.status);
-    
+
     if (errorMsg || isErrorCode) {
         let text = 'Error';
         if (isErrorCode) text = `Error ${dev.status}`;
-        
+
         return `<span class="status-dot bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></span>
                 <span class="text-sm font-medium text-red-500">${text}</span>`;
     }
@@ -528,7 +528,7 @@ function renderStatusCell(dev) {
 }
 
 function renderDashboard() {
-    const tbody  = document.getElementById('devices-body');
+    const tbody = document.getElementById('devices-body');
     const searchEl = document.getElementById('search-input');
     const search = searchEl ? searchEl.value.toLowerCase() : '';
     tbody.innerHTML = '';
@@ -548,13 +548,13 @@ function renderDashboard() {
     function appendRow(dev, indent) {
         const matches = !search
             || (dev.name || '').toLowerCase().includes(search)
-            || (dev.id   || '').toLowerCase().includes(search);
+            || (dev.id || '').toLowerCase().includes(search);
         if (!matches) return;
 
-        const isZigbee  = !!(dev.sub || dev.parent || dev.parent_id);
-        const typeStr   = isZigbee ? 'Zigbee/BLE' : 'WiFi';
-        const iconType  = isZigbee ? 'fa-network-wired' : 'fa-wifi';
-        const indentPx  = search ? 0 : indent * 2;
+        const isZigbee = !!(dev.sub || dev.parent || dev.parent_id);
+        const typeStr = isZigbee ? 'Zigbee/BLE' : 'WiFi';
+        const iconType = isZigbee ? 'fa-network-wired' : 'fa-wifi';
+        const indentPx = search ? 0 : indent * 2;
         const indentIcon = (indent > 0 && !search)
             ? `<i class="fa-solid fa-level-up-alt fa-rotate-90 text-slate-600 mr-2 opacity-70"></i>`
             : '';
@@ -562,7 +562,7 @@ function renderDashboard() {
         const hasLive = !!liveValues[dev.id];
 
         const tr = document.createElement('tr');
-        tr.onclick   = () => openDetails(dev.id);
+        tr.onclick = () => openDetails(dev.id);
         tr.className = 'border-b border-slate-700/50 hover:bg-slate-800/40 transition-colors cursor-pointer group';
         // Mobile: Status/Name/Actions cells hidden, show name+status badge inline in Type cell
         const statusBadge = deviceErrors[dev.id]
@@ -606,7 +606,7 @@ function renderDashboard() {
 
     const roots = (rootNodes.length === 0 && devices.length > 0) ? devices : rootNodes;
     if (search) devices.forEach(d => appendRow(d, 0));
-    else        roots.forEach(d => appendRow(d, 0));
+    else roots.forEach(d => appendRow(d, 0));
 
     populateParentsSelect();
 }
@@ -636,20 +636,20 @@ function openEditDeviceModal(id) {
     if (!dev) return;
     currentDeviceId = id;
     document.getElementById('modal-title').innerText = 'Edit Device';
-    document.getElementById('dev-id').value    = id;
+    document.getElementById('dev-id').value = id;
     document.getElementById('dev-id').readOnly = true;
-    document.getElementById('dev-name').value  = dev.name || '';
+    document.getElementById('dev-name').value = dev.name || '';
 
     const isZigbee = !!(dev.parent || dev.sub || dev.node_id);
     document.querySelector(`input[name="dev-type"][value="${isZigbee ? 'Zigbee/BLE' : 'WiFi'}"]`).checked = true;
     toggleDeviceFields();
 
     if (isZigbee) {
-        document.getElementById('dev-node').value   = dev.node_id || dev.cid || '';
+        document.getElementById('dev-node').value = dev.node_id || dev.cid || '';
         document.getElementById('dev-parent').value = dev.parent || '';
     } else {
-        document.getElementById('dev-key').value     = dev.key || dev.local_key || '';
-        document.getElementById('dev-ip').value      = dev.ip  || '';
+        document.getElementById('dev-key').value = dev.key || dev.local_key || '';
+        document.getElementById('dev-ip').value = dev.ip || '';
         document.getElementById('dev-version').value = dev.version || '';
     }
     showModal('device-modal');
@@ -667,11 +667,11 @@ function openDeviceImportModal(dev) {
     toggleDeviceFields();
 
     if (isZigbee) {
-        document.getElementById('dev-node').value   = dev.cid || dev.node_id || '';
+        document.getElementById('dev-node').value = dev.cid || dev.node_id || '';
         document.getElementById('dev-parent').value = dev.parent_id || dev.parent || '';
     } else {
-        document.getElementById('dev-key').value     = dev.key || dev.local_key || dev.localkey || '';
-        document.getElementById('dev-ip').value      = isPrivateIP(dev.ip) ? dev.ip : '';
+        document.getElementById('dev-key').value = dev.key || dev.local_key || dev.localkey || '';
+        document.getElementById('dev-ip').value = isPrivateIP(dev.ip) ? dev.ip : '';
         document.getElementById('dev-version').value = dev.version || '';
         if (!document.getElementById('dev-ip').value) {
             document.getElementById('dev-ip').placeholder = 'Auto';
@@ -763,15 +763,15 @@ function toggleDeviceFields() {
 function submitDeviceForm(e) {
     e.preventDefault();
     const payload = {
-        id:   document.getElementById('dev-id').value,
+        id: document.getElementById('dev-id').value,
         name: document.getElementById('dev-name').value,
     };
     if (document.querySelector('input[name="dev-type"]:checked').value === 'WiFi') {
-        payload.key     = document.getElementById('dev-key').value;
-        payload.ip      = document.getElementById('dev-ip').value || 'Auto';
+        payload.key = document.getElementById('dev-key').value;
+        payload.ip = document.getElementById('dev-ip').value || 'Auto';
         payload.version = document.getElementById('dev-version').value || 'Auto';
     } else {
-        payload.cid       = document.getElementById('dev-node').value;
+        payload.cid = document.getElementById('dev-node').value;
         payload.parent_id = document.getElementById('dev-parent').value;
     }
     sendCommand('add', payload);
@@ -780,7 +780,7 @@ function submitDeviceForm(e) {
 }
 
 function populateParentsSelect() {
-    const select  = document.getElementById('dev-parent');
+    const select = document.getElementById('dev-parent');
     const prevVal = select.value;
     select.innerHTML = '<option value="">Select Parent...</option>';
     Object.values(devices_map)
@@ -788,7 +788,7 @@ function populateParentsSelect() {
         .forEach(d => {
             const opt = document.createElement('option');
             opt.value = d.id;
-            opt.text  = `${d.name || 'Unnamed'} (${d.id})`;
+            opt.text = `${d.name || 'Unnamed'} (${d.id})`;
             select.appendChild(opt);
         });
     if (Array.from(select.options).some(o => o.value === prevVal)) select.value = prevVal;
@@ -803,7 +803,7 @@ let _maskedKeyRevealState = {}; // { [uniqueId]: boolean }
 
 function toggleMaskedField(uid) {
     _maskedKeyRevealState[uid] = !_maskedKeyRevealState[uid];
-    const valEl  = document.getElementById(`masked-val-${uid}`);
+    const valEl = document.getElementById(`masked-val-${uid}`);
     const iconEl = document.getElementById(`masked-icon-${uid}`);
     if (!valEl || !iconEl) return;
     const rawVal = valEl.dataset.raw;
@@ -826,7 +826,7 @@ function renderDetailRow(key, val) {
         _maskedKeyRevealState[uid] = false;
         return `<div class="detail-item">
             <span class="detail-label">${key.toUpperCase()}</span>
-            <span class="flex items-center gap-2 min-w-0">
+            <span class="detail-value">
                 <span id="masked-val-${uid}" data-raw="${val}" class="detail-value text-slate-500 tracking-widest">••••••••••••••••</span>
                 <button onclick="toggleMaskedField('${uid}')" title="Show/hide" class="text-slate-500 hover:text-slate-200 transition-colors shrink-0 p-0.5">
                     <i id="masked-icon-${uid}" class="fa-solid fa-eye text-sm"></i>
@@ -841,23 +841,23 @@ function renderDetailRow(key, val) {
 }
 
 function updateDetailsLiveValues(id) {
-    const liveEl   = document.getElementById('live-values-body');
-    const liveSec  = document.getElementById('live-values-section');
-    const errEl    = document.getElementById('device-error-body');
-    const errSec   = document.getElementById('device-error-section');
+    const liveEl = document.getElementById('live-values-body');
+    const liveSec = document.getElementById('live-values-section');
+    const errEl = document.getElementById('device-error-body');
+    const errSec = document.getElementById('device-error-section');
     if (!liveEl || !liveSec || !errEl || !errSec) return;
 
     const dev = devices_map[id];
     const online = dev && (dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0);
     const isErrorCode = dev && !online && typeof dev.status === 'string' && /^\d+$/.test(dev.status);
-    
+
     const errorMsg = deviceErrors[id];
     const hasError = errorMsg || isErrorCode;
 
     if (hasError) {
         errSec.classList.remove('hidden');
         liveSec.classList.add('hidden'); // Hide live values on error
-        
+
         let text = errorMsg || `Error Code: ${dev.status}`;
         errEl.innerHTML = `
             <div class="text-red-300 text-xs leading-relaxed flex items-center gap-2">
@@ -903,7 +903,7 @@ function openDetails(id) {
     updateDetailsLiveValues(id);
 
 
-    document.getElementById('btn-edit').onclick   = () => { closeDetails(); openEditDeviceModal(id); };
+    document.getElementById('btn-edit').onclick = () => { closeDetails(); openEditDeviceModal(id); };
     document.getElementById('btn-delete').onclick = async () => {
         const confirmed = await showConfirm({
             title: 'Delete Device',
@@ -922,7 +922,7 @@ function openDetails(id) {
     };
 
     panel.classList.remove('translate-x-full');
-    
+
     // Show backdrop
     const backdrop = document.getElementById('panel-backdrop');
     if (backdrop) {
@@ -958,9 +958,9 @@ function hidePanelBackdrop() {
 // Mobile Sidebar
 // =============================================================================
 function toggleSidebar() {
-    const sidebar  = document.getElementById('sidebar');
+    const sidebar = document.getElementById('sidebar');
     const backdrop = document.getElementById('sidebar-backdrop');
-    const isOpen   = !sidebar.classList.contains('-translate-x-full');
+    const isOpen = !sidebar.classList.contains('-translate-x-full');
     if (isOpen) {
         sidebar.classList.add('-translate-x-full');
         backdrop.classList.add('hidden');
@@ -999,14 +999,14 @@ function startWizard() {
     document.getElementById('wizard-loading-step').classList.remove('hidden');
     document.getElementById('wizard-spinner').classList.remove('hidden');
     document.getElementById('wizard-status-title').innerText = 'Starting API Login...';
-    document.getElementById('wizard-status-msg').innerText   = 'Please wait.';
+    document.getElementById('wizard-status-msg').innerText = 'Please wait.';
     sendCommand('wizard_start', { user_code: code });
 }
 
 function handleWizardEvent(status) {
     if (status.error) {
         document.getElementById('wizard-status-title').innerHTML = `<span class='text-red-500'>Error</span>`;
-        document.getElementById('wizard-status-msg').innerText   = status.error;
+        document.getElementById('wizard-status-msg').innerText = status.error;
         document.getElementById('wizard-spinner').classList.add('hidden');
         document.getElementById('wizard-qr-container').classList.add('hidden');
         showToast(`Wizard failed: ${status.error}`, 'error', 6000);
@@ -1016,12 +1016,12 @@ function handleWizardEvent(status) {
 
     document.getElementById('wizard-status-title').innerText = status.step;
 
-    const hasQr     = !!status.url;
-    const qrEl      = document.getElementById('wizard-qr-container');
+    const hasQr = !!status.url;
+    const qrEl = document.getElementById('wizard-qr-container');
     const spinnerEl = document.getElementById('wizard-spinner');
 
     qrEl.classList.toggle('hidden', !hasQr);
-    qrEl.classList.toggle('flex',    hasQr);
+    qrEl.classList.toggle('flex', hasQr);
     spinnerEl.classList.toggle('hidden', hasQr);
 
     if (hasQr) {

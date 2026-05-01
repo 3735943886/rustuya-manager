@@ -579,3 +579,11 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.error("WS error: %s", e)
     finally:
         state.websocket_connections.discard(websocket)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    # Use PORT environment variable with default 8373
+    port = int(os.getenv("PORT", 8373))
+    uvicorn.run("web.app:app", host="0.0.0.0", port=port, reload=True)
+

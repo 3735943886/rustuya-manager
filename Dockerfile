@@ -47,5 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 VOLUME ["/data"]
 
 # Port and execution command
-EXPOSE 8373
-CMD ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8373"]
+ENV PORT=8373
+EXPOSE $PORT
+CMD ["sh", "-c", "uvicorn web.app:app --host 0.0.0.0 --port $PORT"]
+

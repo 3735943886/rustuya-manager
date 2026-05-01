@@ -798,8 +798,42 @@ function populateParentsSelect() {
 // Details panel
 // =============================================================================
 const HIDDEN_DETAIL_KEYS = new Set(['dps']);
+const MASKED_DETAIL_KEYS = new Set(['key', 'local_key', 'localkey']);
+let _maskedKeyRevealState = {}; // { [uniqueId]: boolean }
+
+function toggleMaskedField(uid) {
+    _maskedKeyRevealState[uid] = !_maskedKeyRevealState[uid];
+    const valEl  = document.getElementById(`masked-val-${uid}`);
+    const iconEl = document.getElementById(`masked-icon-${uid}`);
+    if (!valEl || !iconEl) return;
+    const rawVal = valEl.dataset.raw;
+    if (_maskedKeyRevealState[uid]) {
+        valEl.textContent = rawVal;
+        valEl.classList.add('font-mono', 'text-amber-300');
+        iconEl.classList.remove('fa-eye');
+        iconEl.classList.add('fa-eye-slash');
+    } else {
+        valEl.textContent = '••••••••••••••••';
+        valEl.classList.remove('font-mono', 'text-amber-300');
+        iconEl.classList.add('fa-eye');
+        iconEl.classList.remove('fa-eye-slash');
+    }
+}
 
 function renderDetailRow(key, val) {
+    if (MASKED_DETAIL_KEYS.has(key)) {
+        const uid = `${key}_${Math.random().toString(36).slice(2, 8)}`;
+        _maskedKeyRevealState[uid] = false;
+        return `<div class="detail-item">
+            <span class="detail-label">${key.toUpperCase()}</span>
+            <span class="flex items-center gap-2 min-w-0">
+                <span id="masked-val-${uid}" data-raw="${val}" class="detail-value text-slate-500 tracking-widest">••••••••••••••••</span>
+                <button onclick="toggleMaskedField('${uid}')" title="Show/hide" class="text-slate-500 hover:text-slate-200 transition-colors shrink-0 p-0.5">
+                    <i id="masked-icon-${uid}" class="fa-solid fa-eye text-sm"></i>
+                </button>
+            </span>
+        </div>`;
+    }
     return `<div class="detail-item">
         <span class="detail-label">${key.toUpperCase()}</span>
         <span class="detail-value" title="${val}">${val}</span>

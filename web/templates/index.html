@@ -99,82 +99,84 @@
             <!-- Dashboard Section -->
             <section id="dashboard" class="section h-full flex flex-col gap-3 sm:gap-6">
                 <!-- Stats Cards -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6 shrink-0">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-6 shrink-0">
                     <!-- Total Devices -->
-                    <div class="stat-card group relative overflow-hidden">
-                        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <div class="stat-card group relative overflow-hidden sm:p-5 p-3">
+                        <!-- Large bg icon: desktop only -->
+                        <div class="hidden sm:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <i class="fa-solid fa-diagram-project text-5xl"></i>
                         </div>
-                        <div class="relative z-10">
-                            <div class="flex items-center gap-2 sm:gap-3 text-slate-400 mb-2">
-                                <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400">
-                                    <i class="fa-solid fa-microchip text-sm sm:text-base"></i>
+                        <!-- Mobile: horizontal layout -->
+                        <div class="flex sm:block items-center justify-between relative z-10">
+                            <div class="flex items-center gap-2 text-slate-400 sm:mb-2">
+                                <div class="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0">
+                                    <i class="fa-solid fa-microchip text-xs sm:text-base"></i>
                                 </div>
                                 <h3 class="font-medium text-xs sm:text-sm leading-tight">Bridge<span class="hidden sm:inline"> Devices</span></h3>
                             </div>
-                            <div class="flex items-baseline gap-1 sm:gap-2">
-                                <span id="stat-total" class="text-2xl sm:text-3xl font-bold text-white">0</span>
+                            <div class="flex items-baseline gap-1 sm:gap-2 sm:mt-0">
+                                <span id="stat-total" class="text-xl sm:text-3xl font-bold text-white">0</span>
                                 <span class="text-xs text-slate-500 hidden sm:inline">local nodes</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Cloud Devices -->
-                    <div class="stat-card group relative overflow-hidden">
-                        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <div class="stat-card group relative overflow-hidden sm:p-5 p-3">
+                        <div class="hidden sm:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <i class="fa-solid fa-cloud text-5xl text-brandBlue"></i>
                         </div>
-                        <div class="relative z-10">
-                            <div class="flex items-center gap-2 sm:gap-3 text-slate-400 mb-2">
-                                <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-brandBlue/10 flex items-center justify-center text-brandBlue">
-                                    <i class="fa-solid fa-cloud text-sm sm:text-base"></i>
+                        <div class="flex sm:block items-center justify-between relative z-10">
+                            <div class="flex items-center gap-2 text-slate-400 sm:mb-2">
+                                <div class="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-brandBlue/10 flex items-center justify-center text-brandBlue shrink-0">
+                                    <i class="fa-solid fa-cloud text-xs sm:text-base"></i>
                                 </div>
                                 <h3 class="font-medium text-xs sm:text-sm leading-tight">Cloud<span class="hidden sm:inline"> Assets</span></h3>
                             </div>
                             <div class="flex items-baseline gap-1 sm:gap-2">
-                                <span id="stat-cloud" class="text-2xl sm:text-3xl font-bold text-white">0</span>
+                                <span id="stat-cloud" class="text-xl sm:text-3xl font-bold text-white">0</span>
                                 <span class="text-xs text-slate-500 hidden sm:inline">tuya cloud</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Synced -->
-                    <div class="stat-card group relative overflow-hidden">
-                        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <div class="stat-card group relative overflow-hidden sm:p-5 p-3">
+                        <div class="hidden sm:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <i class="fa-solid fa-check-double text-5xl text-emerald-500"></i>
                         </div>
-                        <div class="relative z-10">
-                            <div class="flex items-center gap-2 sm:gap-3 text-slate-400 mb-2">
-                                <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                                    <i class="fa-solid fa-check-circle text-sm sm:text-base"></i>
+                        <div class="flex sm:block items-center justify-between relative z-10">
+                            <div class="flex items-center gap-2 text-slate-400 sm:mb-2">
+                                <div class="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500 shrink-0">
+                                    <i class="fa-solid fa-check-circle text-xs sm:text-base"></i>
                                 </div>
                                 <h3 class="font-medium text-xs sm:text-sm leading-tight">Synced<span class="hidden sm:inline">ronized</span></h3>
                             </div>
                             <div class="flex items-baseline gap-1 sm:gap-2">
-                                <span id="stat-synced" class="text-2xl sm:text-3xl font-bold text-white">0</span>
+                                <span id="stat-synced" class="text-xl sm:text-3xl font-bold text-white">0</span>
                                 <span class="text-xs text-slate-500 hidden sm:inline">verified</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Conflicts -->
-                    <div class="stat-card group relative overflow-hidden">
-                        <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <div class="stat-card group relative overflow-hidden sm:p-5 p-3">
+                        <div class="hidden sm:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <i class="fa-solid fa-triangle-exclamation text-5xl text-amber-500"></i>
                         </div>
-                        <div class="relative z-10">
-                            <div class="flex items-center gap-2 sm:gap-3 text-slate-400 mb-2">
-                                <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
-                                    <i class="fa-solid fa-circle-exclamation text-sm sm:text-base"></i>
+                        <div class="flex sm:block items-center justify-between relative z-10">
+                            <div class="flex items-center gap-2 text-slate-400 sm:mb-2">
+                                <div class="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500 shrink-0">
+                                    <i class="fa-solid fa-circle-exclamation text-xs sm:text-base"></i>
                                 </div>
                                 <h3 class="font-medium text-xs sm:text-sm leading-tight">Issues<span class="hidden sm:inline"> Pending</span></h3>
                             </div>
-                            <div class="flex flex-col">
+                            <div class="flex flex-col items-end sm:items-start">
                                 <div class="flex items-baseline gap-1 sm:gap-2">
-                                    <span id="stat-conflicts" class="text-2xl sm:text-3xl font-bold text-white">0</span>
+                                    <span id="stat-conflicts" class="text-xl sm:text-3xl font-bold text-white">0</span>
                                     <span class="text-xs text-slate-500 hidden sm:inline">total issues</span>
                                 </div>
-                                <div id="stat-issues-detail" class="text-[10px] leading-tight mt-1 flex flex-wrap gap-x-2">
+                                <div id="stat-issues-detail" class="text-[10px] leading-tight mt-0.5 hidden sm:flex flex-wrap gap-x-2">
                                     <!-- Granular counts will be injected here -->
                                 </div>
                             </div>
@@ -186,12 +188,12 @@
                 <div class="flex-1 overflow-y-auto scrollbar space-y-4 pr-2">
                     <!-- Missing -->
                     <div id="section-missing" class="border border-slate-700 rounded-xl overflow-hidden hidden">
-                        <div class="bg-slate-800/90 p-4 flex justify-between items-center cursor-pointer" onclick="document.getElementById('body-missing').classList.toggle('hidden')">
+                        <div class="bg-slate-800/90 px-4 py-3 flex flex-wrap gap-2 justify-between items-center cursor-pointer" onclick="document.getElementById('body-missing').classList.toggle('hidden')">
                             <h4 class="font-semibold text-rose-400 flex items-center">
-                                <i class="fa-solid fa-cloud-arrow-down mr-3 text-lg"></i>
-                                Missing in Bridge (<span id="count-missing">0</span>)
+                                <i class="fa-solid fa-cloud-arrow-down mr-2 text-lg"></i>
+                                <span class="hidden sm:inline">Missing in Bridge&nbsp;</span><span class="sm:hidden">Missing&nbsp;</span>(<span id="count-missing">0</span>)
                             </h4>
-                            <div class="flex items-center space-x-4">
+                            <div class="flex items-center gap-2">
                                 <button onclick="resolveMissing(event)" class="px-3 py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded text-sm font-medium transition-colors">Import All</button>
                                 <i class="fa-solid fa-chevron-down text-slate-500"></i>
                             </div>
@@ -201,12 +203,12 @@
 
                     <!-- Mismatched -->
                     <div id="section-mismatch" class="border border-slate-700 rounded-xl overflow-hidden hidden">
-                        <div class="bg-slate-800/90 p-4 flex justify-between items-center cursor-pointer" onclick="document.getElementById('body-mismatch').classList.toggle('hidden')">
+                        <div class="bg-slate-800/90 px-4 py-3 flex flex-wrap gap-2 justify-between items-center cursor-pointer" onclick="document.getElementById('body-mismatch').classList.toggle('hidden')">
                             <h4 class="font-semibold text-amber-400 flex items-center">
-                                <i class="fa-solid fa-code-compare mr-3 text-lg"></i>
-                                Mismatched Config (<span id="count-mismatch">0</span>)
+                                <i class="fa-solid fa-code-compare mr-2 text-lg"></i>
+                                <span class="hidden sm:inline">Mismatched Config&nbsp;</span><span class="sm:hidden">Mismatch&nbsp;</span>(<span id="count-mismatch">0</span>)
                             </h4>
-                            <div class="flex items-center space-x-4">
+                            <div class="flex items-center gap-2">
                                 <button onclick="resolveMismatched(event)" class="px-3 py-1 bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white rounded text-sm font-medium transition-colors">Update All</button>
                                 <i class="fa-solid fa-chevron-down text-slate-500"></i>
                             </div>
@@ -216,12 +218,12 @@
 
                     <!-- Orphaned -->
                     <div id="section-orphan" class="border border-slate-700 rounded-xl overflow-hidden hidden">
-                        <div class="bg-slate-800/90 p-4 flex justify-between items-center cursor-pointer" onclick="document.getElementById('body-orphan').classList.toggle('hidden')">
+                        <div class="bg-slate-800/90 px-4 py-3 flex flex-wrap gap-2 justify-between items-center cursor-pointer" onclick="document.getElementById('body-orphan').classList.toggle('hidden')">
                             <h4 class="font-semibold text-slate-400 flex items-center">
-                                <i class="fa-solid fa-ghost mr-3 text-lg"></i>
-                                Orphaned in Bridge (<span id="count-orphan">0</span>)
+                                <i class="fa-solid fa-ghost mr-2 text-lg"></i>
+                                <span class="hidden sm:inline">Orphaned in Bridge&nbsp;</span><span class="sm:hidden">Orphaned&nbsp;</span>(<span id="count-orphan">0</span>)
                             </h4>
-                            <div class="flex items-center space-x-4">
+                            <div class="flex items-center gap-2">
                                 <button onclick="resolveOrphans(event)" class="px-3 py-1 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white rounded text-sm font-medium transition-colors">Delete All</button>
                                 <i class="fa-solid fa-chevron-down text-slate-500"></i>
                             </div>

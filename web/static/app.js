@@ -351,9 +351,9 @@ function requestStatusUpdate() {
 // Sync panels
 // =============================================================================
 function syncItemRow(label, id, btnText, btnClass, onClickExpr, onEditExpr) {
-    return `<div class="flex justify-between items-center text-sm border-b border-slate-700/50 pb-2 mb-2 last:border-0">
-        <span class="text-white">${label}</span>
-        <div class="flex gap-2">
+    return `<div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 text-sm border-b border-slate-700/50 pb-2 mb-2 last:border-0">
+        <span class="text-white min-w-0 truncate">${label}</span>
+        <div class="flex gap-2 shrink-0">
             ${onEditExpr ? `<button onclick="${onEditExpr}" title="Edit before adding" class="px-2 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors border border-slate-600"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
             <button onclick="${onClickExpr}" class="${btnClass} px-3 py-1.5 rounded transition-colors border text-sm font-medium">${btnText}</button>
         </div>

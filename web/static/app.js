@@ -529,7 +529,8 @@ function renderStatusCell(dev) {
 
 function renderDashboard() {
     const tbody  = document.getElementById('devices-body');
-    const search = document.getElementById('search-input').value.toLowerCase();
+    const searchEl = document.getElementById('search-input');
+    const search = searchEl ? searchEl.value.toLowerCase() : '';
     tbody.innerHTML = '';
 
     const allDevices = currentSyncData.synced.length > 0
@@ -610,43 +611,8 @@ function renderDashboard() {
     populateParentsSelect();
 }
 
-// =============================================================================
-// Tree view (topology)
-// =============================================================================
-function renderTree() {
-    const container = document.getElementById('tree-container');
-    if (!container) return;
-    container.innerHTML = '';
-
-    const { rootNodes, childMap } = buildTree(Object.values(devices_map));
-
-    function createNode(dev) {
-        const wrapper  = document.createElement('div');
-        const isOnline = dev.status === 'online';
-        const iconType = dev.parent ? 'fa-microchip' : 'fa-network-wired';
-        const color    = isOnline ? 'text-green-400' : 'text-slate-500';
-        wrapper.innerHTML = `
-            <div class="tree-node" onclick="openDetails('${dev.id}')">
-                <i class="fa-solid ${iconType} ${color} w-6 text-center mr-2"></i>
-                <div>
-                    <div class="text-sm font-medium text-white">${dev.name || 'Unnamed'}</div>
-                    <div class="text-xs text-slate-500 font-mono">${dev.id}</div>
-                </div>
-            </div>`;
-        const children = childMap[dev.id] || [];
-        if (children.length) {
-            const childContainer = document.createElement('div');
-            childContainer.className = 'tree-children';
-            children.forEach(c => childContainer.appendChild(createNode(c)));
-            wrapper.appendChild(childContainer);
-        }
-        return wrapper;
-    }
-
-    const roots = (rootNodes.length === 0 && Object.keys(devices_map).length > 0)
-        ? Object.values(devices_map) : rootNodes;
-    roots.forEach(d => container.appendChild(createNode(d)));
-}
+// renderTree() — topology view, currently unused but preserved
+// function renderTree() { ... }
 
 // =============================================================================
 // Modals
@@ -893,8 +859,7 @@ function openDetails(id) {
     if (!dev) return;
     currentDeviceId = id;
 
-    const statusEl = document.getElementById('details-status');
-    if (statusEl) statusEl.innerHTML = renderStatusCell(dev);
+    // (details-status element not present in current template - skipped)
 
     document.getElementById('details-content').innerHTML = Object.entries(dev)
         .filter(([k, v]) => !HIDDEN_DETAIL_KEYS.has(k) && v !== null && v !== undefined && typeof v !== 'object')
@@ -979,11 +944,11 @@ function closeSidebar() {
 // =============================================================================
 // Navigation
 // =============================================================================
-function showSection(sectionId) {
+function showSection(sectionId, e) {
     document.querySelectorAll('.section').forEach(s => s.classList.add('hidden'));
     document.getElementById(sectionId).classList.remove('hidden');
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    event.currentTarget.classList.add('active');
+    if (e?.currentTarget) e.currentTarget.classList.add('active');
     const titles = { dashboard: 'Device Dashboard', devices: 'Topology View', settings: 'Settings' };
     document.getElementById('page-title').innerText = titles[sectionId] || 'Dashboard';
     // Auto-close sidebar on mobile after nav

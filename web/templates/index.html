@@ -42,7 +42,7 @@
                     <h1 class="text-xl font-bold tracking-wider text-white">Rustuya</h1>
                 </div>
                 <nav class="p-4 space-y-2">
-                    <a href="#" onclick="showSection('dashboard')"
+                    <a href="#" onclick="showSection('dashboard', event)"
                         class="nav-item active flex items-center px-4 py-3 bg-slate-800 text-brandBlue rounded-lg shadow-sm transition-all duration-200">
                         <i class="fa-solid fa-border-all w-6 text-center"></i>
                         <span class="ml-3 font-medium">Dashboard</span>
@@ -221,8 +221,7 @@
                                 </h4>
                                 <div class="flex items-center gap-2">
                                     <button onclick="resolveMissing(event)"
-                                        class="px-3 py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded text-sm font-medium transition-colors">Import
-                                        All</button>
+                                        class="px-3 py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded text-sm font-medium transition-colors">Import All</button>
                                     <i class="fa-solid fa-chevron-down text-slate-500"></i>
                                 </div>
                             </div>
@@ -241,8 +240,7 @@
                                 </h4>
                                 <div class="flex items-center gap-2">
                                     <button onclick="resolveMismatched(event)"
-                                        class="px-3 py-1 bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white rounded text-sm font-medium transition-colors">Update
-                                        All</button>
+                                        class="px-3 py-1 bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white rounded text-sm font-medium transition-colors">Update All</button>
                                     <i class="fa-solid fa-chevron-down text-slate-500"></i>
                                 </div>
                             </div>
@@ -261,8 +259,7 @@
                                 </h4>
                                 <div class="flex items-center gap-2">
                                     <button onclick="resolveOrphans(event)"
-                                        class="px-3 py-1 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white rounded text-sm font-medium transition-colors">Delete
-                                        All</button>
+                                        class="px-3 py-1 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white rounded text-sm font-medium transition-colors">Delete All</button>
                                     <i class="fa-solid fa-chevron-down text-slate-500"></i>
                                 </div>
                             </div>

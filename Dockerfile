@@ -31,17 +31,10 @@ COPY . .
 
 # Environment variables
 ENV PATH=/root/.local/bin:$PATH
-ENV PYTHONUNBUFFERED=1
-ENV TZ=Asia/Seoul
 ENV DATA_DIR=/data
 
 # Create data directory
 RUN mkdir -p /data && chmod 777 /data
-
-# Install tzdata for timezone support
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tzdata \
-    && rm -rf /var/lib/apt/lists/*
 
 # Define volume for data persistence
 VOLUME ["/data"]
@@ -50,4 +43,3 @@ VOLUME ["/data"]
 ENV PORT=8373
 EXPOSE $PORT
 CMD ["sh", "-c", "uvicorn web.app:app --host 0.0.0.0 --port $PORT"]
-

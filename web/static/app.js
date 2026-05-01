@@ -351,7 +351,7 @@ function requestStatusUpdate() {
 // Sync panels
 // =============================================================================
 function syncItemRow(label, id, btnText, btnClass, onClickExpr, onEditExpr) {
-    return `<div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 text-sm border-b border-slate-700/50 pb-2 mb-2 last:border-0">
+    return `<div class="flex flex-col md:flex-row md:justify-between md:items-center gap-2 text-sm border-b border-slate-700/50 pb-2 mb-2 last:border-0">
         <span class="text-white min-w-0 truncate">${label}</span>
         <div class="flex gap-2 shrink-0">
             ${onEditExpr ? `<button onclick="${onEditExpr}" title="Edit before adding" class="px-2 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors border border-slate-600"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
@@ -567,17 +567,17 @@ function renderDashboard() {
         const statusBadge = deviceErrors[dev.id]
             ? `<span class="text-red-500 animate-pulse">● err</span>`
             : hasLive ? `<span class="text-emerald-500">● live</span>` : '';
-        const mobileName = `<div class="sm:hidden text-xs text-slate-400 mt-0.5 truncate max-w-[140px]">
+        const mobileName = `<div class="md:hidden text-xs text-slate-400 mt-0.5 truncate max-w-[140px]">
             ${dev.name || 'Unnamed'}${statusBadge ? ' ' + statusBadge : ''}
         </div>`;
 
         tr.innerHTML = `
-            <td class="hidden sm:table-cell py-3 sm:py-4 px-5">
+            <td class="hidden md:table-cell py-3 md:py-4 px-5">
                 <div class="flex items-center" style="padding-left:${indentPx}rem">
                     ${indentIcon}${renderStatusCell(dev)}
                 </div>
             </td>
-            <td class="py-2.5 sm:py-4 px-3 sm:px-5">
+            <td class="py-2.5 md:py-4 px-3 md:px-5">
                 <div class="flex items-center text-slate-400 group-hover:text-brandBlue transition-colors">
                     <i class="fa-solid ${iconType} mr-2 w-4 text-center shrink-0"></i>
                     <div class="min-w-0">
@@ -586,12 +586,12 @@ function renderDashboard() {
                     </div>
                 </div>
             </td>
-            <td class="hidden sm:table-cell py-4 px-5 text-sm font-medium text-white">
+            <td class="hidden md:table-cell py-4 px-5 text-sm font-medium text-white">
                 ${dev.name || 'Unnamed Device'}
                 ${deviceErrors[dev.id] ? `<span class="ml-2 text-xs text-red-500 font-normal animate-pulse">● error</span>` : (hasLive ? `<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>` : '')}
             </td>
-            <td class="py-2.5 sm:py-4 px-3 sm:px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors max-w-[120px] sm:max-w-none truncate">${dev.id}</td>
-            <td class="hidden sm:table-cell py-4 px-5 text-right">
+            <td class="py-2.5 md:py-4 px-3 md:px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors max-w-[120px] md:max-w-none truncate">${dev.id}</td>
+            <td class="hidden md:table-cell py-4 px-5 text-right">
                 <button aria-label="Open device details"
                         class="text-slate-500 hover:text-white p-2 rounded hover:bg-slate-700 transition-colors"
                         onclick="event.stopPropagation(); openDetails('${dev.id}')">

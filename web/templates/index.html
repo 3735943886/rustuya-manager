@@ -72,7 +72,7 @@
     <!-- Main Content Area -->
     <main class="flex-1 flex flex-col overflow-hidden relative min-w-0">
         <!-- Header -->
-        <header class="h-12 sm:h-16 bg-cardBg bg-opacity-80 backdrop-blur-md border-b border-slate-700 flex items-center justify-between px-3 lg:px-6 z-10">
+        <header class="h-12 md:h-16 bg-cardBg bg-opacity-80 backdrop-blur-md border-b border-slate-700 flex items-center justify-between px-3 lg:px-6 z-10">
             <div class="flex items-center gap-3">
                 <!-- Mobile hamburger -->
                 <button id="sidebar-toggle" onclick="toggleSidebar()" aria-label="Open menu"
@@ -88,95 +88,95 @@
                 </button>
                 <button onclick="openAddDeviceModal()" class="btn-primary">
                     <i class="fa-solid fa-plus"></i>
-                    <span class="hidden sm:inline ml-2">Add Device</span>
+                    <span class="hidden md:inline ml-2">Add Device</span>
                 </button>
             </div>
         </header>
 
         <!-- Content Container -->
-        <div class="flex-1 overflow-y-auto p-2 sm:p-6 scrollbar">
+        <div class="flex-1 overflow-y-auto p-2 md:p-6 scrollbar">
 
             <!-- Dashboard Section -->
-            <section id="dashboard" class="section h-full flex flex-col gap-2 sm:gap-6">
+            <section id="dashboard" class="section h-full flex flex-col gap-2 md:gap-6">
                 <!-- Stats Cards -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-6 shrink-0">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-6 shrink-0">
                     <!-- Total Devices -->
-                    <div class="stat-card group relative overflow-hidden sm:p-5 p-0">
+                    <div class="stat-card group relative overflow-hidden md:p-5 p-0">
                         <!-- Large bg icon: desktop only -->
-                        <div class="hidden sm:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <div class="hidden md:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <i class="fa-solid fa-diagram-project text-5xl"></i>
                         </div>
                         <!-- Mobile: horizontal layout -->
-                        <div class="flex sm:block items-center justify-between relative z-10 px-2.5 py-2 sm:p-0">
-                            <div class="flex items-center gap-2 text-slate-400 sm:mb-2">
-                                <div class="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0">
-                                    <i class="fa-solid fa-microchip text-xs sm:text-base"></i>
+                        <div class="flex md:block items-center justify-between relative z-10 px-2.5 py-2 md:p-0">
+                            <div class="flex items-center gap-2 text-slate-400 md:mb-2">
+                                <div class="w-6 h-6 md:w-8 md:h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0">
+                                    <i class="fa-solid fa-microchip text-xs md:text-base"></i>
                                 </div>
-                                <h3 class="font-medium text-xs sm:text-sm leading-tight">Bridge<span class="hidden sm:inline"> Devices</span></h3>
+                                <h3 class="font-medium text-xs md:text-sm leading-tight">Bridge<span class="hidden md:inline"> Devices</span></h3>
                             </div>
-                            <div class="flex items-baseline gap-1 sm:gap-2 sm:mt-0">
-                                <span id="stat-total" class="text-xl sm:text-3xl font-bold text-white">0</span>
-                                <span class="text-xs text-slate-500 hidden sm:inline">local nodes</span>
+                            <div class="flex items-baseline gap-1 md:gap-2 md:mt-0">
+                                <span id="stat-total" class="text-xl md:text-3xl font-bold text-white">0</span>
+                                <span class="text-xs text-slate-500 hidden md:inline">local nodes</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Cloud Devices -->
-                    <div class="stat-card group relative overflow-hidden sm:p-5 p-0">
-                        <div class="hidden sm:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <div class="stat-card group relative overflow-hidden md:p-5 p-0">
+                        <div class="hidden md:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <i class="fa-solid fa-cloud text-5xl text-brandBlue"></i>
                         </div>
-                        <div class="flex sm:block items-center justify-between relative z-10 px-2.5 py-2 sm:p-0">
-                            <div class="flex items-center gap-2 text-slate-400 sm:mb-2">
-                                <div class="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-brandBlue/10 flex items-center justify-center text-brandBlue shrink-0">
-                                    <i class="fa-solid fa-cloud text-xs sm:text-base"></i>
+                        <div class="flex md:block items-center justify-between relative z-10 px-2.5 py-2 md:p-0">
+                            <div class="flex items-center gap-2 text-slate-400 md:mb-2">
+                                <div class="w-6 h-6 md:w-8 md:h-8 rounded-lg bg-brandBlue/10 flex items-center justify-center text-brandBlue shrink-0">
+                                    <i class="fa-solid fa-cloud text-xs md:text-base"></i>
                                 </div>
-                                <h3 class="font-medium text-xs sm:text-sm leading-tight">Cloud<span class="hidden sm:inline"> Assets</span></h3>
+                                <h3 class="font-medium text-xs md:text-sm leading-tight">Cloud<span class="hidden md:inline"> Assets</span></h3>
                             </div>
-                            <div class="flex items-baseline gap-1 sm:gap-2">
-                                <span id="stat-cloud" class="text-xl sm:text-3xl font-bold text-white">0</span>
-                                <span class="text-xs text-slate-500 hidden sm:inline">tuya cloud</span>
+                            <div class="flex items-baseline gap-1 md:gap-2">
+                                <span id="stat-cloud" class="text-xl md:text-3xl font-bold text-white">0</span>
+                                <span class="text-xs text-slate-500 hidden md:inline">tuya cloud</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Synced -->
-                    <div class="stat-card group relative overflow-hidden sm:p-5 p-0">
-                        <div class="hidden sm:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <div class="stat-card group relative overflow-hidden md:p-5 p-0">
+                        <div class="hidden md:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <i class="fa-solid fa-check-double text-5xl text-emerald-500"></i>
                         </div>
-                        <div class="flex sm:block items-center justify-between relative z-10 px-2.5 py-2 sm:p-0">
-                            <div class="flex items-center gap-2 text-slate-400 sm:mb-2">
-                                <div class="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500 shrink-0">
-                                    <i class="fa-solid fa-check-circle text-xs sm:text-base"></i>
+                        <div class="flex md:block items-center justify-between relative z-10 px-2.5 py-2 md:p-0">
+                            <div class="flex items-center gap-2 text-slate-400 md:mb-2">
+                                <div class="w-6 h-6 md:w-8 md:h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500 shrink-0">
+                                    <i class="fa-solid fa-check-circle text-xs md:text-base"></i>
                                 </div>
-                                <h3 class="font-medium text-xs sm:text-sm leading-tight">Synced<span class="hidden sm:inline">ronized</span></h3>
+                                <h3 class="font-medium text-xs md:text-sm leading-tight">Synced<span class="hidden md:inline">ronized</span></h3>
                             </div>
-                            <div class="flex items-baseline gap-1 sm:gap-2">
-                                <span id="stat-synced" class="text-xl sm:text-3xl font-bold text-white">0</span>
-                                <span class="text-xs text-slate-500 hidden sm:inline">verified</span>
+                            <div class="flex items-baseline gap-1 md:gap-2">
+                                <span id="stat-synced" class="text-xl md:text-3xl font-bold text-white">0</span>
+                                <span class="text-xs text-slate-500 hidden md:inline">verified</span>
                             </div>
                         </div>
                     </div>
 
                     <!-- Conflicts -->
-                    <div class="stat-card group relative overflow-hidden sm:p-5 p-0">
-                        <div class="hidden sm:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                    <div class="stat-card group relative overflow-hidden md:p-5 p-0">
+                        <div class="hidden md:block absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <i class="fa-solid fa-triangle-exclamation text-5xl text-amber-500"></i>
                         </div>
-                        <div class="flex sm:block items-center justify-between relative z-10 px-2.5 py-2 sm:p-0">
-                            <div class="flex items-center gap-2 text-slate-400 sm:mb-2">
-                                <div class="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500 shrink-0">
-                                    <i class="fa-solid fa-circle-exclamation text-xs sm:text-base"></i>
+                        <div class="flex md:block items-center justify-between relative z-10 px-2.5 py-2 md:p-0">
+                            <div class="flex items-center gap-2 text-slate-400 md:mb-2">
+                                <div class="w-6 h-6 md:w-8 md:h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500 shrink-0">
+                                    <i class="fa-solid fa-circle-exclamation text-xs md:text-base"></i>
                                 </div>
-                                <h3 class="font-medium text-xs sm:text-sm leading-tight">Issues<span class="hidden sm:inline"> Pending</span></h3>
+                                <h3 class="font-medium text-xs md:text-sm leading-tight">Issues<span class="hidden md:inline"> Pending</span></h3>
                             </div>
-                            <div class="flex flex-col items-end sm:items-start">
-                                <div class="flex items-baseline gap-1 sm:gap-2">
-                                    <span id="stat-conflicts" class="text-xl sm:text-3xl font-bold text-white">0</span>
-                                    <span class="text-xs text-slate-500 hidden sm:inline">total issues</span>
+                            <div class="flex flex-col items-end md:items-start">
+                                <div class="flex items-baseline gap-1 md:gap-2">
+                                    <span id="stat-conflicts" class="text-xl md:text-3xl font-bold text-white">0</span>
+                                    <span class="text-xs text-slate-500 hidden md:inline">total issues</span>
                                 </div>
-                                <div id="stat-issues-detail" class="text-[10px] leading-tight mt-0.5 hidden sm:flex flex-wrap gap-x-2">
+                                <div id="stat-issues-detail" class="text-[10px] leading-tight mt-0.5 hidden md:flex flex-wrap gap-x-2">
                                     <!-- Granular counts will be injected here -->
                                 </div>
                             </div>
@@ -185,13 +185,13 @@
                 </div>
 
                 <!-- Sync/Conflict Panels -->
-                <div class="flex-1 overflow-y-auto scrollbar space-y-2 sm:space-y-4">
+                <div class="flex-1 overflow-y-auto scrollbar space-y-2 md:space-y-4">
                     <!-- Missing -->
                     <div id="section-missing" class="border border-slate-700 rounded-xl overflow-hidden hidden">
                         <div class="bg-slate-800/90 px-4 py-3 flex flex-wrap gap-2 justify-between items-center cursor-pointer" onclick="document.getElementById('body-missing').classList.toggle('hidden')">
                             <h4 class="font-semibold text-rose-400 flex items-center">
                                 <i class="fa-solid fa-cloud-arrow-down mr-2 text-lg"></i>
-                                <span class="hidden sm:inline">Missing in Bridge&nbsp;</span><span class="sm:hidden">Missing&nbsp;</span>(<span id="count-missing">0</span>)
+                                <span class="hidden md:inline">Missing in Bridge&nbsp;</span><span class="md:hidden">Missing&nbsp;</span>(<span id="count-missing">0</span>)
                             </h4>
                             <div class="flex items-center gap-2">
                                 <button onclick="resolveMissing(event)" class="px-3 py-1 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-white rounded text-sm font-medium transition-colors">Import All</button>
@@ -206,7 +206,7 @@
                         <div class="bg-slate-800/90 px-4 py-3 flex flex-wrap gap-2 justify-between items-center cursor-pointer" onclick="document.getElementById('body-mismatch').classList.toggle('hidden')">
                             <h4 class="font-semibold text-amber-400 flex items-center">
                                 <i class="fa-solid fa-code-compare mr-2 text-lg"></i>
-                                <span class="hidden sm:inline">Mismatched Config&nbsp;</span><span class="sm:hidden">Mismatch&nbsp;</span>(<span id="count-mismatch">0</span>)
+                                <span class="hidden md:inline">Mismatched Config&nbsp;</span><span class="md:hidden">Mismatch&nbsp;</span>(<span id="count-mismatch">0</span>)
                             </h4>
                             <div class="flex items-center gap-2">
                                 <button onclick="resolveMismatched(event)" class="px-3 py-1 bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-white rounded text-sm font-medium transition-colors">Update All</button>
@@ -221,7 +221,7 @@
                         <div class="bg-slate-800/90 px-4 py-3 flex flex-wrap gap-2 justify-between items-center cursor-pointer" onclick="document.getElementById('body-orphan').classList.toggle('hidden')">
                             <h4 class="font-semibold text-slate-400 flex items-center">
                                 <i class="fa-solid fa-ghost mr-2 text-lg"></i>
-                                <span class="hidden sm:inline">Orphaned in Bridge&nbsp;</span><span class="sm:hidden">Orphaned&nbsp;</span>(<span id="count-orphan">0</span>)
+                                <span class="hidden md:inline">Orphaned in Bridge&nbsp;</span><span class="md:hidden">Orphaned&nbsp;</span>(<span id="count-orphan">0</span>)
                             </h4>
                             <div class="flex items-center gap-2">
                                 <button onclick="resolveOrphans(event)" class="px-3 py-1 bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white rounded text-sm font-medium transition-colors">Delete All</button>
@@ -232,25 +232,25 @@
                     </div>
 
                     <!-- Synced Devices Table -->
-                    <div class="bg-cardBg rounded-xl border border-slate-700 shadow-xl overflow-hidden flex flex-col mt-2 sm:mt-4">
-                        <div class="px-3 py-2 sm:p-4 border-b border-slate-700 flex items-center justify-between bg-slate-800/90 z-10 sticky top-0">
-                            <h3 class="font-semibold text-base sm:text-lg text-emerald-400 flex items-center shrink-0">
-                                <i class="fa-solid fa-check-circle mr-2 sm:mr-3"></i>
-                                <span class="hidden sm:inline">Synced&nbsp;</span>Devices (<span id="count-synced">0</span>)
+                    <div class="bg-cardBg rounded-xl border border-slate-700 shadow-xl overflow-hidden flex flex-col mt-2 md:mt-4">
+                        <div class="px-3 py-2 md:p-4 border-b border-slate-700 flex items-center justify-between bg-slate-800/90 z-10 sticky top-0">
+                            <h3 class="font-semibold text-base md:text-lg text-emerald-400 flex items-center shrink-0">
+                                <i class="fa-solid fa-check-circle mr-2 md:mr-3"></i>
+                                Synced<span class="hidden md:inline"> Devices</span> (<span id="count-synced">0</span>)
                             </h3>
                             <div class="flex items-center gap-2 flex-wrap justify-end">
                                 <!-- Status filter -->
                                 <div class="flex items-center gap-1 bg-slate-900 rounded-lg p-1">
-                                    <button data-filter="all"       onclick="setFilter('all')"       class="filter-btn active-filter px-2 sm:px-3 py-1 rounded text-xs font-medium transition-colors">All</button>
-                                    <button data-filter="online"    onclick="setFilter('online')"    class="filter-btn px-2 sm:px-3 py-1 rounded text-xs font-medium transition-colors">On</button>
-                                    <button data-filter="offline"   onclick="setFilter('offline')"   class="filter-btn px-2 sm:px-3 py-1 rounded text-xs font-medium transition-colors">Off</button>
-                                    <button data-filter="subdevice" onclick="setFilter('subdevice')" class="filter-btn px-2 sm:px-3 py-1 rounded text-xs font-medium transition-colors">Sub</button>
+                                    <button data-filter="all"       onclick="setFilter('all')"       class="filter-btn active-filter px-2 md:px-3 py-1 rounded text-xs font-medium transition-colors">All</button>
+                                    <button data-filter="online"    onclick="setFilter('online')"    class="filter-btn px-2 md:px-3 py-1 rounded text-xs font-medium transition-colors">On</button>
+                                    <button data-filter="offline"   onclick="setFilter('offline')"   class="filter-btn px-2 md:px-3 py-1 rounded text-xs font-medium transition-colors">Off</button>
+                                    <button data-filter="subdevice" onclick="setFilter('subdevice')" class="filter-btn px-2 md:px-3 py-1 rounded text-xs font-medium transition-colors">Sub</button>
                                 </div>
                                 <!-- Search -->
                                 <div class="relative">
                                     <i class="fa-solid fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500"></i>
                                     <input type="text" id="search-input" onkeyup="renderDashboard()" placeholder="Search..."
-                                           class="pl-9 pr-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:border-brandBlue transition-colors w-32 sm:w-48 lg:w-56"
+                                           class="pl-9 pr-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:border-brandBlue transition-colors w-28 md:w-48 lg:w-56"
                                            aria-label="Search devices">
                                 </div>
                             </div>
@@ -259,11 +259,11 @@
                             <table class="w-full text-left border-collapse" id="devices-table">
                                 <thead class="bg-slate-800/50">
                                     <tr>
-                                        <th class="hidden sm:table-cell py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Status</th>
-                                        <th class="py-3 px-3 sm:px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Type</th>
-                                        <th class="hidden sm:table-cell py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Name</th>
-                                        <th class="py-3 px-3 sm:px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Device ID</th>
-                                        <th class="hidden sm:table-cell py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700 text-right">Actions</th>
+                                        <th class="hidden md:table-cell py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Status</th>
+                                        <th class="py-3 px-3 md:px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Type</th>
+                                        <th class="hidden md:table-cell py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Name</th>
+                                        <th class="py-3 px-3 md:px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700">Device ID</th>
+                                        <th class="hidden md:table-cell py-3 px-5 text-xs font-semibold text-slate-400 uppercase tracking-widest border-b border-slate-700 text-right">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody id="devices-body" class="divide-y divide-slate-700/50">

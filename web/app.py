@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import signal
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, fields
@@ -339,6 +340,8 @@ async def mqtt_listener() -> None:
                         "devices":         snapshot,
                     })
 
+        except asyncio.CancelledError:
+            raise
         except (aiomqtt.MqttError, Exception) as e:
             level = logger.warning if isinstance(e, aiomqtt.MqttError) else logger.error
             level("%s: %s — retrying in %ds", type(e).__name__, e, reconnect_delay)
@@ -347,7 +350,10 @@ async def mqtt_listener() -> None:
             state.mqtt_connected = False
             await broadcast({"type": "mqtt_status", "connected": False})
             
-            await asyncio.sleep(reconnect_delay)
+            try:
+                await asyncio.sleep(reconnect_delay)
+            except asyncio.CancelledError:
+                raise
             reconnect_delay = min(reconnect_delay * 2, MAX_RETRY_DELAY_SECS)
 
 
@@ -446,12 +452,18 @@ async def handle_ws_command(cmd: dict, websocket: WebSocket) -> None:
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
-async def fetch_config_from_mqtt(cfg: AppConfig | None = None) -> tuple[AppConfig, dict]:
+async def fetch_config_from_mqtt(
+    cfg: AppConfig | None = None,
+    *,
+    stop: asyncio.Event | None = None,
+) -> tuple[AppConfig, dict]:
     """Subscribe to the bridge config topic and return parsed AppConfig and raw data with retry."""
     cfg = cfg or AppConfig()
     reconnect_delay = INITIAL_RETRY_DELAY_SECS
 
     while True:
+        if stop and stop.is_set():
+            raise asyncio.CancelledError("Shutdown requested")
         try:
             logger.info("Fetching config from %s (via %s:%d)...", CONFIG_DISCOVERY_TOPIC, cfg.mqtt_broker, cfg.mqtt_port)
             async with aiomqtt.Client(
@@ -468,10 +480,32 @@ async def fetch_config_from_mqtt(cfg: AppConfig | None = None) -> tuple[AppConfi
                             logger.info("Config received: %s", data)
                             cfg.update_from_dict(data)
                             return cfg, data
+        except asyncio.CancelledError:
+            raise
         except (aiomqtt.MqttError, asyncio.TimeoutError, Exception) as e:
             reason = "Timeout" if isinstance(e, asyncio.TimeoutError) else str(e)
             logger.warning("Config fetch failed (%s). Retrying in %ds...", reason, reconnect_delay)
-            await asyncio.sleep(reconnect_delay)
+
+            # Race between sleep and stop event so Ctrl+C wakes us immediately
+            if stop:
+                sleep_task = asyncio.ensure_future(asyncio.sleep(reconnect_delay))
+                stop_task  = asyncio.ensure_future(stop.wait())
+                try:
+                    done, pending = await asyncio.wait(
+                        [sleep_task, stop_task],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                finally:
+                    for t in pending:
+                        t.cancel()
+                if stop.is_set():
+                    raise asyncio.CancelledError("Shutdown requested")
+            else:
+                try:
+                    await asyncio.sleep(reconnect_delay)
+                except asyncio.CancelledError:
+                    raise
+
             reconnect_delay = min(reconnect_delay * 2, MAX_RETRY_DELAY_SECS)
 
 
@@ -527,9 +561,35 @@ async def lifespan(app: FastAPI):
     init_cfg = AppConfig()
     init_cfg.update_from_dict(bridge_kwargs)
 
-    # 3. Wait for config to be published via MQTT and start listener
-    state.config, config_data = await fetch_config_from_mqtt(init_cfg)
-    
+    # 7. Re-register Python SIGINT/SIGTERM handlers so Ctrl+C works even when
+    #    the Rust bridge replaces the default signal handler during start_async().
+    _stop = asyncio.Event()
+    loop  = asyncio.get_running_loop()
+    try:
+        loop.add_signal_handler(signal.SIGINT,  _stop.set)
+        loop.add_signal_handler(signal.SIGTERM, _stop.set)
+    except (NotImplementedError, OSError):
+        pass  # Windows / some edge environments
+
+    # 8. Wait for config to be published via MQTT and start listener
+    try:
+        state.config, config_data = await fetch_config_from_mqtt(init_cfg, stop=_stop)
+    except asyncio.CancelledError:
+        logger.info("Startup cancelled — shutting down bridge.")
+        bridge_task.cancel()
+        try:
+            await asyncio.wait_for(bridge_task, timeout=5.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            pass
+        raise
+    finally:
+        # Restore handlers so uvicorn can manage signals during normal operation
+        try:
+            loop.remove_signal_handler(signal.SIGINT)
+            loop.remove_signal_handler(signal.SIGTERM)
+        except (NotImplementedError, OSError):
+            pass
+
     # Save config to file if it doesn't exist
     if not config_path.exists():
         logger.info("Saving received config to %s", config_path)
@@ -543,7 +603,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # 3. Shutdown
+    # Shutdown
     task.cancel()
     bridge_task.cancel()
     logger.info("Internal rustuya-bridge stopped.")

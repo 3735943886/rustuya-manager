@@ -945,6 +945,27 @@ function hidePanelBackdrop() {
 }
 
 // =============================================================================
+// Mobile Sidebar
+// =============================================================================
+function toggleSidebar() {
+    const sidebar  = document.getElementById('sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    const isOpen   = !sidebar.classList.contains('-translate-x-full');
+    if (isOpen) {
+        sidebar.classList.add('-translate-x-full');
+        backdrop.classList.add('hidden');
+    } else {
+        sidebar.classList.remove('-translate-x-full');
+        backdrop.classList.remove('hidden');
+    }
+}
+
+function closeSidebar() {
+    document.getElementById('sidebar').classList.add('-translate-x-full');
+    document.getElementById('sidebar-backdrop').classList.add('hidden');
+}
+
+// =============================================================================
 // Navigation
 // =============================================================================
 function showSection(sectionId) {
@@ -954,6 +975,8 @@ function showSection(sectionId) {
     event.currentTarget.classList.add('active');
     const titles = { dashboard: 'Device Dashboard', devices: 'Topology View', settings: 'Settings' };
     document.getElementById('page-title').innerText = titles[sectionId] || 'Dashboard';
+    // Auto-close sidebar on mobile after nav
+    if (window.innerWidth < 1024) closeSidebar();
 }
 
 // =============================================================================

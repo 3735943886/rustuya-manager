@@ -27,8 +27,11 @@
 <body class="bg-darkBg text-slate-200 min-h-screen font-sans antialiased">
 <div id="app" class="flex h-screen overflow-hidden">
 
+    <!-- Mobile Sidebar Backdrop -->
+    <div id="sidebar-backdrop" class="fixed inset-0 bg-black/60 z-40 hidden lg:hidden" onclick="closeSidebar()"></div>
+
     <!-- Sidebar Navigation -->
-    <aside class="w-64 bg-cardBg border-r border-slate-700 flex flex-col justify-between transition-all duration-300">
+    <aside id="sidebar" class="fixed lg:relative inset-y-0 left-0 w-64 bg-cardBg border-r border-slate-700 flex flex-col justify-between transition-transform duration-300 z-50 -translate-x-full lg:translate-x-0">
         <div>
             <div class="h-16 flex items-center px-6 border-b border-slate-700">
                 <i class="fa-solid fa-microchip text-brandBlue text-2xl mr-3"></i>
@@ -39,11 +42,11 @@
                     <i class="fa-solid fa-border-all w-6 text-center"></i>
                     <span class="ml-3 font-medium">Dashboard</span>
                 </a>
-                <a href="#" onclick="openWizardModal()" class="nav-item flex items-center px-4 py-3 bg-transparent text-slate-400 hover:text-white rounded-lg transition-all duration-200">
+                <a href="#" onclick="openWizardModal(); if(window.innerWidth<1024) closeSidebar()" class="nav-item flex items-center px-4 py-3 bg-transparent text-slate-400 hover:text-white rounded-lg transition-all duration-200">
                     <i class="fa-solid fa-wand-magic-sparkles w-6 text-center text-purple-400"></i>
                     <span class="ml-3 font-medium">Tuya Wizard</span>
                 </a>
-                <a href="#" onclick="toggleLogPanel()" class="nav-item flex items-center px-4 py-3 bg-transparent text-slate-400 hover:text-white rounded-lg transition-all duration-200">
+                <a href="#" onclick="toggleLogPanel(); if(window.innerWidth<1024) closeSidebar()" class="nav-item flex items-center px-4 py-3 bg-transparent text-slate-400 hover:text-white rounded-lg transition-all duration-200">
                     <i class="fa-solid fa-list-ul w-6 text-center text-slate-400"></i>
                     <span class="ml-3 font-medium">Activity Log</span>
                 </a>
@@ -67,43 +70,51 @@
     </aside>
 
     <!-- Main Content Area -->
-    <main class="flex-1 flex flex-col overflow-hidden relative">
+    <main class="flex-1 flex flex-col overflow-hidden relative min-w-0">
         <!-- Header -->
-        <header class="h-16 bg-cardBg bg-opacity-80 backdrop-blur-md border-b border-slate-700 flex items-center justify-between px-6 z-10">
-            <h2 id="page-title" class="text-xl font-semibold text-white tracking-wide">Device Dashboard</h2>
-            <div class="flex items-center space-x-4">
+        <header class="h-16 bg-cardBg bg-opacity-80 backdrop-blur-md border-b border-slate-700 flex items-center justify-between px-4 lg:px-6 z-10">
+            <div class="flex items-center gap-3">
+                <!-- Mobile hamburger -->
+                <button id="sidebar-toggle" onclick="toggleSidebar()" aria-label="Open menu"
+                        class="lg:hidden p-2 text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-800">
+                    <i class="fa-solid fa-bars text-lg"></i>
+                </button>
+                <h2 id="page-title" class="text-lg lg:text-xl font-semibold text-white tracking-wide">Device Dashboard</h2>
+            </div>
+            <div class="flex items-center space-x-2 lg:space-x-4">
                 <button onclick="requestStatusUpdate()" aria-label="Refresh Status"
                         class="p-2 text-slate-400 hover:text-white transition-colors tooltip" data-tip="Refresh Status">
                     <i class="fa-solid fa-rotate-right"></i>
                 </button>
                 <button onclick="openAddDeviceModal()" class="btn-primary">
-                    <i class="fa-solid fa-plus mr-2"></i> Add Device
+                    <i class="fa-solid fa-plus"></i>
+                    <span class="hidden sm:inline ml-2">Add Device</span>
                 </button>
             </div>
         </header>
 
         <!-- Content Container -->
-        <div class="flex-1 overflow-y-auto p-6 scrollbar">
+        <div class="flex-1 overflow-y-auto p-3 sm:p-6 scrollbar">
 
             <!-- Dashboard Section -->
-            <section id="dashboard" class="section h-full flex flex-col gap-6">
+            <section id="dashboard" class="section h-full flex flex-col gap-3 sm:gap-6">
                 <!-- Stats Cards -->
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-6 shrink-0">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6 shrink-0">
                     <!-- Total Devices -->
                     <div class="stat-card group relative overflow-hidden">
                         <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
                             <i class="fa-solid fa-diagram-project text-5xl"></i>
                         </div>
                         <div class="relative z-10">
-                            <div class="flex items-center gap-3 text-slate-400 mb-2">
-                                <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400">
-                                    <i class="fa-solid fa-microchip"></i>
+                            <div class="flex items-center gap-2 sm:gap-3 text-slate-400 mb-2">
+                                <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400">
+                                    <i class="fa-solid fa-microchip text-sm sm:text-base"></i>
                                 </div>
-                                <h3 class="font-medium text-sm">Bridge Devices</h3>
+                                <h3 class="font-medium text-xs sm:text-sm leading-tight">Bridge<span class="hidden sm:inline"> Devices</span></h3>
                             </div>
-                            <div class="flex items-baseline gap-2">
-                                <span id="stat-total" class="text-3xl font-bold text-white">0</span>
-                                <span class="text-xs text-slate-500">local nodes</span>
+                            <div class="flex items-baseline gap-1 sm:gap-2">
+                                <span id="stat-total" class="text-2xl sm:text-3xl font-bold text-white">0</span>
+                                <span class="text-xs text-slate-500 hidden sm:inline">local nodes</span>
                             </div>
                         </div>
                     </div>
@@ -114,15 +125,15 @@
                             <i class="fa-solid fa-cloud text-5xl text-brandBlue"></i>
                         </div>
                         <div class="relative z-10">
-                            <div class="flex items-center gap-3 text-slate-400 mb-2">
-                                <div class="w-8 h-8 rounded-lg bg-brandBlue/10 flex items-center justify-center text-brandBlue">
-                                    <i class="fa-solid fa-cloud"></i>
+                            <div class="flex items-center gap-2 sm:gap-3 text-slate-400 mb-2">
+                                <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-brandBlue/10 flex items-center justify-center text-brandBlue">
+                                    <i class="fa-solid fa-cloud text-sm sm:text-base"></i>
                                 </div>
-                                <h3 class="font-medium text-sm">Cloud Assets</h3>
+                                <h3 class="font-medium text-xs sm:text-sm leading-tight">Cloud<span class="hidden sm:inline"> Assets</span></h3>
                             </div>
-                            <div class="flex items-baseline gap-2">
-                                <span id="stat-cloud" class="text-3xl font-bold text-white">0</span>
-                                <span class="text-xs text-slate-500">tuya cloud</span>
+                            <div class="flex items-baseline gap-1 sm:gap-2">
+                                <span id="stat-cloud" class="text-2xl sm:text-3xl font-bold text-white">0</span>
+                                <span class="text-xs text-slate-500 hidden sm:inline">tuya cloud</span>
                             </div>
                         </div>
                     </div>
@@ -133,15 +144,15 @@
                             <i class="fa-solid fa-check-double text-5xl text-emerald-500"></i>
                         </div>
                         <div class="relative z-10">
-                            <div class="flex items-center gap-3 text-slate-400 mb-2">
-                                <div class="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
-                                    <i class="fa-solid fa-check-circle"></i>
+                            <div class="flex items-center gap-2 sm:gap-3 text-slate-400 mb-2">
+                                <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                                    <i class="fa-solid fa-check-circle text-sm sm:text-base"></i>
                                 </div>
-                                <h3 class="font-medium text-sm">Synchronized</h3>
+                                <h3 class="font-medium text-xs sm:text-sm leading-tight">Synced<span class="hidden sm:inline">ronized</span></h3>
                             </div>
-                            <div class="flex items-baseline gap-2">
-                                <span id="stat-synced" class="text-3xl font-bold text-white">0</span>
-                                <span class="text-xs text-slate-500">verified</span>
+                            <div class="flex items-baseline gap-1 sm:gap-2">
+                                <span id="stat-synced" class="text-2xl sm:text-3xl font-bold text-white">0</span>
+                                <span class="text-xs text-slate-500 hidden sm:inline">verified</span>
                             </div>
                         </div>
                     </div>
@@ -152,16 +163,16 @@
                             <i class="fa-solid fa-triangle-exclamation text-5xl text-amber-500"></i>
                         </div>
                         <div class="relative z-10">
-                            <div class="flex items-center gap-3 text-slate-400 mb-2">
-                                <div class="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
-                                    <i class="fa-solid fa-circle-exclamation"></i>
+                            <div class="flex items-center gap-2 sm:gap-3 text-slate-400 mb-2">
+                                <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500">
+                                    <i class="fa-solid fa-circle-exclamation text-sm sm:text-base"></i>
                                 </div>
-                                <h3 class="font-medium text-sm">Pending Issues</h3>
+                                <h3 class="font-medium text-xs sm:text-sm leading-tight">Issues<span class="hidden sm:inline"> Pending</span></h3>
                             </div>
                             <div class="flex flex-col">
-                                <div class="flex items-baseline gap-2">
-                                    <span id="stat-conflicts" class="text-3xl font-bold text-white">0</span>
-                                    <span class="text-xs text-slate-500">total issues</span>
+                                <div class="flex items-baseline gap-1 sm:gap-2">
+                                    <span id="stat-conflicts" class="text-2xl sm:text-3xl font-bold text-white">0</span>
+                                    <span class="text-xs text-slate-500 hidden sm:inline">total issues</span>
                                 </div>
                                 <div id="stat-issues-detail" class="text-[10px] leading-tight mt-1 flex flex-wrap gap-x-2">
                                     <!-- Granular counts will be injected here -->
@@ -225,19 +236,19 @@
                                 <i class="fa-solid fa-check-circle mr-3"></i>
                                 Synced Devices (<span id="count-synced">0</span>)
                             </h3>
-                            <div class="flex items-center gap-3">
+                            <div class="flex items-center gap-2 flex-wrap justify-end">
                                 <!-- Status filter -->
                                 <div class="flex items-center gap-1 bg-slate-900 rounded-lg p-1">
-                                    <button data-filter="all"       onclick="setFilter('all')"       class="filter-btn active-filter px-3 py-1 rounded text-xs font-medium transition-colors">All</button>
-                                    <button data-filter="online"    onclick="setFilter('online')"    class="filter-btn px-3 py-1 rounded text-xs font-medium transition-colors">Online</button>
-                                    <button data-filter="offline"   onclick="setFilter('offline')"   class="filter-btn px-3 py-1 rounded text-xs font-medium transition-colors">Offline</button>
-                                    <button data-filter="subdevice" onclick="setFilter('subdevice')" class="filter-btn px-3 py-1 rounded text-xs font-medium transition-colors">Sub</button>
+                                    <button data-filter="all"       onclick="setFilter('all')"       class="filter-btn active-filter px-2 sm:px-3 py-1 rounded text-xs font-medium transition-colors">All</button>
+                                    <button data-filter="online"    onclick="setFilter('online')"    class="filter-btn px-2 sm:px-3 py-1 rounded text-xs font-medium transition-colors">On</button>
+                                    <button data-filter="offline"   onclick="setFilter('offline')"   class="filter-btn px-2 sm:px-3 py-1 rounded text-xs font-medium transition-colors">Off</button>
+                                    <button data-filter="subdevice" onclick="setFilter('subdevice')" class="filter-btn px-2 sm:px-3 py-1 rounded text-xs font-medium transition-colors">Sub</button>
                                 </div>
                                 <!-- Search -->
                                 <div class="relative">
                                     <i class="fa-solid fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500"></i>
-                                    <input type="text" id="search-input" onkeyup="renderDashboard()" placeholder="Search devices..."
-                                           class="pl-10 pr-4 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:border-brandBlue transition-colors w-56"
+                                    <input type="text" id="search-input" onkeyup="renderDashboard()" placeholder="Search..."
+                                           class="pl-9 pr-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:border-brandBlue transition-colors w-32 sm:w-48 lg:w-56"
                                            aria-label="Search devices">
                                 </div>
                             </div>
@@ -476,7 +487,7 @@
 </div>
 
 <!-- Device Details Sliding Panel -->
-<div id="details-panel" class="fixed inset-y-0 right-0 w-96 bg-cardBg border-l border-slate-700 shadow-2xl transform translate-x-full transition-transform duration-300 z-40 flex flex-col">
+<div id="details-panel" class="fixed inset-y-0 right-0 w-full sm:w-96 bg-cardBg border-l border-slate-700 shadow-2xl transform translate-x-full transition-transform duration-300 z-40 flex flex-col">
     <div class="h-16 flex items-center justify-between px-6 border-b border-slate-700 bg-slate-800/80 backdrop-blur-md">
         <h3 class="font-bold text-white tracking-wide">Device Details</h3>
         <button onclick="closeDetails()" aria-label="Close details panel" class="text-slate-400 hover:text-white transition-colors">
@@ -516,7 +527,7 @@
 </div>
 
 <!-- Activity Log Sliding Panel -->
-<div id="log-panel" class="fixed inset-y-0 right-0 w-96 bg-cardBg border-l border-slate-700 shadow-2xl transform translate-x-full transition-transform duration-300 z-40 flex flex-col">
+<div id="log-panel" class="fixed inset-y-0 right-0 w-full sm:w-96 bg-cardBg border-l border-slate-700 shadow-2xl transform translate-x-full transition-transform duration-300 z-40 flex flex-col">
     <div class="h-16 flex items-center justify-between px-6 border-b border-slate-700 bg-slate-800/80 backdrop-blur-md">
         <h3 class="font-bold text-white tracking-wide flex items-center gap-2">
             <i class="fa-solid fa-list-ul text-slate-400"></i> Activity Log

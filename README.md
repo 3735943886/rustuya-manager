@@ -37,7 +37,7 @@ Create a `docker-compose.yml` file:
 version: '3.8'
 services:
   rustuya-manager:
-    image: ghcr.io/3735943886/rustuya-manager:latest
+    image: 3735943886/rustuya-manager:latest
     container_name: rustuya-manager
     restart: unless-stopped
     network_mode: host
@@ -57,7 +57,7 @@ docker run -d \
   --restart unless-stopped \
   --network host \
   -v $(pwd)/data:/data \
-  ghcr.io/3735943886/rustuya-manager:latest
+  3735943886/rustuya-manager:latest
 ```
 
 Open your browser and navigate to `http://localhost:8373`.

@@ -298,7 +298,7 @@
                                             class="fa-solid fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-500"></i>
                                         <input type="text" id="search-input" onkeyup="renderDashboard()"
                                             placeholder="Search..."
-                                            class="pl-9 pr-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:border-brandBlue transition-colors w-28 md:w-48 lg:w-56"
+                                            class="pl-9 pr-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-base md:text-sm text-white focus:outline-none focus:border-brandBlue transition-colors w-28 md:w-48 lg:w-56"
                                             aria-label="Search devices">
                                     </div>
                                 </div>
@@ -372,12 +372,12 @@
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-1" for="dev-id">Device ID</label>
                             <input type="text" id="dev-id" required
-                                class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                                class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-base text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-slate-300 mb-1" for="dev-name">Name</label>
                             <input type="text" id="dev-name"
-                                class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                                class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-base text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
                         </div>
                         <div class="pt-2">
                             <label class="block text-sm font-medium text-slate-300 mb-2">Protocol</label>
@@ -402,20 +402,20 @@
                                 <label class="block text-sm font-medium text-slate-300 mb-1" for="dev-key">Local
                                     Key</label>
                                 <input type="text" id="dev-key"
-                                    class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                                    class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-base text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
                             </div>
                             <div class="grid grid-cols-5 gap-4">
                                 <div class="col-span-3">
                                     <label class="block text-sm font-medium text-slate-300 mb-1" for="dev-ip">IP
                                         Address</label>
                                     <input type="text" id="dev-ip" placeholder="Auto"
-                                        class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                                        class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-base text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
                                 </div>
                                 <div class="col-span-2">
                                     <label class="block text-sm font-medium text-slate-300 mb-1"
                                         for="dev-version">Version</label>
                                     <input type="text" id="dev-version" placeholder="Auto"
-                                        class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                                        class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-base text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
                                 </div>
                             </div>
                         </div>
@@ -425,13 +425,13 @@
                                 <label class="block text-sm font-medium text-slate-300 mb-1" for="dev-node">Node ID
                                     (CID)</label>
                                 <input type="text" id="dev-node"
-                                    class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
+                                    class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-base text-white placeholder-slate-500 focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-300 mb-1" for="dev-parent">Parent
                                     ID</label>
                                 <select id="dev-parent"
-                                    class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow appearance-none">
+                                    class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-base text-white focus:outline-none focus:border-brandBlue focus:ring-1 focus:ring-brandBlue transition-shadow appearance-none">
                                     <option value="">Select Parent...</option>
                                 </select>
                             </div>
@@ -467,7 +467,7 @@
                             <label class="block text-sm font-medium text-slate-300 mb-1" for="wizard-code">User
                                 Code</label>
                             <input type="text" id="wizard-code" placeholder="user_code"
-                                class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-shadow">
+                                class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-base text-white placeholder-slate-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition-shadow">
                         </div>
                     </div>
                     <div class="mt-8 flex justify-end space-x-3">

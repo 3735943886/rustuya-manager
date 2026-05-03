@@ -98,3 +98,17 @@ body {
     pointer-events: auto;
     max-width: 360px;
 }
+
+/* Prevent iOS auto-zoom on focus by ensuring font-size is at least 16px */
+input:not([type="checkbox"]):not([type="radio"]), 
+select, 
+textarea {
+    font-size: 16px !important;
+}
+
+/* On larger screens, we can allow smaller fonts if specified by classes */
+@media (min-width: 768px) {
+    .text-sm {
+        font-size: 0.875rem !important;
+    }
+}

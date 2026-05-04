@@ -42,4 +42,4 @@ VOLUME ["/data"]
 # Port and execution command
 ENV PORT=8373
 EXPOSE $PORT
-CMD ["python", "web/app.py"]
+CMD ["exec", "python", "web/app.py"]

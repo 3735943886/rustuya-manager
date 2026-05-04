@@ -36,10 +36,14 @@ ENV DATA_DIR=/data
 # Create data directory
 RUN mkdir -p /data && chmod 777 /data
 
+# Install tini for signal forwarding
+RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
+
 # Define volume for data persistence
 VOLUME ["/data"]
 
 # Port and execution command
 ENV PORT=8373
 EXPOSE $PORT
-CMD ["exec", "python", "web/app.py"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "-u", "web/app.py"]

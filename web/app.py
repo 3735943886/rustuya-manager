@@ -520,6 +520,7 @@ async def lifespan(app: FastAPI):
         "state_file": str(DATA_DIR / "rustuya.json"),
         "config_path": str(config_path),
         "log_level": "info",
+        "no_signals": True,
     }
     
     # 3. Load from config.json if it exists
@@ -578,9 +579,12 @@ async def lifespan(app: FastAPI):
         logger.info("Startup cancelled — shutting down bridge.")
         bridge_task.cancel()
         try:
+            # Wait for bridge to stop and perform its own cleanup
             await asyncio.wait_for(bridge_task, timeout=5.0)
         except (asyncio.CancelledError, asyncio.TimeoutError):
             pass
+        # Explicitly call close just in case
+        await bridge.close()
         raise
     finally:
         # Restore handlers so uvicorn can manage signals during normal operation
@@ -604,8 +608,17 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown
+    logger.info("Shutting down manager...")
     task.cancel()
     bridge_task.cancel()
+    try:
+        # Give the bridge a chance to clean up via its own internal signal handling or cancellation
+        await asyncio.wait_for(bridge_task, timeout=5.0)
+    except (asyncio.CancelledError, asyncio.TimeoutError):
+        pass
+    
+    # Explicitly call close to ensure MQTT disconnect and state saving
+    await bridge.close()
     logger.info("Internal rustuya-bridge stopped.")
 
 

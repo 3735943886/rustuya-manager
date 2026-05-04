@@ -42,4 +42,4 @@ VOLUME ["/data"]
 # Port and execution command
 ENV PORT=8373
 EXPOSE $PORT
-CMD ["sh", "-c", "uvicorn web.app:app --host 0.0.0.0 --port $PORT"]
+CMD ["uvicorn", "web.app:app", "--host", "[IP_ADDRESS]", "--port", "$PORT"]

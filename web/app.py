@@ -573,53 +573,49 @@ async def lifespan(app: FastAPI):
         pass  # Windows / some edge environments
 
     # 8. Wait for config to be published via MQTT and start listener
+    task = None
     try:
-        state.config, config_data = await fetch_config_from_mqtt(init_cfg, stop=_stop)
-    except asyncio.CancelledError:
-        logger.info("Startup cancelled — shutting down bridge.")
+        try:
+            state.config, config_data = await fetch_config_from_mqtt(init_cfg, stop=_stop)
+        finally:
+            # Restore handlers so uvicorn can manage signals during normal operation
+            try:
+                loop.remove_signal_handler(signal.SIGINT)
+                loop.remove_signal_handler(signal.SIGTERM)
+            except (NotImplementedError, OSError):
+                pass
+
+        # Save config to file if it doesn't exist
+        if not config_path.exists():
+            logger.info("Saving received config to %s", config_path)
+            await asyncio.to_thread(
+                config_path.write_text,
+                json.dumps(config_data, indent=4, ensure_ascii=False),
+                encoding="utf-8"
+            )
+
+        task = asyncio.create_task(mqtt_listener())
+        yield
+    finally:
+        # Shutdown
+        logger.info("Shutting down manager...")
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
         bridge_task.cancel()
         try:
-            # Wait for bridge to stop and perform its own cleanup
+            # Give the bridge a chance to clean up via its own internal signal handling or cancellation
             await asyncio.wait_for(bridge_task, timeout=5.0)
         except (asyncio.CancelledError, asyncio.TimeoutError):
             pass
-        # Explicitly call close just in case
+        
+        # Explicitly call close to ensure MQTT disconnect and state saving
         await bridge.close()
-        raise
-    finally:
-        # Restore handlers so uvicorn can manage signals during normal operation
-        try:
-            loop.remove_signal_handler(signal.SIGINT)
-            loop.remove_signal_handler(signal.SIGTERM)
-        except (NotImplementedError, OSError):
-            pass
-
-    # Save config to file if it doesn't exist
-    if not config_path.exists():
-        logger.info("Saving received config to %s", config_path)
-        await asyncio.to_thread(
-            config_path.write_text,
-            json.dumps(config_data, indent=4, ensure_ascii=False),
-            encoding="utf-8"
-        )
-
-    task = asyncio.create_task(mqtt_listener())
-    
-    yield
-    
-    # Shutdown
-    logger.info("Shutting down manager...")
-    task.cancel()
-    bridge_task.cancel()
-    try:
-        # Give the bridge a chance to clean up via its own internal signal handling or cancellation
-        await asyncio.wait_for(bridge_task, timeout=5.0)
-    except (asyncio.CancelledError, asyncio.TimeoutError):
-        pass
-    
-    # Explicitly call close to ensure MQTT disconnect and state saving
-    await bridge.close()
-    logger.info("Internal rustuya-bridge stopped.")
+        logger.info("Internal rustuya-bridge stopped.")
 
 
 app = FastAPI(lifespan=lifespan)

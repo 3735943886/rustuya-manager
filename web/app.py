@@ -129,8 +129,11 @@ async def _send_raw(ws: WebSocket, payload: str) -> None:
 
 async def broadcast(message: dict) -> None:
     if state.websocket_connections:
-        payload = json.dumps(message)
-        await asyncio.gather(*(_send_raw(ws, payload) for ws in list(state.websocket_connections)))
+        try:
+            payload = json.dumps(message)
+            await asyncio.gather(*(_send_raw(ws, payload) for ws in list(state.websocket_connections)))
+        except Exception as e:
+            logger.debug("Broadcast failed (expected during shutdown): %s", e)
 
 
 async def send_to(ws: WebSocket, message: dict) -> None:
@@ -598,24 +601,45 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         # Shutdown
-        logger.info("Shutting down manager...")
-        if task:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        async def cleanup():
+            logger.info("Shutting down manager (cleanup phase 1/3)...")
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
-        bridge_task.cancel()
+            logger.info("Shutting down manager (cleanup phase 2/3)...")
+            bridge_task.cancel()
+            try:
+                # Give the bridge a moment to see the cancellation
+                await asyncio.wait_for(bridge_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+            
+            logger.info("Shutting down manager (cleanup phase 3/3: closing bridge)...")
+            try:
+                # Explicitly call close to ensure MQTT disconnect and state saving
+                await bridge.close()
+                logger.info("Internal rustuya-bridge stopped.")
+            except Exception as e:
+                logger.error("Error during bridge close: %s", e)
+
+        # Shield the cleanup task so it cannot be cancelled by Starlette/Uvicorn's exit signals.
+        # This ensures we have a chance to finish MQTT flushing and state saving.
+        cleanup_task = asyncio.create_task(cleanup())
         try:
-            # Give the bridge a chance to clean up via its own internal signal handling or cancellation
-            await asyncio.wait_for(bridge_task, timeout=5.0)
-        except (asyncio.CancelledError, asyncio.TimeoutError):
-            pass
-        
-        # Explicitly call close to ensure MQTT disconnect and state saving
-        await bridge.close()
-        logger.info("Internal rustuya-bridge stopped.")
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError:
+            logger.warning("Shutdown signal received during cleanup, waiting for completion...")
+            try:
+                # Still wait for the cleanup to finish, but with a hard timeout
+                await asyncio.wait_for(cleanup_task, timeout=10.0)
+            except Exception as e:
+                logger.error("Cleanup failed to complete in time: %s", e)
+        except Exception as e:
+            logger.error("Unexpected error during cleanup: %s", e)
 
 
 app = FastAPI(lifespan=lifespan)

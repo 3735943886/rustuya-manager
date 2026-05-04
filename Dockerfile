@@ -45,5 +45,6 @@ VOLUME ["/data"]
 # Port and execution command
 ENV PORT=8373
 EXPOSE $PORT
+STOPSIGNAL SIGINT
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "-u", "web/app.py"]

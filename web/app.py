@@ -133,12 +133,9 @@ class AppConfig:
                 for key, placeholder in matches:
                     if key in payload:
                         val = payload[key]
-                        if placeholder == "dp": captured["dp"] = str(val)
-                        elif placeholder == "value": captured["value"] = val
-                        elif placeholder == "id": captured["id"] = str(val)
-                        else: captured[placeholder] = val
+                        captured[placeholder] = val
                 
-                if "value" in captured or "dp" in captured or "id" in captured:
+                if captured:
                     return captured
         except Exception as e:
             logger.debug("Payload template match failed: %s", e)
@@ -225,7 +222,7 @@ def extract_devices(payload: dict) -> dict | None:
     return {}
 
 
-def _match_template(template: str | None, root: str, topic: str) -> dict[str, str] | None:
+def _match_template(template: str | None, root: str, topic: str) -> dict[str, Any] | None:
     """Match topic against template segment-by-segment and capture {vars}."""
     if not template: return None
     tmpl_parts  = template.replace("{root}", root).split("/")
@@ -248,8 +245,8 @@ def _match_template(template: str | None, root: str, topic: str) -> dict[str, st
     return captured
 
 
-def classify_mqtt_topic(topic: str) -> tuple[str, dict[str, str]]:
-    """Strict template-based classification: 'event'|'response'|'error'|'scanner'|'command'."""
+def classify_mqtt_topic(topic: str, payload: Any) -> tuple[str, dict[str, Any]]:
+    """Strict template-based classification using both topic and payload."""
     cfg = state.config
     
     # Rule-based matching in order of priority
@@ -264,6 +261,10 @@ def classify_mqtt_topic(topic: str) -> tuple[str, dict[str, str]]:
         m = _match_template(template, cfg.mqtt_root_topic, topic)
         if m is None: continue
         
+        # Merge variables from payload template
+        payload_vars = cfg.match_payload(payload)
+        m.update(payload_vars)
+
         # Resolve specific subtype
         sub = m.get("level") or m.get("type") or base_type
         if sub in ("response", "error"): return sub, m
@@ -295,16 +296,18 @@ def _handle_response(did: str, action: str | None, payload: dict) -> tuple[bool,
 
 
 def _handle_event_error(
-    did: str, topic_type: str, action: str | None, payload: object, captured_vars: dict[str, str]
+    did: str, topic_type: str, action: str | None, payload: object, captured_vars: dict[str, Any]
 ) -> tuple[bool, dict | None, bool]:
     if action:  # bridge command echo, not a device update
         return False, None, False
 
     filtered = {"status": "online"} if topic_type == "event" else {}
     if "dp" in captured_vars:
-        # Per-DP mode: topic contains {dp} and potentially {value}
-        dp = captured_vars["dp"]
-        val = payload if payload is not None and payload != "" else captured_vars.get("value")
+        # Per-DP mode: topic or payload contains {dp} and potentially {value}
+        dp = str(captured_vars["dp"])
+        val = captured_vars.get("value")
+        if val is None or val == "":
+            val = payload
         filtered = {dp: val}
     elif isinstance(payload, dict):
         # Bulk mode: payload contains dict of DPs
@@ -324,7 +327,7 @@ def _handle_event_error(
 
 
 def handle_mqtt_message(
-    topic: str, payload: object, topic_type: str, captured_vars: dict[str, str]
+    topic: str, payload: object, topic_type: str, captured_vars: dict[str, Any]
 ) -> tuple[bool, dict | None, bool]:
     """
     Update devices_map from an MQTT message.
@@ -386,7 +389,7 @@ async def mqtt_listener() -> None:
                     topic = str(message.topic)
                     payload = decode_payload(message)
 
-                    topic_type, captured_vars          = classify_mqtt_topic(topic)
+                    topic_type, captured_vars          = classify_mqtt_topic(topic, payload)
                     if topic_type in ("command", "unknown"):
                         continue  # command: our own echo; unknown: unrecognised topic
 
@@ -399,12 +402,20 @@ async def mqtt_listener() -> None:
                         logger.info("Auto-requesting '%s' for device: %s", refresh_action, target_id or "all")
                         await client.publish(cmd_topic, cmd_payload)
 
+                    # Determine live value for UI display
+                    live_dp = captured_vars.get("dp")
+                    live_val = captured_vars.get("value")
+                    if live_dp and (live_val is None or live_val == ""):
+                        live_val = payload
+
                     await broadcast({
                         "type":            "mqtt",
                         "topic_type":      topic_type,
                         "topic":           topic,
                         "payload":         payload,
                         "id":              captured_vars.get("id"),
+                        "dp":              live_dp,
+                        "value":           live_val,
                         "devices_updated": devices_updated,
                         "devices":         snapshot,
                     })

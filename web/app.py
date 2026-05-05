@@ -2,13 +2,13 @@ import asyncio
 import json
 import logging
 import os
+import re
 import signal
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
-import re
 
 import aiomqtt
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -28,7 +28,11 @@ CLOUD_PATH = DATA_DIR / "tuyadevices.json"
 CREDS_PATH = DATA_DIR / "tuyacreds.json"
 
 CONFIG_DISCOVERY_TOPIC = "rustuya/bridge/config"
-BRIDGE_ACTIONS = {"add", "remove", "status", "query", "get", "delete"}
+BRIDGE_ACTIONS = {"add", "remove", "status", "query", "get"}
+WS_DELETE_ALIAS = "delete"  # Frontend alias → 'remove'
+
+# Keys to strip from bulk event/error payloads before storing in devices_map
+_EVENT_JUNK_KEYS = frozenset({"errorCode", "errorMsg", "payloadStr", "id", "action"})
 
 # MQTT Backoff Constants
 INITIAL_RETRY_DELAY_SECS = 10
@@ -61,10 +65,11 @@ class AppConfig:
     mqtt_root_topic:     str       = "rustuya"
     mqtt_user:           str | None = None
     mqtt_password:       str | None = None
-    mqtt_command_topic:  str       = "{root}/command"
-    mqtt_event_topic:    str       = "{root}/event/{type}/{id}"
-    mqtt_message_topic:  str       = "{root}/{level}/{id}"
-    mqtt_scanner_topic:  str       = "{root}/scanner"
+    mqtt_command_topic:    str       = "{root}/command"
+    mqtt_event_topic:     str       = "{root}/event/{type}/{id}"
+    mqtt_message_topic:   str       = "{root}/{level}/{id}"
+    mqtt_scanner_topic:   str       = "{root}/scanner"
+    mqtt_payload_template: str      = "{value}"
 
     def update_from_dict(self, data: dict) -> None:
         if broker := data.get("mqtt_broker"):
@@ -109,7 +114,7 @@ class AppConfig:
 
     def match_payload(self, payload: object) -> dict[str, Any]:
         """Match payload against template to extract id, dp, value, etc."""
-        template = getattr(self, "mqtt_payload_template", "{value}")
+        template = self.mqtt_payload_template
         if not template or template == "{value}":
             return {"value": payload}
 
@@ -303,8 +308,7 @@ def _handle_event_error(
         filtered = {dp: val}
     elif isinstance(payload, dict):
         # Bulk mode: payload contains dict of DPs
-        JUNK = {"errorCode", "errorMsg", "payloadStr", "id", "action"}
-        filtered = {k: v for k, v in payload.items() if k not in JUNK}
+        filtered = {k: v for k, v in payload.items() if k not in _EVENT_JUNK_KEYS}
         if topic_type == "error" and "errorCode" in payload:
             filtered["status"] = "online" if payload["errorCode"] == 0 else str(payload["errorCode"])
     else:
@@ -390,10 +394,10 @@ async def mqtt_listener() -> None:
 
                     if refresh:
                         target_id = refresh if isinstance(refresh, str) else None
-                        action = "get" if target_id else "status"
-                        topic, payload_str = cfg.prepare_publish(action, {"id": target_id})
-                        logger.info("Auto-requesting '%s' for device: %s", action, target_id or "all")
-                        await client.publish(topic, payload_str)
+                        refresh_action = "get" if target_id else "status"
+                        cmd_topic, cmd_payload = cfg.prepare_publish(refresh_action, {"id": target_id} if target_id else None)
+                        logger.info("Auto-requesting '%s' for device: %s", refresh_action, target_id or "all")
+                        await client.publish(cmd_topic, cmd_payload)
 
                     await broadcast({
                         "type":            "mqtt",
@@ -494,8 +498,9 @@ async def handle_ws_command(cmd: dict, websocket: WebSocket) -> None:
     action  = cmd.get("action", "")
     payload = cmd.get("payload", {})
 
+    if action == WS_DELETE_ALIAS:
+        action = "remove"
     if action in BRIDGE_ACTIONS:
-        action = "remove" if action == "delete" else action
         if state.mqtt_client:
             topic, payload_str = state.config.prepare_publish(action, payload)
             await state.mqtt_client.publish(topic, payload_str)
@@ -552,24 +557,18 @@ async def fetch_config_from_mqtt(
             logger.warning("Config fetch failed (%s). Retrying in %ds...", reason, reconnect_delay)
 
             # Race between sleep and stop event so Ctrl+C wakes us immediately
+            sleep_task = asyncio.ensure_future(asyncio.sleep(reconnect_delay))
+            tasks_to_wait = [sleep_task]
             if stop:
-                sleep_task = asyncio.ensure_future(asyncio.sleep(reconnect_delay))
-                stop_task  = asyncio.ensure_future(stop.wait())
-                try:
-                    done, pending = await asyncio.wait(
-                        [sleep_task, stop_task],
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                finally:
-                    for t in pending:
-                        t.cancel()
-                if stop.is_set():
-                    raise asyncio.CancelledError("Shutdown requested")
-            else:
-                try:
-                    await asyncio.sleep(reconnect_delay)
-                except asyncio.CancelledError:
-                    raise
+                stop_task = asyncio.ensure_future(stop.wait())
+                tasks_to_wait.append(stop_task)
+            try:
+                await asyncio.wait(tasks_to_wait, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for t in tasks_to_wait:
+                    t.cancel()
+            if stop and stop.is_set():
+                raise asyncio.CancelledError("Shutdown requested")
 
             reconnect_delay = min(reconnect_delay * 2, MAX_RETRY_DELAY_SECS)
 

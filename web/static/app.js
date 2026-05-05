@@ -411,7 +411,7 @@ function renderSyncPanels() {
                             <th class="px-4 py-2">Type</th>
                             <th class="hidden md:table-cell px-4 py-2">Name</th>
                             <th class="px-4 py-2">ID</th>
-                            <th class="px-4 py-2 text-right">Actions</th>
+                            <th class="hidden md:table-cell px-4 py-2"></th>
                         </tr>
                     </thead>
                     <tbody id="body-orphan-rows"></tbody>
@@ -444,24 +444,12 @@ function renderSyncPanels() {
                         ${hasLive ? '<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>' : ''}
                     </td>
                     <td class="py-3 px-4 font-mono text-xs text-slate-400 max-w-[120px] truncate">${dev.id}</td>
-                    <td class="py-3 px-4">
-                        <div class="flex gap-1.5 justify-end flex-wrap" onclick="event.stopPropagation()">
-                            <button onclick="sendCommand('get', {id:'${dev.id}'})"
-                                title="Get device state"
-                                class="px-2.5 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-brandBlue/30 text-slate-300 hover:text-brandBlue border border-slate-600 hover:border-brandBlue/40 transition-colors">
-                                <i class="fa-solid fa-arrows-rotate mr-1"></i>Get
-                            </button>
-                            <button onclick="openEditDeviceModal('${dev.id}')"
-                                title="Edit device"
-                                class="px-2.5 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white border border-slate-600 transition-colors">
-                                <i class="fa-solid fa-pen-to-square mr-1"></i>Edit
-                            </button>
-                            <button onclick="resolveSingle('orphaned','${dev.id}',event)"
-                                title="Remove from bridge"
-                                class="px-2.5 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-600 hover:border-red-500/30 transition-colors">
-                                <i class="fa-solid fa-trash mr-1"></i>Delete
-                            </button>
-                        </div>
+                    <td class="hidden md:table-cell py-3 px-4 text-right">
+                        <button aria-label="Open device details"
+                                class="text-slate-500 hover:text-white p-2 rounded hover:bg-slate-700 transition-colors"
+                                onclick="event.stopPropagation(); openDetails('${dev.id}')">
+                            <i class="fa-solid fa-chevron-right"></i>
+                        </button>
                     </td>`;
                 tbody.appendChild(tr);
             }
@@ -474,8 +462,20 @@ function renderSyncPanels() {
 // =============================================================================
 // Resolve actions (DRY)
 // =============================================================================
-function resolveAll(category, e) {
+async function resolveAll(category, e) {
     if (e) e.stopPropagation();
+    const count = currentSyncData[category].length;
+    if (count === 0) return;
+
+    const config = {
+        missing: { title: 'Import All?', message: `Are you sure you want to import all ${count} missing devices?` },
+        mismatched: { title: 'Update All?', message: `Are you sure you want to update all ${count} mismatched devices?` },
+        orphaned: { title: 'Delete All?', message: `Are you sure you want to delete all ${count} orphaned devices from the bridge?` }
+    };
+
+    const confirmed = await showConfirm(config[category] || { title: 'Are you sure?', message: `Apply this action to all ${count} devices?` });
+    if (!confirmed) return;
+
     const actions = {
         missing: (dev) => submitDeviceBridgeAdd(dev),
         mismatched: (item) => submitDeviceBridgeAdd(item.cloud),
@@ -484,19 +484,28 @@ function resolveAll(category, e) {
     currentSyncData[category].forEach(actions[category]);
 }
 
-function resolveSingle(category, id, e) {
+async function resolveSingle(category, id, e) {
     if (e) e.stopPropagation();
     const item = currentSyncData[category].find(x => (x.id ?? x.cloud?.id) === id);
     if (!item) return;
-    category === 'orphaned'
-        ? sendCommand('remove', { id: item.id })
-        : submitDeviceBridgeAdd(category === 'mismatched' ? item.cloud : item);
+
+    if (category === 'orphaned') {
+        const confirmed = await showConfirm({
+            title: 'Delete Device?',
+            message: `Are you sure you want to delete "${item.name || item.id}" from the bridge?`
+        });
+        if (!confirmed) return;
+        sendCommand('remove', { id: item.id });
+    } else {
+        submitDeviceBridgeAdd(category === 'mismatched' ? item.cloud : item);
+    }
 }
 
 // Legacy shims for HTML onclick
 const resolveMissing = (e) => resolveAll('missing', e);
-const resolveMismatched = (e) => resolveAll('mismatched', e);
 const resolveOrphans = (e) => resolveAll('orphaned', e);
+const resolveMismatch = (e) => resolveAll('mismatched', e);
+const resolveMismatched = (e) => resolveAll('mismatched', e);
 
 function isPrivateIP(ip) {
     if (!ip || typeof ip !== 'string') return false;

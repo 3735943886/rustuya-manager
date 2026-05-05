@@ -7,6 +7,8 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+from typing import Any
+import re
 
 import aiomqtt
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -96,9 +98,68 @@ class AppConfig:
                 res = res.replace(key, val)
         return res
 
-    def resolve_command_topic(self, action: str, device_id: str | None = None) -> str:
-        """Resolve command topic using standardized formatter."""
-        return self.format(self.mqtt_command_topic, action=action, id=device_id)
+    def resolve_command_topic(self, action: str, device_id: str | None = None, dp: str | None = None) -> str:
+        """Resolve command topic using standardized formatter with dummy support."""
+        ctx = {
+            "action": action, 
+            "id": device_id or "_",
+            "dp": dp or "_"
+        }
+        return self.format(self.mqtt_command_topic, **ctx)
+
+    def match_payload(self, payload: object) -> dict[str, Any]:
+        """Match payload against template to extract id, dp, value, etc."""
+        template = getattr(self, "mqtt_payload_template", "{value}")
+        if not template or template == "{value}":
+            return {"value": payload}
+
+        if not isinstance(payload, dict):
+            return {"value": payload}
+
+        try:
+            tpl_str = template if isinstance(template, str) else json.dumps(template)
+            
+            # Robust regex to find "key": "{placeholder}" or 'key': {placeholder} etc.
+            pattern = r'["\']?([a-zA-Z0-9_-]+)["\']?\s*:\s*["\']?\{([a-zA-Z0-9_]+)\}["\']?'
+            matches = re.findall(pattern, tpl_str)
+            
+            if matches:
+                captured = {}
+                for key, placeholder in matches:
+                    if key in payload:
+                        val = payload[key]
+                        if placeholder == "dp": captured["dp"] = str(val)
+                        elif placeholder == "value": captured["value"] = val
+                        elif placeholder == "id": captured["id"] = str(val)
+                        else: captured[placeholder] = val
+                
+                if "value" in captured or "dp" in captured or "id" in captured:
+                    return captured
+        except Exception as e:
+            logger.debug("Payload template match failed: %s", e)
+
+        return {"value": payload}
+
+    def prepare_publish(self, action: str, payload: dict | None = None) -> tuple[str, str]:
+        """Resolve topic and clean payload based on template."""
+        payload = dict(payload or {})
+        device_id = payload.get("id")
+        dp = payload.get("dp")
+        
+        # 1. Resolve Topic (with dummy values)
+        topic = self.resolve_command_topic(action, device_id=device_id, dp=dp)
+        
+        # 2. Deduplicate Payload
+        # Remove fields that are already in the topic template
+        template = self.mqtt_command_topic
+        for key in ["action", "id", "dp"]:
+            if f"{{{key}}}" in template:
+                payload.pop(key, None)
+        
+        # 3. Finalize Payload String
+        # Send 'null' if empty, otherwise JSON
+        payload_str = "null" if not payload else json.dumps(payload)
+        return topic, payload_str
 
 
 # ---------------------------------------------------------------------------
@@ -328,10 +389,11 @@ async def mqtt_listener() -> None:
                     devices_updated, snapshot, refresh = handle_mqtt_message(topic, payload, topic_type, captured_vars)
 
                     if refresh:
-                        await client.publish(
-                            cfg.resolve_command_topic("status"),
-                            json.dumps({"action": "status"}),
-                        )
+                        target_id = refresh if isinstance(refresh, str) else None
+                        action = "get" if target_id else "status"
+                        topic, payload_str = cfg.prepare_publish(action, {"id": target_id})
+                        logger.info("Auto-requesting '%s' for device: %s", action, target_id or "all")
+                        await client.publish(topic, payload_str)
 
                     await broadcast({
                         "type":            "mqtt",
@@ -434,10 +496,9 @@ async def handle_ws_command(cmd: dict, websocket: WebSocket) -> None:
 
     if action in BRIDGE_ACTIONS:
         action = "remove" if action == "delete" else action
-        payload["action"] = action
         if state.mqtt_client:
-            pub_topic = state.config.resolve_command_topic(action, device_id=payload.get("id"))
-            await state.mqtt_client.publish(pub_topic, json.dumps(payload))
+            topic, payload_str = state.config.prepare_publish(action, payload)
+            await state.mqtt_client.publish(topic, payload_str)
         else:
             await send_to(websocket, {
                 "type":    "bridge_response",
@@ -468,17 +529,18 @@ async def fetch_config_from_mqtt(
         if stop and stop.is_set():
             raise asyncio.CancelledError("Shutdown requested")
         try:
-            logger.info("Fetching config from %s (via %s:%d)...", CONFIG_DISCOVERY_TOPIC, cfg.mqtt_broker, cfg.mqtt_port)
+            discovery_topic = cfg.format("{root}/bridge/config")
+            logger.info("Fetching config from %s (via %s:%d)...", discovery_topic, cfg.mqtt_broker, cfg.mqtt_port)
             async with aiomqtt.Client(
                 hostname=cfg.mqtt_broker, 
                 port=cfg.mqtt_port,
                 username=cfg.mqtt_user,
                 password=cfg.mqtt_password
             ) as client:
-                await client.subscribe(CONFIG_DISCOVERY_TOPIC)
+                await client.subscribe(discovery_topic)
                 async with asyncio.timeout(5.0):
                     async for message in client.messages:
-                        if str(message.topic) == CONFIG_DISCOVERY_TOPIC:
+                        if str(message.topic) == discovery_topic:
                             data = json.loads(message.payload.decode())
                             logger.info("Config received: %s", data)
                             cfg.update_from_dict(data)

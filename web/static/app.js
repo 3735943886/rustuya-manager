@@ -468,10 +468,17 @@ function submitDeviceBridgeAdd(dev) {
 function buildTree(devices) {
     const rootNodes = [];
     const childMap = {};
+    const deviceIds = new Set(devices.map(d => d.id));
+
     for (const d of devices) {
         const parentId = d.parent || d.parent_id;
-        if (parentId) (childMap[parentId] ??= []).push(d);
-        else rootNodes.push(d);
+        if (parentId && deviceIds.has(parentId)) {
+            (childMap[parentId] ??= []).push(d);
+        } else {
+            // No parent or parent not in current list -> treat as root
+            if (parentId) d._missing_parent = parentId;
+            rootNodes.push(d);
+        }
     }
     return { rootNodes, childMap };
 }
@@ -504,8 +511,15 @@ function passesFilter(dev) {
 // =============================================================================
 function renderStatusCell(dev) {
     const errorMsg = deviceErrors[dev.id];
-    const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
     const online = dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0;
+    
+    // Missing Parent Check (from buildTree)
+    if (dev._missing_parent) {
+        return `<span class="status-dot bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"></span>
+                <span class="text-sm font-medium text-amber-500">Missing Parent</span>`;
+    }
+
+    const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
 
     // Check if status is a non-zero error code
     const isErrorCode = !online && !isSubDevice && typeof dev.status === 'string' && /^\d+$/.test(dev.status);
@@ -589,6 +603,7 @@ function renderDashboard() {
             </td>
             <td class="hidden md:table-cell py-4 px-5 text-sm font-medium text-white">
                 ${dev.name || 'Unnamed Device'}
+                ${cloud_devices[dev.id] ? `<span class="ml-2 px-1.5 py-0.5 rounded-md bg-brandBlue/10 text-brandBlue text-[10px] uppercase tracking-wider font-bold border border-brandBlue/20">Cloud</span>` : ''}
                 ${deviceErrors[dev.id] ? `<span class="ml-2 text-xs text-red-500 font-normal animate-pulse">● error</span>` : (hasLive ? `<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>` : '')}
             </td>
             <td class="py-2.5 md:py-4 px-3 md:px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors max-w-[120px] md:max-w-none truncate">${dev.id}</td>
@@ -797,7 +812,7 @@ function populateParentsSelect() {
 // =============================================================================
 // Details panel
 // =============================================================================
-const HIDDEN_DETAIL_KEYS = new Set(['dps']);
+const HIDDEN_DETAIL_KEYS = new Set(['dps', '_missing_parent', '_is_cloud']);
 const MASKED_DETAIL_KEYS = new Set(['key', 'local_key', 'localkey']);
 let _maskedKeyRevealState = {}; // { [uniqueId]: boolean }
 
@@ -895,10 +910,26 @@ function openDetails(id) {
 
     // (details-status element not present in current template - skipped)
 
-    document.getElementById('details-content').innerHTML = Object.entries(dev)
+    let detailsHtml = Object.entries(dev)
         .filter(([k, v]) => !HIDDEN_DETAIL_KEYS.has(k) && v !== null && v !== undefined && typeof v !== 'object')
         .map(([k, v]) => renderDetailRow(k, v))
         .join('');
+
+    if (dev._missing_parent) {
+        detailsHtml += `<div class="detail-item bg-amber-500/10 border border-amber-500/20 rounded p-2 mt-2">
+            <span class="detail-label text-amber-500"><i class="fa-solid fa-link-slash mr-1"></i> MISSING PARENT</span>
+            <span class="detail-value font-mono text-amber-200">${dev._missing_parent}</span>
+        </div>`;
+    }
+
+    if (cloud_devices[dev.id]) {
+        detailsHtml += `<div class="detail-item bg-brandBlue/10 border border-brandBlue/20 rounded p-2 mt-1">
+            <span class="detail-label text-brandBlue"><i class="fa-solid fa-cloud mr-1"></i> CLOUD STATUS</span>
+            <span class="detail-value text-slate-300">Synchronized with Tuya Cloud</span>
+        </div>`;
+    }
+
+    document.getElementById('details-content').innerHTML = detailsHtml;
 
     updateDetailsLiveValues(id);
 

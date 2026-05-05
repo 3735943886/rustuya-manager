@@ -395,16 +395,78 @@ function renderSyncPanels() {
         }
     });
 
-    renderSyncSection({
-        countId: 'count-orphan', sectionId: 'section-orphan', bodyId: 'body-orphan',
-        items: currentSyncData.orphaned,
-        renderRow: (dev) => syncItemRow(
-            `${dev.name} <span class="text-slate-500 font-mono text-xs">(${dev.id})</span>`,
-            dev.id, 'Delete from Bridge',
-            'text-slate-400 hover:text-red-400 bg-slate-700 hover:bg-red-500/20 border-slate-600 hover:border-red-500/30',
-            `resolveSingle('orphaned', '${dev.id}', event)`
-        ),
-    });
+    // Orphan: render as full table like the dashboard
+    const orphanSection = document.getElementById('section-orphan');
+    const orphanBody    = document.getElementById('body-orphan');
+    const orphanCount   = document.getElementById('count-orphan');
+    if (orphanSection && orphanBody && orphanCount) {
+        orphanCount.innerText = currentSyncData.orphaned.length;
+        orphanSection.classList.toggle('hidden', currentSyncData.orphaned.length === 0);
+        if (currentSyncData.orphaned.length > 0) {
+            orphanBody.innerHTML = `
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-xs text-slate-500 border-b border-slate-700">
+                            <th class="hidden md:table-cell px-4 py-2">Status</th>
+                            <th class="px-4 py-2">Type</th>
+                            <th class="hidden md:table-cell px-4 py-2">Name</th>
+                            <th class="px-4 py-2">ID</th>
+                            <th class="px-4 py-2 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="body-orphan-rows"></tbody>
+                </table>`;
+            const tbody = orphanBody.querySelector('#body-orphan-rows');
+            for (const dev of currentSyncData.orphaned) {
+                const isZigbee = !!(dev.sub || dev.parent || dev.parent_id);
+                const typeStr  = isZigbee ? 'Zigbee/BLE' : 'WiFi';
+                const iconType = isZigbee ? 'fa-network-wired' : 'fa-wifi';
+                const hasLive  = !!liveValues[dev.id];
+                const tr = document.createElement('tr');
+                tr.className = 'border-b border-slate-700/50 hover:bg-slate-800/40 transition-colors cursor-pointer group';
+                tr.onclick = () => openDetails(dev.id);
+                tr.innerHTML = `
+                    <td class="hidden md:table-cell py-3 px-4">${renderStatusCell(dev)}</td>
+                    <td class="py-3 px-4">
+                        <div class="flex items-center text-slate-400 gap-2">
+                            <i class="fa-solid ${iconType} w-4 text-center shrink-0"></i>
+                            <div>
+                                <span class="text-sm font-medium">${typeStr}</span>
+                                <div class="md:hidden text-xs text-slate-400 mt-0.5 truncate max-w-[120px]">
+                                    ${dev.name || 'Unnamed'}
+                                    ${hasLive ? '<span class="text-emerald-500">● live</span>' : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="hidden md:table-cell py-3 px-4 font-medium text-white">
+                        ${dev.name || 'Unnamed Device'}
+                        ${hasLive ? '<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>' : ''}
+                    </td>
+                    <td class="py-3 px-4 font-mono text-xs text-slate-400 max-w-[120px] truncate">${dev.id}</td>
+                    <td class="py-3 px-4">
+                        <div class="flex gap-1.5 justify-end flex-wrap" onclick="event.stopPropagation()">
+                            <button onclick="sendCommand('get', {id:'${dev.id}'})"
+                                title="Get device state"
+                                class="px-2.5 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-brandBlue/30 text-slate-300 hover:text-brandBlue border border-slate-600 hover:border-brandBlue/40 transition-colors">
+                                <i class="fa-solid fa-arrows-rotate mr-1"></i>Get
+                            </button>
+                            <button onclick="openEditDeviceModal('${dev.id}')"
+                                title="Edit device"
+                                class="px-2.5 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white border border-slate-600 transition-colors">
+                                <i class="fa-solid fa-pen-to-square mr-1"></i>Edit
+                            </button>
+                            <button onclick="resolveSingle('orphaned','${dev.id}',event)"
+                                title="Remove from bridge"
+                                class="px-2.5 py-1 rounded text-xs font-medium bg-slate-700 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-600 hover:border-red-500/30 transition-colors">
+                                <i class="fa-solid fa-trash mr-1"></i>Delete
+                            </button>
+                        </div>
+                    </td>`;
+                tbody.appendChild(tr);
+            }
+        }
+    }
 
     document.getElementById('count-synced').innerText = currentSyncData.synced.length;
 }
@@ -515,9 +577,9 @@ function renderStatusCell(dev) {
     
     // Missing Parent Check (from buildTree)
     if (dev._missing_parent) {
-        const inCloud = !!cloud_devices[dev.id];
+        const parentInCloud = !!cloud_devices[dev._missing_parent];
         return `<span class="status-dot bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"></span>
-                <span class="text-sm font-medium text-amber-500">Missing Parent ${inCloud ? '(Cloud)' : ''}</span>`;
+                <span class="text-sm font-medium text-amber-500">Missing Parent${parentInCloud ? ' (Cloud)' : ''}</span>`;
     }
 
     const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
@@ -922,10 +984,11 @@ function openDetails(id) {
         </div>`;
     }
 
-    if (dev._missing_parent && cloud_devices[dev.id]) {
+    if (dev._missing_parent && cloud_devices[dev._missing_parent]) {
+        const parentDev = cloud_devices[dev._missing_parent];
         detailsHtml += `<div class="detail-item bg-brandBlue/10 border border-brandBlue/20 rounded p-2 mt-1">
-            <span class="detail-label text-brandBlue"><i class="fa-solid fa-cloud mr-1"></i> CLOUD STATUS</span>
-            <span class="detail-value text-slate-300">Synchronized with Tuya Cloud</span>
+            <span class="detail-label text-brandBlue"><i class="fa-solid fa-cloud mr-1"></i> PARENT IN CLOUD</span>
+            <span class="detail-value text-slate-300">${parentDev.name || dev._missing_parent} <span class="font-mono text-xs text-slate-500">(${dev._missing_parent})</span></span>
         </div>`;
     }
 

@@ -515,8 +515,9 @@ function renderStatusCell(dev) {
     
     // Missing Parent Check (from buildTree)
     if (dev._missing_parent) {
+        const inCloud = !!cloud_devices[dev.id];
         return `<span class="status-dot bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"></span>
-                <span class="text-sm font-medium text-amber-500">Missing Parent</span>`;
+                <span class="text-sm font-medium text-amber-500">Missing Parent ${inCloud ? '(Cloud)' : ''}</span>`;
     }
 
     const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
@@ -603,7 +604,6 @@ function renderDashboard() {
             </td>
             <td class="hidden md:table-cell py-4 px-5 text-sm font-medium text-white">
                 ${dev.name || 'Unnamed Device'}
-                ${cloud_devices[dev.id] ? `<span class="ml-2 px-1.5 py-0.5 rounded-md bg-brandBlue/10 text-brandBlue text-[10px] uppercase tracking-wider font-bold border border-brandBlue/20">Cloud</span>` : ''}
                 ${deviceErrors[dev.id] ? `<span class="ml-2 text-xs text-red-500 font-normal animate-pulse">● error</span>` : (hasLive ? `<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>` : '')}
             </td>
             <td class="py-2.5 md:py-4 px-3 md:px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors max-w-[120px] md:max-w-none truncate">${dev.id}</td>
@@ -922,7 +922,7 @@ function openDetails(id) {
         </div>`;
     }
 
-    if (cloud_devices[dev.id]) {
+    if (dev._missing_parent && cloud_devices[dev.id]) {
         detailsHtml += `<div class="detail-item bg-brandBlue/10 border border-brandBlue/20 rounded p-2 mt-1">
             <span class="detail-label text-brandBlue"><i class="fa-solid fa-cloud mr-1"></i> CLOUD STATUS</span>
             <span class="detail-value text-slate-300">Synchronized with Tuya Cloud</span>

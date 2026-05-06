@@ -136,10 +136,12 @@ def extract_devices(payload: dict) -> dict | None:
 
 def match_template(template: str, root: str, topic: str) -> dict[str, str] | None:
     tmpl_parts, topic_parts = template.replace("{root}", root).split("/"), topic.split("/")
-    if tmpl_parts[-1] == "#":
+    is_wildcard = tmpl_parts[-1] == "#"
+    if is_wildcard:
         tmpl_parts = tmpl_parts[:-1]
         topic_parts = topic_parts[:len(tmpl_parts)]
-    if len(topic_parts) < len(tmpl_parts): return None
+    
+    if len(topic_parts) != len(tmpl_parts): return None
     
     captured = {}
     for tmpl_seg, topic_seg in zip(tmpl_parts, topic_parts):
@@ -170,7 +172,7 @@ def handle_mqtt_message(topic_type: str, captured: dict, payload: Any) -> tuple[
 
     match topic_type:
         case "response" if isinstance(payload, dict):
-            if devs := extract_devices(payload):
+            if (devs := extract_devices(payload)) is not None:
                 state.devices_map = devs
                 return True, dict(state.devices_map), None
             status = str(payload.get("status", "")).lower()
@@ -211,11 +213,16 @@ async def mqtt_listener() -> None:
                 await client.subscribe(f"{state.config.mqtt_root_topic}/#")
 
                 async for msg in client.messages:
-                    payload = json.loads(p) if (p := msg.payload.decode()).startswith(("{", "[")) else p
+                    p = msg.payload.decode()
+                    try: payload = json.loads(p) if p.startswith(("{", "[")) else p
+                    except Exception: payload = p
+
                     ttype, captured = classify_mqtt_topic(str(msg.topic), payload)
+                    logger.debug("MQTT: %s | Type: %s | Vars: %s", msg.topic, ttype, captured)
                     if ttype in ("command", "unknown"): continue
                     
                     updated, snapshot, refresh = handle_mqtt_message(ttype, captured, payload)
+                    if updated: logger.info("Devices updated via %s (count: %d)", ttype, len(snapshot))
                     if refresh:
                         target = captured.get("id") if refresh == "get" else None
                         cmd_topic, cmd_payload = state.config.prepare_publish(refresh, {"id": target} if target else None)

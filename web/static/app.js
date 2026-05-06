@@ -45,6 +45,7 @@ const isZigbee = d => !!(d.sub || d.parent || d.parent_id || d.cid || d.node_id)
 
 const computeSync = () => {
     const res = { missing: [], mismatched: [], orphaned: [], synced: [] }, bids = Object.keys(s.devices), cids = Object.keys(s.cloud);
+    if (!cids.length) return { ...res, synced: Object.values(s.devices) };
     cids.forEach(id => {
         const c = s.cloud[id], b = s.devices[id], diff = [];
         if (!b) return res.missing.push(c);

@@ -87,24 +87,60 @@ class AppConfig:
 
     def format(self, template: str, **kwargs) -> str:
         """Universal topic/payload formatter with global root and common defaults."""
-        ctx = {"id": "", "name": "", "cid": "", "level": "", "type": "", "dp": "", "action": "", "timestamp": int(time.time()), "value": kwargs.get("value") or kwargs.get("dps_str", ""), "dps": kwargs.get("dps_str", ""), **kwargs}
         res = template.replace("{root}", self.mqtt_root_topic)
+        ctx = {
+            "id": "", "name": "", "cid": "", "level": "", "type": "",
+            "dp": "", "action": "", "timestamp": int(time.time()),
+            "value": kwargs.get("value") or kwargs.get("dps_str", ""),
+            "dps":   kwargs.get("dps_str", ""),
+            **kwargs
+        }
         for k, v in ctx.items():
-            if not v and f"{{{k}}}" in res:
-                res = res.replace(f"/{{{k}}}", "")
-            res = res.replace(f"{{{k}}}", str(v))
+            key = f"{{{k}}}"
+            if key in res:
+                val = str(v)
+                if not val: res = res.replace(f"/{key}", "")
+                res = res.replace(key, val)
         return res
 
     def resolve_command_topic(self, action: str, device_id: str | None = None, dp: str | None = None) -> str:
         """Resolve command topic using standardized formatter with dummy support."""
-        return self.format(self.mqtt_command_topic, action=action, id=device_id or "_", dp=dp or "_")
+        ctx = {
+            "action": action, 
+            "id": device_id or "_",
+            "dp": dp or "_"
+        }
+        return self.format(self.mqtt_command_topic, **ctx)
 
     def match_payload(self, payload: object) -> dict[str, Any]:
         """Match payload against template to extract id, dp, value, etc."""
-        if not isinstance(payload, dict) or not isinstance(self.mqtt_payload_template, str):
+        template = self.mqtt_payload_template
+        if not template or template == "{value}":
             return {"value": payload}
-        pattern = r'["\']?([\w-]+)["\']?\s*:\s*["\']?\{(\w+)\}["\']?'
-        return {p: payload[k] for k, p in re.findall(pattern, self.mqtt_payload_template) if k in payload} or {"value": payload}
+
+        if not isinstance(payload, dict):
+            return {"value": payload}
+
+        try:
+            tpl_str = template if isinstance(template, str) else json.dumps(template)
+            
+            # Robust regex to find "key": "{placeholder}" or 'key': {placeholder} etc.
+            pattern = r'["\']?([a-zA-Z0-9_-]+)["\']?\s*:\s*["\']?\{([a-zA-Z0-9_]+)\}["\']?'
+            matches = re.findall(pattern, tpl_str)
+            
+            if matches:
+                captured = {}
+                for key, placeholder in matches:
+                    if key in payload:
+                        val = payload[key]
+                        captured[placeholder] = val
+                
+                if captured:
+                    return captured
+        except Exception as e:
+            logger.debug("Payload template match failed: %s", e)
+
+        return {"value": payload}
 
     def prepare_publish(self, action: str, payload: dict | None = None) -> tuple[str, str]:
         """Resolve topic and clean payload based on template."""
@@ -172,40 +208,122 @@ async def send_to(ws: WebSocket, message: dict) -> None:
 # ---------------------------------------------------------------------------
 def extract_devices(payload: dict) -> dict | None:
     """Extract device list/dict from various payload shapes."""
-    devs = payload.get("devices") or (payload.get("data", {}).get("devices") if isinstance(payload.get("data"), dict) else None)
+    devs = payload.get("devices")
+    if devs is None and isinstance(data := payload.get("data"), dict):
+        devs = data.get("devices")
+            
+    if devs is None:
+        return None
+        
     if isinstance(devs, list):
         return {d["id"]: d for d in devs if isinstance(d, dict) and "id" in d}
-    return devs if isinstance(devs, dict) else None
+    if isinstance(devs, dict):
+        return devs
+    return {}
 
 
 def _match_template(template: str | None, root: str, topic: str) -> dict[str, Any] | None:
+    """Match topic against template segment-by-segment and capture {vars}."""
     if not template: return None
-    tmpl_parts = template.replace("{root}", root).split("/")
+    tmpl_parts  = template.replace("{root}", root).split("/")
     topic_parts = topic.split("/")
+    
+    # MQTT wildcard support (only /# at the end)
     if tmpl_parts[-1] == "#":
         tmpl_parts = tmpl_parts[:-1]
+        if len(topic_parts) < len(tmpl_parts): return None
         topic_parts = topic_parts[:len(tmpl_parts)]
-    if len(topic_parts) != len(tmpl_parts): return None
+    elif len(topic_parts) != len(tmpl_parts):
+        return None
+            
     captured = {}
-    for t, p in zip(tmpl_parts, topic_parts):
-        if t.startswith("{") and t.endswith("}"): captured[t[1:-1]] = p
-        elif t != p: return None
+    for tmpl_seg, topic_seg in zip(tmpl_parts, topic_parts):
+        if tmpl_seg.startswith("{") and tmpl_seg.endswith("}"):
+            captured[tmpl_seg[1:-1]] = topic_seg
+        elif tmpl_seg != topic_seg:
+            return None
     return captured
 
 
 def classify_mqtt_topic(topic: str, payload: Any) -> tuple[str, dict[str, Any]]:
+    """Strict template-based classification using both topic and payload."""
     cfg = state.config
-    for template, base_type in [
-        (cfg.mqtt_event_topic, "event"), (cfg.mqtt_message_topic, "message"),
-        (cfg.mqtt_scanner_topic, "scanner"), (cfg.mqtt_command_topic, "command")
-    ]:
-        if (m := _match_template(template, cfg.mqtt_root_topic, topic)) is not None:
-            m.update(cfg.match_payload(payload))
-            sub = m.get("level") or m.get("type") or base_type
-            match sub:
-                case "response" | "error": return sub, m
-                case _: return "event" if base_type == "event" else ("response" if base_type == "message" else base_type), m
+    
+    # Rule-based matching in order of priority
+    rules = [
+        (cfg.mqtt_event_topic,   "event"),
+        (cfg.mqtt_message_topic, "message"),
+        (cfg.mqtt_scanner_topic, "scanner"),
+        (cfg.mqtt_command_topic, "command"),
+    ]
+    
+    for template, base_type in rules:
+        m = _match_template(template, cfg.mqtt_root_topic, topic)
+        if m is None: continue
+        
+        # Merge variables from payload template
+        payload_vars = cfg.match_payload(payload)
+        m.update(payload_vars)
+
+        # Resolve specific subtype
+        sub = m.get("level") or m.get("type") or base_type
+        if sub in ("response", "error"): return sub, m
+        if base_type == "event":         return "event", m
+        return ("response" if base_type == "message" else base_type), m
+            
     return "unknown", {}
+
+
+def _handle_response(did: str, action: str | None, payload: dict) -> tuple[bool, dict | None, bool]:
+    devs = extract_devices(payload)
+    if devs is not None:
+        state.devices_map = devs
+        return True, dict(state.devices_map), False
+
+    status = str(payload.get("status", "")).lower()
+    is_success = status in ("success", "ok") or payload.get("status") is True
+
+    if action == "remove" and is_success:
+        state.devices_map.pop(did, None)
+        logger.info("Removed device %s from local state", did)
+        return True, dict(state.devices_map), True
+
+    if action == "add" and is_success:
+        logger.info("Device add confirmed, refreshing status")
+        return False, None, True
+
+    return False, None, False
+
+
+def _handle_event_error(
+    did: str, topic_type: str, action: str | None, payload: object, captured_vars: dict[str, Any]
+) -> tuple[bool, dict | None, bool]:
+    if action:  # bridge command echo, not a device update
+        return False, None, False
+
+    filtered = {"status": "online"} if topic_type == "event" else {}
+    if "dp" in captured_vars:
+        # Per-DP mode: topic or payload contains {dp} and potentially {value}
+        dp = str(captured_vars["dp"])
+        val = captured_vars.get("value")
+        if val is None or val == "":
+            val = payload
+        filtered = {dp: val}
+    elif isinstance(payload, dict):
+        # Bulk mode: payload contains dict of DPs
+        filtered = {k: v for k, v in payload.items() if k not in _EVENT_JUNK_KEYS}
+        if topic_type == "error" and "errorCode" in payload:
+            filtered["status"] = "online" if payload["errorCode"] == 0 else str(payload["errorCode"])
+    else:
+        return False, None, False
+
+    if did in state.devices_map:
+        state.devices_map[did].update(filtered)
+    else:
+        logger.info("Discovered device via %s: %s (%s)", topic_type, filtered.get("name", "?"), did)
+        state.devices_map[did] = {**filtered, "id": did}
+
+    return True, dict(state.devices_map), False
 
 
 def handle_mqtt_message(
@@ -216,45 +334,24 @@ def handle_mqtt_message(
     Returns: (devices_updated, snapshot | None, should_request_status)
     """
     did = captured_vars.get("id")
-    action = payload.get("action") if isinstance(payload, dict) else None
-    if isinstance(payload, dict) and did and not payload.get("id"):
-        payload["id"] = did
-    did = did or (payload.get("id") if isinstance(payload, dict) else None)
-    if not did: return False, None, False
+    action = None
+    if isinstance(payload, dict):
+        action = payload.get("action")
+        # Ensure payload has id for frontend compatibility
+        if not payload.get("id") and did:
+            payload["id"] = did
+        did = payload.get("id") or did
 
-    match topic_type, payload:
-        case "response", dict(payload):
-            if devs := extract_devices(payload):
-                state.devices_map = devs
-                return True, dict(state.devices_map), False
-            status = str(payload.get("status", "")).lower()
-            is_success = status in ("success", "ok") or payload.get("status") is True
-            match action, is_success:
-                case "remove", True:
-                    state.devices_map.pop(did, None)
-                    return True, dict(state.devices_map), True
-                case "add", True:
-                    return False, None, True
-                case _: return False, None, False
-                
-        case ("error" | "event") as t, _ if not action:
-            filtered = {"status": "online"} if t == "event" else {}
-            if "dp" in captured_vars:
-                filtered[str(captured_vars["dp"])] = captured_vars.get("value") or payload
-            elif isinstance(payload, dict):
-                filtered = {k: v for k, v in payload.items() if k not in _EVENT_JUNK_KEYS}
-                if t == "error" and "errorCode" in payload:
-                    filtered["status"] = "online" if payload["errorCode"] == 0 else str(payload["errorCode"])
-            else:
-                return False, None, False
+    if not did:
+        return False, None, False
 
-            if did in state.devices_map:
-                state.devices_map[did].update(filtered)
-            else:
-                state.devices_map[did] = {**filtered, "id": did}
-            return True, dict(state.devices_map), False
+    if topic_type == "response" and isinstance(payload, dict):
+        return _handle_response(did, action, payload)
 
-        case _: return False, None, False
+    if topic_type in ("error", "event"):
+        return _handle_event_error(did, topic_type, action, payload, captured_vars)
+
+    return False, None, False
 
 
 def decode_payload(message) -> object:
@@ -409,18 +506,27 @@ async def load_init_data() -> dict:
 
 
 async def handle_ws_command(cmd: dict, websocket: WebSocket) -> None:
-    action, payload = cmd.get("action", ""), cmd.get("payload", {})
-    action = "remove" if action == WS_DELETE_ALIAS else action
-    match action:
-        case _ if action in BRIDGE_ACTIONS:
-            if state.mqtt_client:
-                await state.mqtt_client.publish(*state.config.prepare_publish(action, payload))
-            else:
-                await send_to(websocket, {"type": "bridge_response", "level": "error", "message": "MQTT broker not connected."})
-        case "wizard_start":
-            task = asyncio.create_task(run_wizard(payload.get("user_code", "")))
-            state.background_tasks.add(task)
-            task.add_done_callback(state.background_tasks.discard)
+    action  = cmd.get("action", "")
+    payload = cmd.get("payload", {})
+
+    if action == WS_DELETE_ALIAS:
+        action = "remove"
+    if action in BRIDGE_ACTIONS:
+        if state.mqtt_client:
+            topic, payload_str = state.config.prepare_publish(action, payload)
+            await state.mqtt_client.publish(topic, payload_str)
+        else:
+            await send_to(websocket, {
+                "type":    "bridge_response",
+                "level":   "error",
+                "message": "MQTT broker not connected. Command not sent.",
+            })
+        return
+
+    if action == "wizard_start":
+        task = asyncio.create_task(run_wizard(payload.get("user_code", "")))
+        state.background_tasks.add(task)
+        task.add_done_callback(state.background_tasks.discard)
 
 
 # ---------------------------------------------------------------------------
@@ -478,83 +584,134 @@ async def fetch_config_from_mqtt(
             reconnect_delay = min(reconnect_delay * 2, MAX_RETRY_DELAY_SECS)
 
 
-def _build_bridge_kwargs() -> dict:
-    config_path = Path(os.environ.get("CONFIG", DATA_DIR / "config.json"))
-    kwargs = {
-        "mqtt_broker": "localhost", "state_file": str(DATA_DIR / "rustuya.json"),
-        "config_path": str(config_path), "log_level": "info", "no_signals": True,
-    }
-    if config_path.exists():
-        try:
-            if isinstance(file_config := json.loads(config_path.read_text(encoding="utf-8")), dict):
-                kwargs.update(file_config)
-                logger.info("Loaded bridge settings from %s", config_path)
-        except Exception as e: logger.warning("Failed to read config %s: %s", config_path, e)
-
-    kwargs.update({k: os.environ[e] for e, k in ENV_TO_KWARG.items() if e in os.environ})
-    if "MQTT_RETAIN" in os.environ: kwargs["mqtt_retain"] = os.environ["MQTT_RETAIN"].lower() in ("true", "1", "yes", "t")
-    if "SAVE_DEBOUNCE_SECS" in os.environ:
-        try: kwargs["save_debounce_secs"] = int(os.environ["SAVE_DEBOUNCE_SECS"])
-        except ValueError: pass
-    return kwargs
-
-async def _shutdown_cleanup(task, bridge_task, bridge):
-    logger.info("Shutting down manager (cleanup phase 1/3)...")
-    if task:
-        task.cancel()
-        try: await task
-        except Exception: pass
-    logger.info("Shutting down manager (cleanup phase 2/3)...")
-    bridge_task.cancel()
-    try: await asyncio.wait_for(bridge_task, timeout=2.0)
-    except Exception: pass
-    logger.info("Shutting down manager (cleanup phase 3/3: closing bridge)...")
-    try:
-        await bridge.close()
-        logger.info("Internal rustuya-bridge stopped.")
-    except Exception as e: logger.error("Error during bridge close: %s", e)
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    bridge_kwargs = _build_bridge_kwargs()
+    # 1. Determine config path
+    config_path = Path(os.environ.get("CONFIG", DATA_DIR / "config.json"))
+    
+    # 2. Start with defaults for bridge
+    bridge_kwargs = {
+        "mqtt_broker": "localhost",
+        "state_file": str(DATA_DIR / "rustuya.json"),
+        "config_path": str(config_path),
+        "log_level": "info",
+        "no_signals": True,
+    }
+    
+    # 3. Load from config.json if it exists
+    if config_path.exists():
+        try:
+            file_config = json.loads(config_path.read_text(encoding="utf-8"))
+            if isinstance(file_config, dict):
+                bridge_kwargs.update(file_config)
+                logger.info("Loaded bridge settings from %s", config_path)
+        except Exception as e:
+            logger.warning("Failed to read config file %s: %s", config_path, e)
+
+    # 4. Override with environment variables (Priority: Env > File)
+    env_overrides = {
+        kwarg: os.environ[env] for env, kwarg in ENV_TO_KWARG.items() if env in os.environ
+    }
+    bridge_kwargs.update(env_overrides)
+    
+    # Handle special types from env
+    if "MQTT_RETAIN" in os.environ:
+        bridge_kwargs["mqtt_retain"] = os.environ["MQTT_RETAIN"].lower() in ("true", "1", "yes", "t")
+        
+    if "SAVE_DEBOUNCE_SECS" in os.environ:
+        try:
+            bridge_kwargs["save_debounce_secs"] = int(os.environ["SAVE_DEBOUNCE_SECS"])
+        except ValueError:
+            pass
+
+    # 5. Initialize and start bridge
     bridge = PyBridgeServer(**bridge_kwargs)
-    bridge_task = asyncio.ensure_future(bridge.start_async())
+
+    async def start_bridge():
+        await bridge.start_async()
+
+    bridge_task = asyncio.create_task(start_bridge())
     logger.info("Internal rustuya-bridge started with: %s", {k: v for k, v in bridge_kwargs.items() if "password" not in k})
 
+    # 6. Prepare initial config for manager discovery
     init_cfg = AppConfig()
     init_cfg.update_from_dict(bridge_kwargs)
 
-    _stop, loop = asyncio.Event(), asyncio.get_running_loop()
+    # 7. Re-register Python SIGINT/SIGTERM handlers so Ctrl+C works even when
+    #    the Rust bridge replaces the default signal handler during start_async().
+    _stop = asyncio.Event()
+    loop  = asyncio.get_running_loop()
     try:
-        loop.add_signal_handler(signal.SIGINT, _stop.set)
+        loop.add_signal_handler(signal.SIGINT,  _stop.set)
         loop.add_signal_handler(signal.SIGTERM, _stop.set)
-    except (NotImplementedError, OSError): pass
+    except (NotImplementedError, OSError):
+        pass  # Windows / some edge environments
 
+    # 8. Wait for config to be published via MQTT and start listener
     task = None
     try:
         try:
             state.config, config_data = await fetch_config_from_mqtt(init_cfg, stop=_stop)
         finally:
+            # Restore handlers so uvicorn can manage signals during normal operation
             try:
                 loop.remove_signal_handler(signal.SIGINT)
                 loop.remove_signal_handler(signal.SIGTERM)
-            except (NotImplementedError, OSError): pass
+            except (NotImplementedError, OSError):
+                pass
 
-        config_path = Path(bridge_kwargs["config_path"])
+        # Save config to file if it doesn't exist
         if not config_path.exists():
             logger.info("Saving received config to %s", config_path)
-            await asyncio.to_thread(config_path.write_text, json.dumps(config_data, indent=4, ensure_ascii=False), encoding="utf-8")
+            await asyncio.to_thread(
+                config_path.write_text,
+                json.dumps(config_data, indent=4, ensure_ascii=False),
+                encoding="utf-8"
+            )
 
         task = asyncio.create_task(mqtt_listener())
         yield
     finally:
-        cleanup_task = asyncio.create_task(_shutdown_cleanup(task, bridge_task, bridge))
-        try: await asyncio.shield(cleanup_task)
+        # Shutdown
+        async def cleanup():
+            logger.info("Shutting down manager (cleanup phase 1/3)...")
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+            logger.info("Shutting down manager (cleanup phase 2/3)...")
+            bridge_task.cancel()
+            try:
+                # Give the bridge a moment to see the cancellation
+                await asyncio.wait_for(bridge_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+            
+            logger.info("Shutting down manager (cleanup phase 3/3: closing bridge)...")
+            try:
+                # Explicitly call close to ensure MQTT disconnect and state saving
+                await bridge.close()
+                logger.info("Internal rustuya-bridge stopped.")
+            except Exception as e:
+                logger.error("Error during bridge close: %s", e)
+
+        # Shield the cleanup task so it cannot be cancelled by Starlette/Uvicorn's exit signals.
+        # This ensures we have a chance to finish MQTT flushing and state saving.
+        cleanup_task = asyncio.create_task(cleanup())
+        try:
+            await asyncio.shield(cleanup_task)
         except asyncio.CancelledError:
-            logger.warning("Shutdown signal received during cleanup, waiting...")
-            try: await asyncio.wait_for(cleanup_task, timeout=10.0)
-            except Exception as e: logger.error("Cleanup failed: %s", e)
-        except Exception as e: logger.error("Unexpected error during cleanup: %s", e)
+            logger.warning("Shutdown signal received during cleanup, waiting for completion...")
+            try:
+                # Still wait for the cleanup to finish, but with a hard timeout
+                await asyncio.wait_for(cleanup_task, timeout=10.0)
+            except Exception as e:
+                logger.error("Cleanup failed to complete in time: %s", e)
+        except Exception as e:
+            logger.error("Unexpected error during cleanup: %s", e)
 
 
 app = FastAPI(lifespan=lifespan)

@@ -1,56 +1,50 @@
 // =============================================================================
-// State
+// State & Constants
 // =============================================================================
-let ws = null;
-let reconnectTimer = null;
-let devices_map = {};
-let cloud_devices = {};
-let currentSyncData = { missing: [], mismatched: [], orphaned: [], synced: [] };
-let currentDeviceId = null;
-let currentFilter = 'all';          // 'all' | 'online' | 'offline' | 'subdevice'
-let liveValues = {};                // { [device_id]: { [dp]: value } }
-let deviceErrors = {};              // { [device_id]: "error message" }
-let activityLog = [];               // ring buffer, max 100 entries
 const MAX_LOG = 100;
+const META_KEYS = new Set(['id', 'name', 'cid', 'data']);
+const HIDDEN_DETAIL_KEYS = new Set(['dps', '_missing_parent', '_is_cloud']);
+const MASKED_DETAIL_KEYS = new Set(['key', 'local_key', 'localkey']);
+
+let ws = null, reconnectTimer = null, currentDeviceId = null;
+let devices_map = {}, cloud_devices = {}, liveValues = {}, deviceErrors = {}, activityLog = [];
+let currentFilter = 'all';
+let currentSyncData = { missing: [], mismatched: [], orphaned: [], synced: [] };
+let _maskedKeyRevealState = {};
+
+// =============================================================================
+// DOM Utilities
+// =============================================================================
+const $ = (id) => document.getElementById(id);
+const toggle = (id, show) => $(id)?.classList.toggle('hidden', !show);
+const setVal = (id, val) => { const el = $(id); if (el) el.value = val; };
+const setHTML = (id, html) => { const el = $(id); if (el) el.innerHTML = html; };
+const setText = (id, text) => { const el = $(id); if (el) el.innerText = text; };
+const toggleClass = (id, cls, state) => $(id)?.classList.toggle(cls, state);
 
 // =============================================================================
 // Toast Notification System
 // =============================================================================
 function showToast(message, level = 'info', duration = 3500) {
-    const container = document.getElementById('toast-container');
+    const container = $('toast-container');
     if (!container) return;
 
-    // Limit maximum toasts on screen
-    const MAX_TOASTS = 5;
-    while (container.children.length >= MAX_TOASTS) {
-        container.children[0].remove();
-    }
+    if (container.children.length >= 5) container.children[0].remove();
 
-    const colors = {
-        success: 'bg-emerald-600 border-emerald-500',
-        error: 'bg-red-700    border-red-600',
-        info: 'bg-slate-700  border-slate-600',
-        warning: 'bg-amber-600  border-amber-500',
+    const themes = {
+        success: { bg: 'bg-emerald-600 border-emerald-500', icon: 'fa-circle-check' },
+        error:   { bg: 'bg-red-700 border-red-600', icon: 'fa-circle-xmark' },
+        info:    { bg: 'bg-slate-700 border-slate-600', icon: 'fa-circle-info' },
+        warning: { bg: 'bg-amber-600 border-amber-500', icon: 'fa-triangle-exclamation' },
     };
-    const icons = {
-        success: 'fa-circle-check',
-        error: 'fa-circle-xmark',
-        info: 'fa-circle-info',
-        warning: 'fa-triangle-exclamation',
-    };
+    const t = themes[level] || themes.info;
 
     const toast = document.createElement('div');
-    toast.className = `flex items-start gap-3 px-4 py-3 rounded-lg border shadow-2xl text-white text-sm
-                       transition-all duration-300 opacity-0 -translate-y-4 max-w-md w-auto
-                       ${colors[level] ?? colors.info}`;
-    toast.innerHTML = `<i class="fa-solid ${icons[level] ?? icons.info} mt-0.5 flex-shrink-0"></i>
-                       <span class="break-words overflow-hidden">${message}</span>`;
+    toast.className = `flex items-start gap-3 px-4 py-3 rounded-lg border shadow-2xl text-white text-sm transition-all duration-300 opacity-0 -translate-y-4 max-w-md ${t.bg}`;
+    toast.innerHTML = `<i class="fa-solid ${t.icon} mt-0.5 shrink-0"></i><span class="break-words overflow-hidden">${message}</span>`;
     container.appendChild(toast);
 
-    requestAnimationFrame(() => {
-        toast.classList.remove('opacity-0', '-translate-y-4');
-    });
-
+    requestAnimationFrame(() => toast.classList.remove('opacity-0', '-translate-y-4'));
     setTimeout(() => {
         toast.classList.add('opacity-0', '-translate-y-4');
         setTimeout(() => toast.remove(), 300);
@@ -61,178 +55,111 @@ function showToast(message, level = 'info', duration = 3500) {
 // Activity Log
 // =============================================================================
 function addLog(message, level = 'info') {
-    const entry = { ts: new Date().toLocaleTimeString(), message, level };
-    activityLog.unshift(entry);
+    activityLog.unshift({ ts: new Date().toLocaleTimeString(), message, level });
     if (activityLog.length > MAX_LOG) activityLog.pop();
     renderActivityLog();
 }
 
 function renderActivityLog() {
-    const el = document.getElementById('log-body');
-    if (!el) return;
     const colors = { info: 'text-slate-300', error: 'text-red-400', success: 'text-emerald-400', warning: 'text-amber-400' };
-    el.innerHTML = activityLog.map(({ ts, message, level }) =>
+    setHTML('log-body', activityLog.map(({ ts, message, level }) =>
         `<div class="flex gap-3 text-xs py-1.5 border-b border-slate-700/50 last:border-0">
             <span class="text-slate-500 shrink-0 font-mono">${ts}</span>
-            <span class="${colors[level] ?? colors.info}">${message}</span>
+            <span class="${colors[level] || colors.info}">${message}</span>
          </div>`
-    ).join('') || `<p class="text-slate-500 text-sm text-center py-6">No activity yet.</p>`;
+    ).join('') || `<p class="text-slate-500 text-sm text-center py-6">No activity yet.</p>`);
 }
 
 function toggleLogPanel() {
-    document.getElementById('log-panel').classList.toggle('translate-x-full');
-
-    // Toggle backdrop
-    const isVisible = !document.getElementById('log-panel').classList.contains('translate-x-full');
-    if (isVisible) {
-        const backdrop = document.getElementById('panel-backdrop');
-        if (backdrop) {
-            backdrop.classList.remove('hidden');
-            setTimeout(() => backdrop.classList.remove('opacity-0'), 10);
-        }
-    } else {
-        hidePanelBackdrop();
-    }
-
-    // Close details if open
-    document.getElementById('details-panel').classList.add('translate-x-full');
+    const isVisible = $('log-panel').classList.toggle('translate-x-full');
+    if (!isVisible) showPanelBackdrop();
+    else hidePanelBackdrop();
+    toggleClass('details-panel', 'translate-x-full', true);
 }
 
 function closeLogPanel() {
-    document.getElementById('log-panel').classList.add('translate-x-full');
+    toggleClass('log-panel', 'translate-x-full', true);
     hidePanelBackdrop();
 }
 
 // =============================================================================
 // WebSocket
 // =============================================================================
+// =============================================================================
+// WebSocket Dispatcher
+// =============================================================================
+const WS_HANDLERS = {
+    mqtt_status: (msg) => {
+        updateMqttBrokerStatus(msg.connected);
+        showToast(`MQTT broker ${msg.connected ? 'connected' : 'disconnected'}`, msg.connected ? 'success' : 'warning', 2000);
+    },
+    wizard: (msg) => {
+        handleWizardEvent(msg.status);
+        if (msg.cloud_devices) { cloud_devices = msg.cloud_devices; updateSyncStateAndRender(); }
+    },
+    bridge_response: (msg) => {
+        const level = msg.level === 'error' ? 'error' : 'success';
+        showToast(msg.message, level);
+        addLog(msg.message, level);
+    },
+    mqtt: (msg) => {
+        if (msg.topic_type === 'response' || msg.topic_type === 'error') {
+            const p = msg.payload || {};
+            const isError = msg.topic_type === 'error';
+            let text = p.message || p.errorMsg || p.error;
+            
+            if (!text) {
+                if (p.action === 'status') text = `Status updated (${Object.keys(p.devices || {}).length} devices)`;
+                else if (p.action === 'remove') text = `Device removed: ${p.id}`;
+                else text = JSON.stringify(p);
+            }
+
+            const fullText = `${p.name ? `[${p.name}] ` : ''}${p.id ? `(${p.id}) ` : ''}${text}`;
+            const isRealError = isError && p.errorCode !== 0 && p.status !== 'success';
+            
+            if (!isRealError || deviceErrors[p.id] !== fullText) {
+                showToast(`Bridge: ${fullText}`, isRealError ? 'error' : 'success');
+                addLog(`Bridge ${isRealError ? 'ERR' : 'OK'} — ${fullText}`, isRealError ? 'error' : 'success');
+            }
+
+            if (p.id) {
+                if (isRealError) deviceErrors[p.id] = fullText;
+                else if (p.errorCode === 0) delete deviceErrors[p.id];
+                if (currentDeviceId === p.id) updateDetailsLiveValues(p.id);
+            }
+        } else if (msg.topic_type === 'event' && !msg.payload?.action) {
+            const did = msg.payload?.id || msg.id;
+            const raw = msg.payload?.dps ?? msg.payload?.data ?? msg.payload;
+            if (did && typeof raw === 'object' && !Array.isArray(raw)) {
+                const ts = new Date().toLocaleTimeString();
+                liveValues[did] = { ...(liveValues[did] ?? {}) };
+                for (const [dp, v] of Object.entries(raw)) {
+                    if (!META_KEYS.has(dp)) liveValues[did][dp] = { value: v, ts };
+                }
+                if (currentDeviceId === did) updateDetailsLiveValues(did);
+                renderDashboard();
+            }
+        }
+    },
+    init_status: (msg) => {
+        if (msg.cloud_devices) cloud_devices = msg.cloud_devices;
+        if (msg.devices) devices_map = msg.devices;
+        if (msg.mqtt_connected !== undefined) updateMqttBrokerStatus(msg.mqtt_connected);
+        if (msg.type === 'init' && msg.user_code) setVal('wizard-code', msg.user_code);
+        updateSyncStateAndRender();
+    }
+};
+
 function connectWS() {
     ws = new WebSocket(`ws://${window.location.host}/ws`);
-
-    ws.onopen = () => {
-        clearTimeout(reconnectTimer);
-        updateConnectionStatus(true);
-        requestStatusUpdate();
-    };
-
+    ws.onopen = () => { clearTimeout(reconnectTimer); updateConnectionStatus(true); requestStatusUpdate(); };
     ws.onmessage = ({ data }) => {
         const msg = JSON.parse(data);
-
-        if (msg.type === 'mqtt_status') {
-            updateMqttBrokerStatus(msg.connected);
-            if (!msg.connected) showToast('MQTT broker disconnected', 'warning');
-            else showToast('MQTT broker connected', 'success', 2000);
-            return;
-        }
-
-        if (msg.type === 'wizard') {
-            handleWizardEvent(msg.status);
-            // Wizard completion may carry refreshed cloud_devices
-            if (msg.cloud_devices) {
-                cloud_devices = msg.cloud_devices;
-                updateSyncStateAndRender();
-            }
-            return;
-        }
-
-        if (msg.type === 'bridge_response') {
-            const level = msg.level === 'error' ? 'error' : 'success';
-            showToast(msg.message, level);
-            addLog(msg.message, level);
-            return;
-        }
-
-        if (msg.type === 'mqtt') {
-            // Bridge response/error via MQTT topic
-            if (msg.topic_type === 'response') {
-                const p = msg.payload || {};
-                let text = p.message;
-                if (!text) {
-                    if (p.action === 'status') {
-                        const count = Object.keys(p.devices || {}).length;
-                        text = `Status updated (${count} devices)`;
-                    } else if (p.action === 'remove') {
-                        text = `Device removed: ${p.id}`;
-                    } else {
-                        text = JSON.stringify(p);
-                    }
-                }
-                showToast(`Bridge: ${text}`, 'success');
-                addLog(`Bridge OK — ${text}`, 'success');
-            } else if (msg.topic_type === 'error') {
-                const p = msg.payload || {};
-                let errMsg = p.errorMsg || p.message || p.error;
-                if (!errMsg) {
-                    if (p.action === 'status') {
-                        const count = Object.keys(p.devices || {}).length;
-                        errMsg = `Status updated (${count} devices)`;
-                    } else {
-                        errMsg = JSON.stringify(p);
-                    }
-                }
-                const namePart = p.name ? `[${p.name}] ` : '';
-                const idPart = p.id ? `(${p.id}) ` : '';
-                const text = `${namePart}${idPart}${errMsg}`;
-
-                const isRealError = p.errorCode !== 0 && p.status !== 'success';
-                const level = isRealError ? 'error' : 'success';
-                const prefix = isRealError ? 'Bridge ERR' : 'Bridge OK';
-
-                // Suppress duplicate errors for the same device
-                const isDuplicate = p.id && isRealError && deviceErrors[p.id] === text;
-
-                if (!isDuplicate) {
-                    showToast(`Bridge: ${text}`, level);
-                    addLog(`${prefix} — ${text}`, level);
-                }
-
-                if (isRealError && p.id) {
-                    deviceErrors[p.id] = text;
-                } else if (p.errorCode === 0 && p.id) {
-                    delete deviceErrors[p.id];
-                }
-
-                if (currentDeviceId === p.id) updateDetailsLiveValues(p.id);
-            } else if (msg.topic_type === 'event') {
-                // Accumulate live DPS values (exclude metadata keys)
-                if (msg.payload?.action) return; // Ignore bridge responses mistakenly classified as events
-
-                const META_KEYS = new Set(['id', 'name', 'cid', 'data']);
-                const did = msg.payload?.id || msg.id;
-                if (did && msg.payload) {
-                    // Bridge may use 'dps', 'data', or flat payload for DPS values
-                    const raw = msg.payload.dps ?? msg.payload.data ?? msg.payload;
-                    if (typeof raw === 'object' && !Array.isArray(raw)) {
-                        const ts = new Date().toLocaleTimeString();
-                        liveValues[did] = { ...(liveValues[did] ?? {}) };
-                        for (const [dp, v] of Object.entries(raw)) {
-                            if (!META_KEYS.has(dp)) liveValues[did][dp] = { value: v, ts };
-                        }
-                        if (currentDeviceId === did) updateDetailsLiveValues(did);
-                        renderDashboard(); // refresh ● live badge
-                    }
-                }
-            }
-        }
-
-        if (msg.type === 'init' || msg.devices_updated || msg.type === 'status') {
-            if (msg.cloud_devices) cloud_devices = msg.cloud_devices;
-            if (msg.devices) devices_map = msg.devices;
-            if (msg.mqtt_connected !== undefined) updateMqttBrokerStatus(msg.mqtt_connected);
-            if (msg.type === 'init' && msg.user_code) {
-                const el = document.getElementById('wizard-code');
-                if (el) el.value = msg.user_code;
-            }
-            updateSyncStateAndRender();
-        }
+        const handler = WS_HANDLERS[msg.type] || (msg.devices_updated ? WS_HANDLERS.init_status : null);
+        if (handler) handler(msg);
+        else if (msg.type === 'init' || msg.type === 'status') WS_HANDLERS.init_status(msg);
     };
-
-    ws.onclose = () => {
-        updateConnectionStatus(false);
-        updateMqttBrokerStatus(false);
-        reconnectTimer = setTimeout(connectWS, 5000);
-    };
-
+    ws.onclose = () => { updateConnectionStatus(false); updateMqttBrokerStatus(false); reconnectTimer = setTimeout(connectWS, 5000); };
     ws.onerror = () => ws.close();
 }
 
@@ -240,31 +167,18 @@ function sendCommand(action, payload = {}) {
     if (ws?.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ action, payload }));
         addLog(`→ ${action}${payload.id ? ` [${payload.id}]` : ''}`, 'info');
-    } else {
-        showToast('Disconnected from backend', 'error');
-    }
+    } else showToast('Disconnected from backend', 'error');
 }
 
 function updateConnectionStatus(connected) {
-    const el = document.getElementById('connection-status');
-    el.innerHTML = connected
-        ? `<span class="status-dot status-online"></span>
-           <span class="text-slate-300 font-medium tracking-wide">Connected</span>`
-        : `<span class="relative flex h-3 w-3 mr-3">
-               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-               <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-           </span>
-           <span class="text-slate-300 font-medium tracking-wide">Disconnected</span>`;
+    setHTML('connection-status', connected 
+        ? `<span class="status-dot status-online"></span><span class="text-slate-300 font-medium tracking-wide">Connected</span>`
+        : `<span class="relative flex h-3 w-3 mr-3"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span></span><span class="text-slate-300 font-medium tracking-wide">Disconnected</span>`
+    );
 }
 
 function updateMqttBrokerStatus(connected) {
-    const el = document.getElementById('mqtt-broker-status');
-    if (!el) return;
-    el.innerHTML = connected
-        ? `<span class="status-dot status-online"></span>
-           <span class="text-slate-400 text-xs tracking-wide">MQTT Broker</span>`
-        : `<span class="status-dot status-offline"></span>
-           <span class="text-slate-400 text-xs tracking-wide">MQTT Broker</span>`;
+    setHTML('mqtt-broker-status', `<span class="status-dot ${connected ? 'status-online' : 'status-offline'}"></span><span class="text-slate-400 text-xs tracking-wide">MQTT Broker</span>`);
 }
 
 // =============================================================================
@@ -272,20 +186,24 @@ function updateMqttBrokerStatus(connected) {
 // =============================================================================
 function computeSyncState() {
     const result = { missing: [], mismatched: [], orphaned: [], synced: [] };
-    const bIds = new Set(Object.keys(devices_map)), cIds = new Set(Object.keys(cloud_devices));
-    if (!cIds.size) return { ...result, synced: Object.values(devices_map) };
+    const bridge_ids = Object.keys(devices_map);
+    const cloud_ids = Object.keys(cloud_devices);
 
-    for (const [cid, cdev] of Object.entries(cloud_devices)) {
-        if (!bIds.has(cid)) { result.missing.push(cdev); continue; }
-        const bdev = devices_map[cid], diff = [];
+    if (!cloud_ids.length) { result.synced = Object.values(devices_map); return result; }
+
+    for (const cid of cloud_ids) {
+        const cdev = cloud_devices[cid], bdev = devices_map[cid];
+        if (!bdev) { result.missing.push(cdev); continue; }
+        
+        const diff = [];
         if (cdev.name && bdev.name && cdev.name !== bdev.name) diff.push('name');
         const ckey = cdev.key || cdev.local_key || cdev.localkey, bkey = bdev.key || bdev.local_key;
         if (ckey && bkey && ckey !== bkey) diff.push('local_key');
-        diff.length ? result.mismatched.push({ cloud: cdev, bridge: bdev, reasons: diff }) : result.synced.push(bdev);
+        
+        diff.length > 0 ? result.mismatched.push({ cloud: cdev, bridge: bdev, reasons: diff }) : result.synced.push(bdev);
     }
-    for (const [bid, bdev] of Object.entries(devices_map)) {
-        if (!cIds.has(bid)) result.orphaned.push(bdev);
-    }
+
+    for (const bid of bridge_ids) { if (!cloud_ids.includes(bid)) result.orphaned.push(devices_map[bid]); }
     return result;
 }
 
@@ -297,40 +215,25 @@ function updateSyncStateAndRender() {
     if (currentDeviceId) updateDetailsLiveValues(currentDeviceId);
 }
 
-// =============================================================================
-// Stats
-// =============================================================================
 function updateStatsCards() {
-    const missing = currentSyncData.missing.length;
-    const mismatched = currentSyncData.mismatched.length;
-    const orphaned = currentSyncData.orphaned.length;
-    const total = missing + mismatched + orphaned;
+    const { missing, mismatched, orphaned, synced } = currentSyncData;
+    setText('stat-total', Object.keys(devices_map).length);
+    setText('stat-cloud', Object.keys(cloud_devices).length);
+    setText('stat-synced', synced.length);
+    setText('stat-conflicts', missing.length + mismatched.length + orphaned.length);
 
-    document.getElementById('stat-total').innerText = Object.keys(devices_map).length;
-    document.getElementById('stat-cloud').innerText = Object.keys(cloud_devices).length;
-    document.getElementById('stat-synced').innerText = currentSyncData.synced.length;
-    document.getElementById('stat-conflicts').innerText = total;
+    const parts = [];
+    if (missing.length) parts.push(`<span class="text-rose-400 font-medium">${missing.length} Missing</span>`);
+    if (mismatched.length) parts.push(`<span class="text-amber-400 font-medium">${mismatched.length} Mismatch</span>`);
+    if (orphaned.length) parts.push(`<span class="text-slate-400 font-medium">${orphaned.length} Orphan</span>`);
 
-    const detailEl = document.getElementById('stat-issues-detail');
-    if (detailEl) {
-        const parts = [];
-        if (missing > 0) parts.push(`<span class="text-rose-400 font-medium">${missing} Missing</span>`);
-        if (mismatched > 0) parts.push(`<span class="text-amber-400 font-medium">${mismatched} Mismatch</span>`);
-        if (orphaned > 0) parts.push(`<span class="text-slate-400 font-medium">${orphaned} Orphan</span>`);
-
-        detailEl.innerHTML = parts.length > 0
-            ? parts.join('<span class="text-slate-600 opacity-50">/</span>')
-            : '<span class="text-slate-500 italic">No issues found</span>';
-    }
+    setHTML('stat-issues-detail', parts.length ? parts.join('<span class="text-slate-600 opacity-50">/</span>') : '<span class="text-slate-500 italic">No issues found</span>');
 }
 
 function requestStatusUpdate() {
     sendCommand('status');
     const icon = document.querySelector('.fa-rotate-right');
-    if (icon) {
-        icon.classList.add('fa-spin');
-        setTimeout(() => icon.classList.remove('fa-spin'), 1000);
-    }
+    if (icon) { icon.classList.add('fa-spin'); setTimeout(() => icon.classList.remove('fa-spin'), 1000); }
 }
 
 // =============================================================================
@@ -340,59 +243,56 @@ function syncItemRow(label, id, btnText, btnClass, onClickExpr, onEditExpr) {
     return `<div class="flex flex-col md:flex-row md:justify-between md:items-center gap-2 text-sm border-b border-slate-700/50 pb-2 mb-2 last:border-0">
         <span class="text-white min-w-0 truncate">${label}</span>
         <div class="flex gap-2 shrink-0">
-            ${onEditExpr ? `<button onclick="${onEditExpr}" title="Edit before adding" class="px-2 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors border border-slate-600"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
+            ${onEditExpr ? `<button onclick="${onEditExpr}" class="px-2 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white border border-slate-600"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
             <button onclick="${onClickExpr}" class="${btnClass} px-3 py-1.5 rounded transition-colors border text-sm font-medium">${btnText}</button>
         </div>
     </div>`;
 }
 
 function renderSyncPanels() {
-    const rSection = (countId, sectionId, bodyId, items, rowFn) => {
-        document.getElementById(countId).innerText = items.length;
-        document.getElementById(sectionId).classList.toggle('hidden', !items.length);
-        document.getElementById(bodyId).innerHTML = items.map(rowFn).join('');
+    const { missing, mismatched, orphaned, synced } = currentSyncData;
+    
+    const render = (id, items, rowFn) => {
+        setText(`count-${id}`, items.length);
+        toggle(`section-${id}`, items.length > 0);
+        setHTML(`body-${id}`, items.map(rowFn).join(''));
     };
 
-    rSection('count-missing', 'section-missing', 'body-missing', currentSyncData.missing, dev => syncItemRow(
-        `${dev.name} <span class="text-slate-500 font-mono text-xs">(${dev.id})</span>`, dev.id, 'Import to Bridge',
-        'text-emerald-400 hover:text-white bg-emerald-500/10 hover:bg-emerald-500/30 border-emerald-500/20',
-        `resolveSingle('missing', '${dev.id}', event)`, `openDeviceImportModal(cloud_devices['${dev.id}'])`
-    ));
-
-    rSection('count-mismatch', 'section-mismatch', 'body-mismatch', currentSyncData.mismatched, item => {
+    render('missing', missing, (dev) => syncItemRow(`${dev.name} <span class="text-slate-500 font-mono text-xs">(${dev.id})</span>`, dev.id, 'Import to Bridge', 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20', `resolveSingle('missing', '${dev.id}', event)`, `openDeviceImportModal(cloud_devices['${dev.id}'])`));
+    render('mismatch', mismatched, (item) => {
         const did = item.cloud.id;
-        return `<div class="mb-2 last:mb-0">${syncItemRow(`${item.cloud.name} <span class="text-slate-500 font-mono text-xs">(${did})</span>`, did, 'Push to Bridge', 'text-amber-400 hover:text-white bg-amber-500/10 hover:bg-amber-500/30 border-amber-500/20', `resolveSingle('mismatched', '${did}', event)`, `openDeviceImportModal(cloud_devices['${did}'])`)}<div class="text-[10px] text-amber-500/70 -mt-1.5 mb-2 px-1">Conflicts: ${item.reasons.join(', ')}</div></div>`;
+        return `<div class="mb-2 last:mb-0">${syncItemRow(`${item.cloud.name} <span class="text-slate-500 font-mono text-xs">(${did})</span>`, did, 'Push to Bridge', 'text-amber-400 bg-amber-500/10 border-amber-500/20', `resolveSingle('mismatched', '${did}', event)`, `openDeviceImportModal(cloud_devices['${did}'])`)}<div class="text-[10px] text-amber-500/70 -mt-1.5 mb-2 px-1">Conflicts: ${item.reasons.join(', ')}</div></div>`;
     });
 
-    const orphanCount = document.getElementById('count-orphan');
-    if (orphanCount) {
-        orphanCount.innerText = currentSyncData.orphaned.length;
-        document.getElementById('section-orphan').classList.toggle('hidden', !currentSyncData.orphaned.length);
-        if (currentSyncData.orphaned.length) {
-            const tbody = document.querySelector('#body-orphan-rows') || (document.getElementById('body-orphan').innerHTML = `<table class="w-full text-sm"><thead><tr class="text-left text-xs text-slate-500 border-b border-slate-700"><th class="hidden md:table-cell px-4 py-2">Status</th><th class="px-4 py-2">Type</th><th class="hidden md:table-cell px-4 py-2">Name</th><th class="px-4 py-2">ID</th><th class="hidden md:table-cell px-4 py-2"></th></tr></thead><tbody id="body-orphan-rows"></tbody></table>`, document.getElementById('body-orphan-rows'));
-            tbody.innerHTML = '';
-            currentSyncData.orphaned.forEach(dev => {
-                const isZigbee = !!(dev.sub || dev.parent || dev.parent_id), hasLive = !!liveValues[dev.id];
-                const tr = document.createElement('tr');
-                tr.className = 'border-b border-slate-700/50 hover:bg-slate-800/40 transition-colors cursor-pointer group';
-                tr.onclick = () => openDetails(dev.id);
-                tr.innerHTML = `<td class="hidden md:table-cell py-3 px-4">${renderStatusCell(dev)}</td><td class="py-3 px-4"><div class="flex items-center text-slate-400 gap-2"><i class="fa-solid ${isZigbee ? 'fa-network-wired' : 'fa-wifi'} w-4 text-center shrink-0"></i><div><span class="text-sm font-medium">${isZigbee ? 'Zigbee/BLE' : 'WiFi'}</span><div class="md:hidden text-xs text-slate-400 mt-0.5 truncate max-w-[120px]">${dev.name || 'Unnamed'} ${hasLive ? '<span class="text-emerald-500">● live</span>' : ''}</div></div></div></td><td class="hidden md:table-cell py-3 px-4 font-medium text-white">${dev.name || 'Unnamed Device'} ${hasLive ? '<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>' : ''}</td><td class="py-3 px-4 font-mono text-xs text-slate-400 max-w-[120px] truncate">${dev.id}</td><td class="hidden md:table-cell py-3 px-4 text-right"><button class="text-slate-500 hover:text-white p-2 rounded hover:bg-slate-700 transition-colors" onclick="event.stopPropagation(); openDetails('${dev.id}')"><i class="fa-solid fa-chevron-right"></i></button></td>`;
-                tbody.appendChild(tr);
-            });
-        }
+    setText('count-orphan', orphaned.length);
+    toggle('section-orphan', orphaned.length > 0);
+    if (orphaned.length) {
+        setHTML('body-orphan', `<table class="w-full text-sm"><thead><tr class="text-left text-xs text-slate-500 border-b border-slate-700"><th class="hidden md:table-cell px-4 py-2">Status</th><th class="px-4 py-2">Type</th><th class="hidden md:table-cell px-4 py-2">Name</th><th class="px-4 py-2">ID</th><th class="hidden md:table-cell px-4 py-2"></th></tr></thead><tbody id="body-orphan-rows"></tbody></table>`);
+        const tbody = $('body-orphan-rows');
+        orphaned.forEach(dev => {
+            const isZigbee = !!(dev.sub || dev.parent || dev.parent_id), hasLive = !!liveValues[dev.id];
+            const tr = document.createElement('tr');
+            tr.className = 'border-b border-slate-700/50 hover:bg-slate-800/40 cursor-pointer group';
+            tr.onclick = () => openDetails(dev.id);
+            tr.innerHTML = `<td class="hidden md:table-cell py-3 px-4">${renderStatusCell(dev)}</td><td class="py-3 px-4"><div class="flex items-center text-slate-400 gap-2"><i class="fa-solid ${isZigbee ? 'fa-network-wired' : 'fa-wifi'} w-4 text-center shrink-0"></i><div><span class="text-sm font-medium">${isZigbee ? 'Zigbee/BLE' : 'WiFi'}</span><div class="md:hidden text-xs text-slate-400 mt-0.5 truncate max-w-[120px]">${dev.name || 'Unnamed'}${hasLive ? '<span class="text-emerald-500">● live</span>' : ''}</div></div></div></td><td class="hidden md:table-cell py-3 px-4 font-medium text-white">${dev.name || 'Unnamed Device'}${hasLive ? '<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>' : ''}</td><td class="py-3 px-4 font-mono text-xs text-slate-400 truncate">${dev.id}</td><td class="hidden md:table-cell py-3 px-4 text-right"><button class="text-slate-500 hover:text-white p-2 rounded hover:bg-slate-700"><i class="fa-solid fa-chevron-right"></i></button></td>`;
+            tbody.appendChild(tr);
+        });
     }
-    document.getElementById('count-synced').innerText = currentSyncData.synced.length;
+    setText('count-synced', synced.length);
 }
 
-// =============================================================================
-// Resolve actions (DRY)
-// =============================================================================
-async function resolveAll(cat, e) {
+async function resolveAll(category, e) {
     if (e) e.stopPropagation();
-    if (!currentSyncData[cat].length) return;
-    const actions = { missing: d => submitDeviceBridgeAdd(d), mismatched: i => submitDeviceBridgeAdd(i.cloud), orphaned: d => sendCommand('remove', { id: d.id }) };
-    const configs = { missing: ['Import All?', `Import all ${currentSyncData[cat].length} missing devices?`], mismatched: ['Update All?', `Update all ${currentSyncData[cat].length} mismatched devices?`], orphaned: ['Delete All?', `Delete all ${currentSyncData[cat].length} orphaned devices?`] };
-    if (await showConfirm({ title: configs[cat][0], message: configs[cat][1] })) currentSyncData[cat].forEach(actions[cat]);
+    const count = currentSyncData[category].length;
+    if (!count) return;
+
+    const titles = { missing: 'Import All?', mismatched: 'Update All?', orphaned: 'Delete All?' };
+    const msgs = { missing: `Import all ${count} missing devices?`, mismatched: `Update all ${count} mismatched devices?`, orphaned: `Delete all ${count} orphaned devices?` };
+    
+    if (await showConfirm({ title: titles[category], message: msgs[category] })) {
+        const actions = { missing: (d) => submitDeviceBridgeAdd(d), mismatched: (i) => submitDeviceBridgeAdd(i.cloud), orphaned: (d) => sendCommand('remove', { id: d.id }) };
+        currentSyncData[category].forEach(actions[category]);
+    }
 }
 
 async function resolveSingle(cat, id, e) {
@@ -404,20 +304,23 @@ async function resolveSingle(cat, id, e) {
     } else submitDeviceBridgeAdd(cat === 'mismatched' ? item.cloud : item);
 }
 
-const resolveMissing = e => resolveAll('missing', e), resolveOrphans = e => resolveAll('orphaned', e), resolveMismatch = e => resolveAll('mismatched', e), resolveMismatched = e => resolveAll('mismatched', e);
+const resolveMissing = (e) => resolveAll('missing', e), resolveOrphans = (e) => resolveAll('orphaned', e), resolveMismatch = (e) => resolveAll('mismatched', e), resolveMismatched = (e) => resolveAll('mismatched', e);
 
 function isPrivateIP(ip) {
     if (!ip || typeof ip !== 'string') return false;
     if (ip.toLowerCase() === 'auto') return true;
     const [a, b] = ip.split('.');
-    if (a === '10' || (a === '192' && b === '168') || (a === '172' && +b >= 16 && +b <= 31)) return true;
-    return false;
+    return a === '10' || (a === '192' && b === '168') || (a === '172' && +b >= 16 && +b <= 31);
 }
 
 function submitDeviceBridgeAdd(dev) {
     const payload = { id: dev.id, name: dev.name || 'Unnamed' };
-    if (dev.sub || dev.parent || dev.parent_id || dev.node_id || dev.cid) Object.assign(payload, { cid: dev.cid || dev.node_id, parent_id: dev.parent_id || dev.parent });
-    else Object.assign(payload, { key: dev.key || dev.local_key || dev.localkey, ip: isPrivateIP(dev.ip) ? dev.ip : 'Auto', version: dev.version || 'Auto' });
+    if (dev.sub || dev.parent || dev.parent_id || dev.node_id || dev.cid) {
+        payload.cid = dev.cid || dev.node_id;
+        payload.parent_id = dev.parent_id || dev.parent;
+    } else {
+        Object.assign(payload, { key: dev.key || dev.local_key || dev.localkey, ip: isPrivateIP(dev.ip) ? dev.ip : 'Auto', version: dev.version || 'Auto' });
+    }
     sendCommand('add', payload);
 }
 
@@ -445,84 +348,54 @@ function buildTree(devices) {
 // =============================================================================
 // Status filter
 // =============================================================================
-function setFilter(filter) {
-    currentFilter = filter;
-    document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.classList.toggle('active-filter', btn.dataset.filter === filter);
-    });
+function setFilter(f) {
+    currentFilter = f;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active-filter', b.dataset.filter === f));
     renderDashboard();
 }
 
 function passesFilter(dev) {
     if (currentFilter === 'all') return true;
-    const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
-    if (currentFilter === 'subdevice') return isSubDevice;
-    if (currentFilter === 'online') return !isSubDevice && (dev.status === undefined || dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0);
-    if (currentFilter === 'offline') {
-        const isOffline = dev.status === 'offline' || (typeof dev.status === 'string' && /^\d+$/.test(dev.status) && dev.status !== '0');
-        return !isSubDevice && isOffline;
-    }
+    const isSub = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
+    if (currentFilter === 'subdevice') return isSub;
+    if (currentFilter === 'online') return !isSub && (dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0);
+    if (currentFilter === 'offline') return !isSub && (dev.status === 'offline' || (typeof dev.status === 'string' && /^\d+$/.test(dev.status) && dev.status !== '0'));
     return true;
 }
 
-// =============================================================================
-// Dashboard rendering
-// =============================================================================
 function renderStatusCell(dev) {
-    const errorMsg = deviceErrors[dev.id];
-    const online = dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0;
-    
-    // Missing Parent Check (from buildTree)
-    if (dev._missing_parent) {
-        const parentInCloud = !!cloud_devices[dev._missing_parent];
-        return `<span class="status-dot bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"></span>
-                <span class="text-sm font-medium text-amber-500">Missing Parent${parentInCloud ? ' (Cloud)' : ''}</span>`;
-    }
-
-    const isSubDevice = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
-
-    // Check if status is a non-zero error code
-    const isErrorCode = !online && !isSubDevice && typeof dev.status === 'string' && /^\d+$/.test(dev.status);
-
-    if (errorMsg || isErrorCode) {
-        let text = 'Error';
-        if (isErrorCode) text = `Error ${dev.status}`;
-
-        return `<span class="status-dot bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></span>
-                <span class="text-sm font-medium text-red-500">${text}</span>`;
-    }
-
-    if (isSubDevice) {
-        return `<span class="status-dot" style="background:#3b82f6;box-shadow:0 0 0 2px rgba(59,130,246,0.25)"></span>
-                <span class="text-sm font-medium text-blue-400">Sub-device</span>`;
-    }
-
-    return `<span class="status-dot ${online ? 'status-online' : 'status-offline'}"></span>
-            <span class="text-sm font-medium ${online ? 'text-slate-300' : 'text-slate-500'}">${online ? 'Online' : 'Offline'}</span>`;
+    const err = deviceErrors[dev.id], online = dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0;
+    if (dev._missing_parent) return `<span class="status-dot bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]"></span><span class="text-sm font-medium text-amber-500">Missing Parent${cloud_devices[dev._missing_parent] ? ' (Cloud)' : ''}</span>`;
+    const isSub = ['subdevice', 'no parent', 'invalid subdevice'].includes(dev.status);
+    const isErrCode = !online && !isSub && typeof dev.status === 'string' && /^\d+$/.test(dev.status);
+    if (err || isErrCode) return `<span class="status-dot bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></span><span class="text-sm font-medium text-red-500">${isErrCode ? `Error ${dev.status}` : 'Error'}</span>`;
+    if (isSub) return `<span class="status-dot bg-blue-500 shadow-[0_0_0_2px_rgba(59,130,246,0.25)]"></span><span class="text-sm font-medium text-blue-400">Sub-device</span>`;
+    return `<span class="status-dot ${online ? 'status-online' : 'status-offline'}"></span><span class="text-sm font-medium ${online ? 'text-slate-300' : 'text-slate-500'}">${online ? 'Online' : 'Offline'}</span>`;
 }
 
 function renderDashboard() {
-    const tbody = document.getElementById('devices-body'), search = (document.getElementById('search-input')?.value || '').toLowerCase();
-    tbody.innerHTML = '';
+    const tbody = $('devices-body'), search = $('search-input')?.value.toLowerCase() || '';
     const devices = (currentSyncData.synced.length ? currentSyncData.synced : Object.values(devices_map)).filter(passesFilter);
-    if (!devices.length) return (tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No devices match the current filter.</td></tr>`);
+    
+    if (!devices.length) { tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-slate-500">No devices match.</td></tr>`; return; }
 
     const { rootNodes, childMap } = buildTree(devices);
+    tbody.innerHTML = '';
 
     const appendRow = (dev, indent) => {
-        if (search && !(dev.name?.toLowerCase().includes(search) || dev.id?.toLowerCase().includes(search))) return;
-        const isZigbee = !!(dev.sub || dev.parent || dev.parent_id), hasLive = !!liveValues[dev.id], isErr = !!deviceErrors[dev.id];
-        const statusBadge = isErr ? `<span class="text-red-500 animate-pulse">● err</span>` : (hasLive ? `<span class="text-emerald-500">● live</span>` : '');
+        if (search && !dev.name?.toLowerCase().includes(search) && !dev.id?.toLowerCase().includes(search)) return;
+        const isZigbee = !!(dev.sub || dev.parent || dev.parent_id), hasLive = !!liveValues[dev.id], err = deviceErrors[dev.id];
+        const statusBadge = err ? `<span class="text-red-500 animate-pulse">● err</span>` : (hasLive ? `<span class="text-emerald-500">● live</span>` : '');
         
         const tr = document.createElement('tr');
+        tr.className = 'border-b border-slate-700/50 hover:bg-slate-800/40 cursor-pointer group';
         tr.onclick = () => openDetails(dev.id);
-        tr.className = 'border-b border-slate-700/50 hover:bg-slate-800/40 transition-colors cursor-pointer group';
         tr.innerHTML = `
-            <td class="hidden md:table-cell py-3 md:py-4 px-5"><div class="flex items-center" style="padding-left:${search ? 0 : indent * 2}rem">${(indent > 0 && !search) ? `<i class="fa-solid fa-level-up-alt fa-rotate-90 text-slate-600 mr-2 opacity-70"></i>` : ''}${renderStatusCell(dev)}</div></td>
-            <td class="py-2.5 md:py-4 px-3 md:px-5"><div class="flex items-center text-slate-400 group-hover:text-brandBlue transition-colors"><i class="fa-solid ${isZigbee ? 'fa-network-wired' : 'fa-wifi'} mr-2 w-4 text-center shrink-0"></i><div class="min-w-0"><span class="text-sm font-medium">${isZigbee ? 'Zigbee/BLE' : 'WiFi'}</span><div class="md:hidden text-xs text-slate-400 mt-0.5 truncate max-w-[140px]">${dev.name || 'Unnamed'} ${statusBadge}</div></div></div></td>
-            <td class="hidden md:table-cell py-4 px-5 text-sm font-medium text-white">${dev.name || 'Unnamed Device'} ${isErr ? `<span class="ml-2 text-xs text-red-500 font-normal animate-pulse">● error</span>` : (hasLive ? `<span class="ml-2 text-xs text-emerald-500 font-normal">● live</span>` : '')}</td>
-            <td class="py-2.5 md:py-4 px-3 md:px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 transition-colors max-w-[120px] md:max-w-none truncate">${dev.id}</td>
-            <td class="hidden md:table-cell py-4 px-5 text-right"><button class="text-slate-500 hover:text-white p-2 rounded hover:bg-slate-700 transition-colors" onclick="event.stopPropagation(); openDetails('${dev.id}')"><i class="fa-solid fa-chevron-right"></i></button></td>`;
+            <td class="hidden md:table-cell py-4 px-5"><div class="flex items-center" style="padding-left:${search ? 0 : indent * 2}rem">${(indent > 0 && !search) ? `<i class="fa-solid fa-level-up-alt fa-rotate-90 text-slate-600 mr-2 opacity-70"></i>` : ''}${renderStatusCell(dev)}</div></td>
+            <td class="py-2.5 md:py-4 px-3 md:px-5"><div class="flex items-center text-slate-400 group-hover:text-blue-400 transition-colors"><i class="fa-solid ${isZigbee ? 'fa-network-wired' : 'fa-wifi'} mr-2 w-4 text-center"></i><div class="min-w-0"><span class="text-sm font-medium">${isZigbee ? 'Zigbee/BLE' : 'WiFi'}</span><div class="md:hidden text-xs text-slate-400 mt-0.5 truncate max-w-[140px]">${dev.name || 'Unnamed'}${statusBadge ? ' ' + statusBadge : ''}</div></div></div></td>
+            <td class="hidden md:table-cell py-4 px-5 text-sm font-medium text-white">${dev.name || 'Unnamed Device'}${err ? `<span class="ml-2 text-xs text-red-500 animate-pulse">● error</span>` : (hasLive ? `<span class="ml-2 text-xs text-emerald-500">● live</span>` : '')}</td>
+            <td class="py-2.5 md:py-4 px-3 md:px-5 font-mono text-xs text-slate-400 group-hover:text-slate-300 truncate">${dev.id}</td>
+            <td class="hidden md:table-cell py-4 px-5 text-right"><button class="text-slate-500 hover:text-white p-2 rounded hover:bg-slate-700" onclick="event.stopPropagation(); openDetails('${dev.id}')"><i class="fa-solid fa-chevron-right"></i></button></td>`;
         tbody.appendChild(tr);
         if (!search) (childMap[dev.id] || []).forEach(c => appendRow(c, indent + 1));
     };
@@ -537,132 +410,108 @@ function renderDashboard() {
 // =============================================================================
 // Modals
 // =============================================================================
-function showModal(modalId) {
-    document.getElementById('modal-overlay').classList.remove('opacity-0', 'pointer-events-none');
-    document.getElementById(modalId).classList.remove('scale-95', 'hidden');
+function showModal(id) { 
+    toggleClass('modal-overlay', 'opacity-0', false); 
+    toggleClass('modal-overlay', 'pointer-events-none', false); 
+    toggle(id, true); 
+    setTimeout(() => toggleClass(id, 'scale-95', false), 10);
 }
 
 function closeModal() {
-    document.getElementById('modal-overlay').classList.add('opacity-0', 'pointer-events-none');
+    toggleClass('modal-overlay', 'opacity-0', true); 
+    toggleClass('modal-overlay', 'pointer-events-none', true);
     ['device-modal', 'wizard-modal', 'sync-modal', 'confirm-modal'].forEach(id => {
-        const el = document.getElementById(id);
-        el.classList.add('scale-95');
-        setTimeout(() => el.classList.add('hidden'), 300);
+        toggleClass(id, 'scale-95', true);
+        setTimeout(() => toggle(id, false), 300);
     });
 }
 
-function setupDeviceModal(title, dev = null, isImport = false) {
-    currentDeviceId = isImport ? null : (dev?.id || null);
-    document.getElementById('modal-title').innerText = title;
-    document.getElementById('device-form').reset();
-    
-    const idEl = document.getElementById('dev-id');
-    idEl.value = dev?.id || '';
-    idEl.readOnly = !!dev;
-
-    document.getElementById('dev-name').value = dev?.name || '';
-    
-    const isZigbee = dev ? !!(dev.sub || dev.parent || dev.parent_id || dev.node_id || dev.cid) : false;
-    document.querySelector(`input[name="dev-type"][value="${isZigbee ? 'Zigbee/BLE' : 'WiFi'}"]`).checked = true;
+function openAddDeviceModal() {
+    currentDeviceId = null;
+    setText('modal-title', 'Add Device');
+    $('device-form').reset();
+    $('dev-id').readOnly = false;
     toggleDeviceFields();
-
-    if (isZigbee) {
-        document.getElementById('dev-node').value = dev?.node_id || dev?.cid || '';
-        document.getElementById('dev-parent').value = dev?.parent_id || dev?.parent || '';
-    } else {
-        document.getElementById('dev-key').value = dev?.key || dev?.local_key || dev?.localkey || '';
-        document.getElementById('dev-ip').value = dev ? (isPrivateIP(dev.ip) ? dev.ip : '') : '';
-        document.getElementById('dev-version').value = dev?.version || '';
-        if (!document.getElementById('dev-ip').value) document.getElementById('dev-ip').placeholder = 'Auto';
-    }
     showModal('device-modal');
 }
 
-const openAddDeviceModal = () => setupDeviceModal('Add Device');
-const openEditDeviceModal = (id) => devices_map[id] && setupDeviceModal('Edit Device', devices_map[id]);
-const openDeviceImportModal = (dev) => setupDeviceModal('Import Device', dev, true);
+function openEditDeviceModal(id) {
+    const dev = devices_map[id];
+    if (!dev) return;
+    currentDeviceId = id;
+    setText('modal-title', 'Edit Device');
+    setVal('dev-id', id);
+    $('dev-id').readOnly = true;
+    setVal('dev-name', dev.name || '');
+    const isZig = !!(dev.parent || dev.sub || dev.node_id);
+    document.querySelector(`input[name="dev-type"][value="${isZig ? 'Zigbee/BLE' : 'WiFi'}"]`).checked = true;
+    toggleDeviceFields();
+    if (isZig) { setVal('dev-node', dev.node_id || dev.cid || ''); setVal('dev-parent', dev.parent || ''); }
+    else { setVal('dev-key', dev.key || dev.local_key || ''); setVal('dev-ip', dev.ip || ''); setVal('dev-version', dev.version || ''); }
+    showModal('device-modal');
+}
+
+function openDeviceImportModal(dev) {
+    currentDeviceId = null;
+    setText('modal-title', 'Import Device');
+    setVal('dev-id', dev.id);
+    $('dev-id').readOnly = true;
+    setVal('dev-name', dev.name || '');
+    const isZig = !!(dev.sub || dev.parent || dev.parent_id || dev.node_id || dev.cid);
+    document.querySelector(`input[name="dev-type"][value="${isZig ? 'Zigbee/BLE' : 'WiFi'}"]`).checked = true;
+    toggleDeviceFields();
+    if (isZig) { setVal('dev-node', dev.cid || dev.node_id || ''); setVal('dev-parent', dev.parent_id || dev.parent || ''); }
+    else { setVal('dev-key', dev.key || dev.local_key || dev.localkey || ''); setVal('dev-ip', isPrivateIP(dev.ip) ? dev.ip : ''); setVal('dev-version', dev.version || ''); }
+    showModal('device-modal');
+}
 
 function openWizardModal() {
-    ['device-modal', 'sync-modal'].forEach(id => document.getElementById(id).classList.add('hidden'));
-    ['wizard-modal', 'wizard-input-step'].forEach(id => document.getElementById(id).classList.remove('hidden'));
-    ['wizard-loading-step', 'wizard-qr-container', 'wizard-spinner'].forEach(id => document.getElementById(id).classList.add('hidden'));
+    ['device-modal', 'sync-modal'].forEach(id => toggle(id, false));
+    ['wizard-qr-container', 'wizard-spinner', 'wizard-loading-step'].forEach(id => toggle(id, false));
+    toggle('wizard-input-step', true);
     showModal('wizard-modal');
 }
 
 function showConfirm({ title = 'Are you sure?', message = '', okText = 'Confirm', cancelText = 'Cancel' }) {
-    return new Promise((resolve) => {
-        // Hide other modals to prevent overlap
-        ['device-modal', 'wizard-modal', 'sync-modal'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.classList.add('hidden', 'scale-95');
-        });
-
-        const modal = document.getElementById('confirm-modal');
-        const overlay = document.getElementById('modal-overlay');
-        const titleEl = document.getElementById('confirm-title');
-        const msgEl = document.getElementById('confirm-message');
-        const okBtn = document.getElementById('confirm-ok-btn');
-        const cancelBtn = document.getElementById('confirm-cancel-btn');
-
-        titleEl.innerText = title;
-        msgEl.innerText = message;
-        okBtn.innerText = okText;
-        cancelBtn.innerText = cancelText;
-
-        overlay.classList.remove('opacity-0', 'pointer-events-none');
-        modal.classList.remove('hidden');
-        setTimeout(() => modal.classList.remove('scale-95'), 10);
-
-        const onOk = () => { cleanup(true); };
-        const onCancel = () => { cleanup(false); };
-
-        const onKeyDown = (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                onOk();
-            } else if (e.key === 'Escape') {
-                e.preventDefault();
-                onCancel();
-            }
+    return new Promise((res) => {
+        ['device-modal', 'wizard-modal', 'sync-modal'].forEach(id => toggle(id, false));
+        setText('confirm-title', title);
+        setText('confirm-message', message);
+        setText('confirm-ok-btn', okText);
+        setText('confirm-cancel-btn', cancelText);
+        toggleClass('modal-overlay', 'opacity-0', false);
+        toggleClass('modal-overlay', 'pointer-events-none', false);
+        toggle('confirm-modal', true);
+        setTimeout(() => toggleClass('confirm-modal', 'scale-95', false), 10);
+        
+        const cleanup = (v) => {
+            toggleClass('confirm-modal', 'scale-95', true);
+            window.removeEventListener('keydown', onKey);
+            setTimeout(() => { toggle('confirm-modal', false); toggleClass('modal-overlay', 'opacity-0', true); toggleClass('modal-overlay', 'pointer-events-none', true); res(v); }, 200);
         };
-
-        const cleanup = (result) => {
-            modal.classList.add('scale-95');
-            window.removeEventListener('keydown', onKeyDown);
-            setTimeout(() => {
-                modal.classList.add('hidden');
-                overlay.classList.add('opacity-0', 'pointer-events-none');
-                resolve(result);
-            }, 200);
-            okBtn.removeEventListener('click', onOk);
-            cancelBtn.removeEventListener('click', onCancel);
-        };
-
-        window.addEventListener('keydown', onKeyDown);
-        okBtn.addEventListener('click', onOk);
-        cancelBtn.addEventListener('click', onCancel);
+        const onKey = (e) => { if (e.key === 'Enter') cleanup(true); if (e.key === 'Escape') cleanup(false); };
+        window.addEventListener('keydown', onKey);
+        $('confirm-ok-btn').onclick = () => cleanup(true);
+        $('confirm-cancel-btn').onclick = () => cleanup(false);
     });
 }
 
 function toggleDeviceFields() {
     const isWifi = document.querySelector('input[name="dev-type"]:checked').value === 'WiFi';
-    document.getElementById('fields-wifi').classList.toggle('hidden', !isWifi);
-    document.getElementById('fields-zigbee').classList.toggle('hidden', isWifi);
+    toggle('fields-wifi', isWifi);
+    toggle('fields-zigbee', !isWifi);
 }
 
 function submitDeviceForm(e) {
     e.preventDefault();
-    const payload = {
-        id: document.getElementById('dev-id').value,
-        name: document.getElementById('dev-name').value,
-    };
+    const payload = { id: $('dev-id').value, name: $('dev-name').value };
     if (document.querySelector('input[name="dev-type"]:checked').value === 'WiFi') {
-        payload.key = document.getElementById('dev-key').value;
-        payload.ip = document.getElementById('dev-ip').value || 'Auto';
-        payload.version = document.getElementById('dev-version').value || 'Auto';
+        payload.key = $('dev-key').value;
+        payload.ip = $('dev-ip').value || 'Auto';
+        payload.version = $('dev-version').value || 'Auto';
     } else {
-        payload.cid = document.getElementById('dev-node').value;
-        payload.parent_id = document.getElementById('dev-parent').value;
+        payload.cid = $('dev-node').value;
+        payload.parent_id = $('dev-parent').value;
     }
     sendCommand('add', payload);
     closeModal();
@@ -670,43 +519,29 @@ function submitDeviceForm(e) {
 }
 
 function populateParentsSelect() {
-    const select = document.getElementById('dev-parent');
-    const prevVal = select.value;
-    select.innerHTML = '<option value="">Select Parent...</option>';
-    Object.values(devices_map)
-        .filter(d => !d.parent && !d.sub && !d.parent_id && !d.cid && d.status !== 'subdevice')
-        .forEach(d => {
-            const opt = document.createElement('option');
-            opt.value = d.id;
-            opt.text = `${d.name || 'Unnamed'} (${d.id})`;
-            select.appendChild(opt);
-        });
-    if (Array.from(select.options).some(o => o.value === prevVal)) select.value = prevVal;
+    const s = $('dev-parent'), prev = s.value;
+    s.innerHTML = '<option value="">Select Parent...</option>';
+    Object.values(devices_map).filter(d => !d.parent && !d.sub && !d.parent_id && !d.cid && d.status !== 'subdevice').forEach(d => {
+        const o = document.createElement('option'); o.value = d.id; o.text = `${d.name || 'Unnamed'} (${d.id})`; s.appendChild(o);
+    });
+    if (Array.from(s.options).some(o => o.value === prev)) s.value = prev;
 }
 
 // =============================================================================
 // Details panel
 // =============================================================================
-const HIDDEN_DETAIL_KEYS = new Set(['dps', '_missing_parent', '_is_cloud']);
-const MASKED_DETAIL_KEYS = new Set(['key', 'local_key', 'localkey']);
-let _maskedKeyRevealState = {}; // { [uniqueId]: boolean }
-
 function toggleMaskedField(uid) {
     _maskedKeyRevealState[uid] = !_maskedKeyRevealState[uid];
-    const valEl = document.getElementById(`masked-val-${uid}`);
-    const iconEl = document.getElementById(`masked-icon-${uid}`);
+    const valEl = $(`masked-val-${uid}`), iconEl = $(`masked-icon-${uid}`);
     if (!valEl || !iconEl) return;
-    const rawVal = valEl.dataset.raw;
     if (_maskedKeyRevealState[uid]) {
-        valEl.textContent = rawVal;
+        valEl.textContent = valEl.dataset.raw;
         valEl.classList.add('font-mono', 'text-amber-300');
-        iconEl.classList.remove('fa-eye');
-        iconEl.classList.add('fa-eye-slash');
+        iconEl.classList.replace('fa-eye', 'fa-eye-slash');
     } else {
         valEl.textContent = '••••••••••••••••';
         valEl.classList.remove('font-mono', 'text-amber-300');
-        iconEl.classList.add('fa-eye');
-        iconEl.classList.remove('fa-eye-slash');
+        iconEl.classList.replace('fa-eye-slash', 'fa-eye');
     }
 }
 
@@ -714,264 +549,114 @@ function renderDetailRow(key, val) {
     if (MASKED_DETAIL_KEYS.has(key)) {
         const uid = `${key}_${Math.random().toString(36).slice(2, 8)}`;
         _maskedKeyRevealState[uid] = false;
-        return `<div class="detail-item">
-            <span class="detail-label">${key.toUpperCase()}</span>
-            <span class="detail-value">
-                <span id="masked-val-${uid}" data-raw="${val}" class="detail-value text-slate-500 tracking-widest">••••••••••••••••</span>
-                <button onclick="toggleMaskedField('${uid}')" title="Show/hide" class="text-slate-500 hover:text-slate-200 transition-colors shrink-0 p-0.5">
-                    <i id="masked-icon-${uid}" class="fa-solid fa-eye text-sm"></i>
-                </button>
-            </span>
-        </div>`;
+        return `<div class="detail-item"><span class="detail-label">${key.toUpperCase()}</span><span class="detail-value"><span id="masked-val-${uid}" data-raw="${val}" class="detail-value text-slate-500 tracking-widest">••••••••••••••••</span><button onclick="toggleMaskedField('${uid}')" class="text-slate-500 hover:text-slate-200 shrink-0 p-0.5"><i id="masked-icon-${uid}" class="fa-solid fa-eye text-sm"></i></button></span></div>`;
     }
-    return `<div class="detail-item">
-        <span class="detail-label">${key.toUpperCase()}</span>
-        <span class="detail-value" title="${val}">${val}</span>
-    </div>`;
+    return `<div class="detail-item"><span class="detail-label">${key.toUpperCase()}</span><span class="detail-value" title="${val}">${val}</span></div>`;
 }
 
 function updateDetailsLiveValues(id) {
-    const liveEl = document.getElementById('live-values-body');
-    const liveSec = document.getElementById('live-values-section');
-    const errEl = document.getElementById('device-error-body');
-    const errSec = document.getElementById('device-error-section');
-    if (!liveEl || !liveSec || !errEl || !errSec) return;
+    const liveSec = $('live-values-section'), errSec = $('device-error-section');
+    const dev = devices_map[id], online = dev && (dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0);
+    const err = deviceErrors[id] || (!online && typeof dev?.status === 'string' && /^\d+$/.test(dev.status) ? `Error Code: ${dev.status}` : null);
 
-    const dev = devices_map[id];
-    const online = dev && (dev.status === 'online' || dev.status === true || dev.status === '0' || dev.status === 0);
-    const isErrorCode = dev && !online && typeof dev.status === 'string' && /^\d+$/.test(dev.status);
-
-    const errorMsg = deviceErrors[id];
-    const hasError = errorMsg || isErrorCode;
-
-    if (hasError) {
-        errSec.classList.remove('hidden');
-        liveSec.classList.add('hidden'); // Hide live values on error
-
-        let text = errorMsg || `Error Code: ${dev.status}`;
-        errEl.innerHTML = `
-            <div class="text-red-300 text-xs leading-relaxed flex items-center gap-2">
-                <i class="fa-solid fa-triangle-exclamation text-red-500"></i>
-                ${text}
-            </div>`;
+    if (err) {
+        toggle(liveSec, false); toggle(errSec, true);
+        setHTML('device-error-body', `<div class="text-red-300 text-xs flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation text-red-500"></i>${err}</div>`);
         return;
     }
 
-    errSec.classList.add('hidden');
+    toggle(errSec, false);
     const vals = liveValues[id];
-    if (!vals || !Object.keys(vals).length) {
-        liveSec.classList.add('hidden');
-        return;
-    }
-    liveSec.classList.remove('hidden');
-    liveEl.innerHTML = Object.entries(vals).map(([dp, { value, ts }]) =>
-        `<div class="flex justify-between items-center text-xs py-1.5 border-b border-slate-700/50 last:border-0 gap-2">
-            <span class="text-slate-400 font-mono shrink-0">${dp}</span>
-            <span class="text-emerald-400 font-semibold">${JSON.stringify(value)}</span>
-            <span class="text-slate-600 font-mono text-[10px] shrink-0">${ts}</span>
-         </div>`
-    ).join('');
+    if (!vals || !Object.keys(vals).length) { toggle(liveSec, false); return; }
+    toggle(liveSec, true);
+    setHTML('live-values-body', Object.entries(vals).map(([dp, { value, ts }]) =>
+        `<div class="flex justify-between items-center text-xs py-1.5 border-b border-slate-700/50 last:border-0 gap-2"><span class="text-slate-400 font-mono shrink-0">${dp}</span><span class="text-emerald-400 font-semibold">${JSON.stringify(value)}</span><span class="text-slate-600 font-mono text-[10px] shrink-0">${ts}</span></div>`
+    ).join(''));
 }
 
 function openDetails(id) {
-    const panel = document.getElementById('details-panel');
-    if (currentDeviceId === id && !panel.classList.contains('translate-x-full')) {
-        closeDetails();
-        return;
-    }
+    const panel = $('details-panel');
+    if (currentDeviceId === id && !panel.classList.contains('translate-x-full')) { closeDetails(); return; }
     const dev = devices_map[id];
     if (!dev) return;
     currentDeviceId = id;
 
-    // (details-status element not present in current template - skipped)
+    let html = Object.entries(dev).filter(([k, v]) => !HIDDEN_DETAIL_KEYS.has(k) && v !== null && v !== undefined && typeof v !== 'object').map(([k, v]) => renderDetailRow(k, v)).join('');
+    if (dev._missing_parent) html += `<div class="detail-item bg-amber-500/10 border border-amber-500/20 rounded p-2 mt-2"><span class="detail-label text-amber-500"><i class="fa-solid fa-link-slash mr-1"></i> MISSING PARENT</span><span class="detail-value font-mono text-amber-200">${dev._missing_parent}</span></div>`;
+    if (dev._missing_parent && cloud_devices[dev._missing_parent]) html += `<div class="detail-item bg-blue-500/10 border border-blue-500/20 rounded p-2 mt-1"><span class="detail-label text-blue-400"><i class="fa-solid fa-cloud mr-1"></i> PARENT IN CLOUD</span><span class="detail-value text-slate-300">${cloud_devices[dev._missing_parent].name || dev._missing_parent} <span class="font-mono text-xs text-slate-500">(${dev._missing_parent})</span></span></div>`;
 
-    let detailsHtml = Object.entries(dev)
-        .filter(([k, v]) => !HIDDEN_DETAIL_KEYS.has(k) && v !== null && v !== undefined && typeof v !== 'object')
-        .map(([k, v]) => renderDetailRow(k, v))
-        .join('');
-
-    if (dev._missing_parent) {
-        detailsHtml += `<div class="detail-item bg-amber-500/10 border border-amber-500/20 rounded p-2 mt-2">
-            <span class="detail-label text-amber-500"><i class="fa-solid fa-link-slash mr-1"></i> MISSING PARENT</span>
-            <span class="detail-value font-mono text-amber-200">${dev._missing_parent}</span>
-        </div>`;
-    }
-
-    if (dev._missing_parent && cloud_devices[dev._missing_parent]) {
-        const parentDev = cloud_devices[dev._missing_parent];
-        detailsHtml += `<div class="detail-item bg-brandBlue/10 border border-brandBlue/20 rounded p-2 mt-1">
-            <span class="detail-label text-brandBlue"><i class="fa-solid fa-cloud mr-1"></i> PARENT IN CLOUD</span>
-            <span class="detail-value text-slate-300">${parentDev.name || dev._missing_parent} <span class="font-mono text-xs text-slate-500">(${dev._missing_parent})</span></span>
-        </div>`;
-    }
-
-    document.getElementById('details-content').innerHTML = detailsHtml;
-
+    setHTML('details-content', html);
     updateDetailsLiveValues(id);
-
-
-    document.getElementById('btn-edit').onclick = () => { closeDetails(); openEditDeviceModal(id); };
-    document.getElementById('btn-delete').onclick = async () => {
-        const confirmed = await showConfirm({
-            title: 'Delete Device',
-            message: `Are you sure you want to delete ${dev.name || id}? This will remove it from the bridge configuration.`,
-            okText: 'Delete',
-        });
-        if (confirmed) {
+    $('btn-edit').onclick = () => { closeDetails(); openEditDeviceModal(id); };
+    $('btn-delete').onclick = async () => {
+        if (await showConfirm({ title: 'Delete Device', message: `Delete ${dev.name || id}?`, okText: 'Delete' })) {
             sendCommand('remove', { id });
-            // Preemptive UI removal for better responsiveness
-            if (devices_map[id]) {
-                delete devices_map[id];
-                updateSyncStateAndRender();
-            }
+            if (devices_map[id]) { delete devices_map[id]; updateSyncStateAndRender(); }
             closeDetails();
         }
     };
-
-    panel.classList.remove('translate-x-full');
-
-    // Show backdrop
-    const backdrop = document.getElementById('panel-backdrop');
-    if (backdrop) {
-        backdrop.classList.remove('hidden');
-        setTimeout(() => backdrop.classList.remove('opacity-0'), 10);
-    }
-
-    // Close log panel if open
-    document.getElementById('log-panel')?.classList.add('translate-x-full');
+    toggleClass('details-panel', 'translate-x-full', false);
+    showPanelBackdrop();
+    toggleClass('log-panel', 'translate-x-full', true);
 }
 
-function closeDetails() {
-    const panel = document.getElementById('details-panel');
-    if (panel) panel.classList.add('translate-x-full');
-    currentDeviceId = null;
-    hidePanelBackdrop();
-}
+function closeDetails() { toggleClass('details-panel', 'translate-x-full', true); currentDeviceId = null; hidePanelBackdrop(); }
+function closeAllSidePanels() { closeDetails(); closeLogPanel(); }
+function showPanelBackdrop() { const b = $('panel-backdrop'); if (b) { toggle(b, true); setTimeout(() => toggleClass(b, 'opacity-0', false), 10); } }
+function hidePanelBackdrop() { const b = $('panel-backdrop'); if (b) { toggleClass(b, 'opacity-0', true); setTimeout(() => toggle(b, false), 300); } }
 
-function closeAllSidePanels() {
-    closeDetails();
-    closeLogPanel();
-}
-
-function hidePanelBackdrop() {
-    const backdrop = document.getElementById('panel-backdrop');
-    if (backdrop) {
-        backdrop.classList.add('opacity-0');
-        setTimeout(() => backdrop.classList.add('hidden'), 300);
-    }
-}
-
-// =============================================================================
-// Mobile Sidebar
-// =============================================================================
 function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar');
-    const backdrop = document.getElementById('sidebar-backdrop');
-    const isOpen = !sidebar.classList.contains('-translate-x-full');
-    if (isOpen) {
-        sidebar.classList.add('-translate-x-full');
-        backdrop.classList.add('hidden');
-    } else {
-        sidebar.classList.remove('-translate-x-full');
-        backdrop.classList.remove('hidden');
-    }
+    const s = $('sidebar'), b = $('sidebar-backdrop'), open = s.classList.contains('-translate-x-full');
+    toggleClass(s, '-translate-x-full', !open);
+    toggle(b, open);
 }
+function closeSidebar() { toggleClass('sidebar', '-translate-x-full', true); toggle('sidebar-backdrop', false); }
 
-function closeSidebar() {
-    document.getElementById('sidebar').classList.add('-translate-x-full');
-    document.getElementById('sidebar-backdrop').classList.add('hidden');
-}
-
-// =============================================================================
-// Navigation
-// =============================================================================
-function showSection(sectionId, e) {
-    document.querySelectorAll('.section').forEach(s => s.classList.add('hidden'));
-    document.getElementById(sectionId).classList.remove('hidden');
-    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    if (e?.currentTarget) e.currentTarget.classList.add('active');
+function showSection(id, e) {
+    document.querySelectorAll('.section').forEach(s => toggle(s, false));
+    toggle(id, true);
+    document.querySelectorAll('.nav-item').forEach(n => toggleClass(n, 'active', false));
+    if (e?.currentTarget) toggleClass(e.currentTarget, 'active', true);
     const titles = { dashboard: 'Device Dashboard', devices: 'Topology View', settings: 'Settings' };
-    document.getElementById('page-title').innerText = titles[sectionId] || 'Dashboard';
-    // Auto-close sidebar on mobile after nav
+    setText('page-title', titles[id] || 'Dashboard');
     if (window.innerWidth < 1024) closeSidebar();
 }
 
-// =============================================================================
-// Wizard
-// =============================================================================
 function startWizard() {
-    const code = document.getElementById('wizard-code').value;
+    const code = $('wizard-code').value;
     if (!code) { showToast('Please enter a User Code.', 'warning'); return; }
-    document.getElementById('wizard-input-step').classList.add('hidden');
-    document.getElementById('wizard-loading-step').classList.remove('hidden');
-    document.getElementById('wizard-spinner').classList.remove('hidden');
-    document.getElementById('wizard-status-title').innerText = 'Starting API Login...';
-    document.getElementById('wizard-status-msg').innerText = 'Please wait.';
+    toggle('wizard-input-step', false); toggle('wizard-loading-step', true); toggle('wizard-spinner', true);
+    setText('wizard-status-title', 'Starting API Login...'); setText('wizard-status-msg', 'Please wait.');
     sendCommand('wizard_start', { user_code: code });
 }
 
 function handleWizardEvent(status) {
     if (status.error) {
-        document.getElementById('wizard-status-title').innerHTML = `<span class='text-red-500'>Error</span>`;
-        document.getElementById('wizard-status-msg').innerText = status.error;
-        document.getElementById('wizard-spinner').classList.add('hidden');
-        document.getElementById('wizard-qr-container').classList.add('hidden');
+        setHTML('wizard-status-title', `<span class='text-red-500'>Error</span>`);
+        setText('wizard-status-msg', status.error);
+        toggle('wizard-spinner', false); toggle('wizard-qr-container', false);
         showToast(`Wizard failed: ${status.error}`, 'error', 6000);
-        addLog(`Wizard failed: ${status.error}`, 'error');
         return;
     }
-
-    document.getElementById('wizard-status-title').innerText = status.step;
-
+    setText('wizard-status-title', status.step);
     const hasQr = !!status.url;
-    const qrEl = document.getElementById('wizard-qr-container');
-    const spinnerEl = document.getElementById('wizard-spinner');
-
-    qrEl.classList.toggle('hidden', !hasQr);
-    qrEl.classList.toggle('flex', hasQr);
-    spinnerEl.classList.toggle('hidden', hasQr);
-
+    toggle('wizard-qr-container', hasQr);
+    toggleClass('wizard-qr-container', 'flex', hasQr);
+    toggle('wizard-spinner', !hasQr);
     if (hasQr) {
         try {
-            // Generate QR code locally
-            const typeNumber = 0; // auto
-            const errorCorrectionLevel = 'L';
-            const qr = qrcode(typeNumber, errorCorrectionLevel);
-            qr.addData(status.url);
-            qr.make();
-            document.getElementById('wizard-qr-img').src = qr.createDataURL(6); // scale=6 for decent size
-        } catch (err) {
-            console.error('QR Gen Error:', err);
-            showToast('Local QR generation failed.', 'error');
-        }
+            const qr = qrcode(0, 'L'); qr.addData(status.url); qr.make();
+            $('wizard-qr-img').src = qr.createDataURL(6);
+        } catch (err) { console.error('QR Gen Error:', err); showToast('Local QR generation failed.', 'error'); }
         return;
     }
-
     if (!status.running) {
-        spinnerEl.classList.add('hidden');
+        toggle('wizard-spinner', false);
         showToast('Wizard complete! Cloud devices refreshed.', 'success', 4000);
-        addLog('Wizard complete — cloud devices refreshed', 'success');
         setTimeout(() => { closeModal(); requestStatusUpdate(); }, 1500);
     }
 }
 
-// =============================================================================
-// Sync modal
-// =============================================================================
 function requestSyncCheck() { requestStatusUpdate(); }
-
-// =============================================================================
-// Keyboard shortcuts
-// =============================================================================
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        closeModal();
-        closeDetails();
-        closeLogPanel();
-    }
-});
-
-// =============================================================================
-// Bootstrap
-// =============================================================================
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeModal(); closeDetails(); closeLogPanel(); } });
 connectWS();

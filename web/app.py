@@ -331,8 +331,12 @@ async def lifespan(app: FastAPI):
         except ValueError: pass
 
     bridge = PyBridgeServer(**bridge_kwargs)
-    bridge_task = asyncio.create_task(bridge.start_async())
-    
+
+    async def start_bridge():
+        await bridge.start_async()
+
+    bridge_task = asyncio.create_task(start_bridge())
+
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):

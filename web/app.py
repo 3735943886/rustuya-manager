@@ -319,11 +319,9 @@ def _handle_event_error(
 
     if did in state.devices_map:
         state.devices_map[did].update(filtered)
-    else:
-        logger.info("Discovered device via %s: %s (%s)", topic_type, filtered.get("name", "?"), did)
-        state.devices_map[did] = {**filtered, "id": did}
+        return True, dict(state.devices_map), False
 
-    return True, dict(state.devices_map), False
+    return False, None, False
 
 
 def handle_mqtt_message(

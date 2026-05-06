@@ -282,9 +282,11 @@ def _handle_response(did: str, action: str | None, payload: dict) -> tuple[bool,
         merged = {}
         for did, dev in devs.items():
             if did in state.devices_map:
-                # Bridge config (dev) takes precedence over placeholder data, 
-                # but we keep existing status/DP values.
-                merged[did] = {**state.devices_map[did], **dev}
+                # Merge: bridge config (dev) takes precedence, but we preserve
+                # existing status and merge the 'dps' sub-dictionary.
+                old_dev = state.devices_map[did]
+                merged_dps = {**old_dev.get("dps", {}), **dev.get("dps", {})}
+                merged[did] = {**old_dev, **dev, "dps": merged_dps}
             else:
                 merged[did] = dev
         state.devices_map = merged
@@ -311,28 +313,33 @@ def _handle_event_error(
     if action:  # bridge command echo, not a device update
         return False, None, False
 
-    filtered = {"status": "online"} if topic_type == "event" else {}
+    if did not in state.devices_map:
+        # Create skeleton entry to capture state for unknown devices (e.g. retained messages on startup)
+        state.devices_map[did] = {"id": did, "name": "Discovered...", "dps": {}}
+
+    dev = state.devices_map[did]
+    if "dps" not in dev:
+        dev["dps"] = {}
+
     if "dp" in captured_vars:
         # Per-DP mode: topic or payload contains {dp} and potentially {value}
         dp = str(captured_vars["dp"])
         val = captured_vars.get("value")
         if val is None or val == "":
             val = payload
-        filtered = {dp: val}
+        dev["dps"][dp] = val
     elif isinstance(payload, dict):
         # Bulk mode: payload contains dict of DPs
-        filtered = {k: v for k, v in payload.items() if k not in _EVENT_JUNK_KEYS}
-        if topic_type == "error" and "errorCode" in payload:
-            filtered["status"] = "online" if payload["errorCode"] == 0 else str(payload["errorCode"])
-    else:
-        return False, None, False
+        for k, v in payload.items():
+            if k not in _EVENT_JUNK_KEYS:
+                dev["dps"][k] = v
 
-    if did not in state.devices_map:
-        # Create skeleton entry to capture state for unknown devices (e.g. retained messages on startup)
-        # These will be filled in or pruned once the official bridge status response arrives.
-        state.devices_map[did] = {"id": did, "name": "Discovered..."}
+    # Update top-level status indicators
+    if topic_type == "event":
+        dev["status"] = "online"
+    elif topic_type == "error" and isinstance(payload, dict) and "errorCode" in payload:
+        dev["status"] = "online" if payload["errorCode"] == 0 else str(payload["errorCode"])
 
-    state.devices_map[did].update(filtered)
     return True, dict(state.devices_map), False
 
 

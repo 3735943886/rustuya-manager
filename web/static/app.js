@@ -989,7 +989,7 @@ function openDetails(id) {
     // (details-status element not present in current template - skipped)
 
     let detailsHtml = Object.entries(dev)
-        .filter(([k, v]) => !HIDDEN_DETAIL_KEYS.has(k) && v !== null && v !== undefined && typeof v !== 'object')
+        .filter(([k, v]) => !HIDDEN_DETAIL_KEYS.has(k) && v !== null && v !== undefined && typeof v !== 'object' && !/^\d+$/.test(k))
         .map(([k, v]) => renderDetailRow(k, v))
         .join('');
 

@@ -518,7 +518,7 @@ async def _shutdown_cleanup(task, bridge_task, bridge):
 async def lifespan(app: FastAPI):
     bridge_kwargs = _build_bridge_kwargs()
     bridge = PyBridgeServer(**bridge_kwargs)
-    bridge_task = asyncio.create_task(bridge.start_async())
+    bridge_task = asyncio.ensure_future(bridge.start_async())
     logger.info("Internal rustuya-bridge started with: %s", {k: v for k, v in bridge_kwargs.items() if "password" not in k})
 
     init_cfg = AppConfig()

@@ -277,7 +277,17 @@ def classify_mqtt_topic(topic: str, payload: Any) -> tuple[str, dict[str, Any]]:
 def _handle_response(did: str, action: str | None, payload: dict) -> tuple[bool, dict | None, bool]:
     devs = extract_devices(payload)
     if devs is not None:
-        state.devices_map = devs
+        # Merge: keep only devices present in the official bridge list ('devs'),
+        # but preserve any status/data fields already captured in our local map.
+        merged = {}
+        for did, dev in devs.items():
+            if did in state.devices_map:
+                # Bridge config (dev) takes precedence over placeholder data, 
+                # but we keep existing status/DP values.
+                merged[did] = {**state.devices_map[did], **dev}
+            else:
+                merged[did] = dev
+        state.devices_map = merged
         return True, dict(state.devices_map), False
 
     status = str(payload.get("status", "")).lower()
@@ -317,11 +327,13 @@ def _handle_event_error(
     else:
         return False, None, False
 
-    if did in state.devices_map:
-        state.devices_map[did].update(filtered)
-        return True, dict(state.devices_map), False
+    if did not in state.devices_map:
+        # Create skeleton entry to capture state for unknown devices (e.g. retained messages on startup)
+        # These will be filled in or pruned once the official bridge status response arrives.
+        state.devices_map[did] = {"id": did, "name": "Discovered..."}
 
-    return False, None, False
+    state.devices_map[did].update(filtered)
+    return True, dict(state.devices_map), False
 
 
 def handle_mqtt_message(

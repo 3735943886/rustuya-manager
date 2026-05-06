@@ -193,6 +193,7 @@ function connectWS() {
                 }
 
                 if (currentDeviceId === p.id) updateDetailsLiveValues(p.id);
+                updateSyncStateAndRender(); // Update badges in all sections
             } else if (msg.topic_type === 'event') {
                 // Accumulate live DPS values (exclude metadata keys)
                 if (msg.payload?.action) return; // Ignore bridge responses mistakenly classified as events
@@ -209,7 +210,7 @@ function connectWS() {
                             if (!META_KEYS.has(dp)) liveValues[did][dp] = { value: v, ts };
                         }
                         if (currentDeviceId === did) updateDetailsLiveValues(did);
-                        renderDashboard(); // refresh ● live badge
+                        updateSyncStateAndRender(); // Update badges in all sections
                     }
                 }
             }
@@ -351,8 +352,14 @@ function requestStatusUpdate() {
 // Sync panels
 // =============================================================================
 function syncItemRow(label, id, btnText, btnClass, onClickExpr, onEditExpr) {
+    const errorMsg = deviceErrors[id];
+    const hasLive = !!liveValues[id];
+    const statusBadge = errorMsg 
+        ? `<span class="text-red-500 text-[10px] animate-pulse ml-2">● err</span>`
+        : hasLive ? `<span class="text-emerald-500 text-[10px] ml-2">● live</span>` : '';
+
     return `<div class="flex flex-col md:flex-row md:justify-between md:items-center gap-2 text-sm border-b border-slate-700/50 pb-2 mb-2 last:border-0">
-        <span class="text-white min-w-0 truncate">${label}</span>
+        <span class="text-white min-w-0 truncate">${label}${statusBadge}</span>
         <div class="flex gap-2 shrink-0">
             ${onEditExpr ? `<button onclick="${onEditExpr}" title="Edit before adding" class="px-2 py-1.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white transition-colors border border-slate-600"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
             <button onclick="${onClickExpr}" class="${btnClass} px-3 py-1.5 rounded transition-colors border text-sm font-medium">${btnText}</button>

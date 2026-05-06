@@ -406,9 +406,9 @@ async def mqtt_listener() -> None:
                     topic = str(message.topic)
                     payload = decode_payload(message)
 
-                    topic_type, captured_vars          = classify_mqtt_topic(topic, payload)
-                    if topic_type in ("command", "unknown"):
-                        continue  # command: our own echo; unknown: unrecognised topic
+                    topic_type, captured_vars = classify_mqtt_topic(topic, payload)
+                    if topic_type in ("command", "unknown") or payload is None:
+                        continue  # command: our own echo; unknown: unrecognised; None: clearing retain
 
                     devices_updated, snapshot, refresh = handle_mqtt_message(topic, payload, topic_type, captured_vars)
 

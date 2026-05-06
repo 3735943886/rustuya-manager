@@ -143,6 +143,7 @@ function connectWS() {
         }
 
         if (msg.type === 'mqtt') {
+            if (msg.payload === null) return; // Skip retain clearing messages
             // Bridge response/error via MQTT topic
             if (msg.topic_type === 'response') {
                 const p = msg.payload || {};

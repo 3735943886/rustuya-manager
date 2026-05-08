@@ -123,6 +123,8 @@ function App() {
 
     ws.onopen = () => {
       setSocket(ws);
+      // Automatically request full status from the bridge upon connection
+      ws.send(JSON.stringify({ action: 'mqtt_publish', topic: 'rustuya/command', payload: { action: 'status' } }));
     };
 
     ws.onmessage = (event) => {
@@ -131,7 +133,7 @@ function App() {
         
         if (msg.type === 'init') {
           setMqttConnected(msg.mqtt_connected);
-          if (msg.devices) setDevices(msg.devices);
+          if (msg.cloud_devices) setDevices(msg.cloud_devices);
         } else if (msg.type === 'wizard') {
           setWizardState(msg.status);
           if (!msg.status.running && msg.cloud_devices) {

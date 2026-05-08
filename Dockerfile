@@ -1,50 +1,48 @@
-# --- Stage 1: Build stage (includes compilation tools) ---
-FROM python:3.11-slim AS builder
+# --- Stage 1: Build React Frontend ---
+FROM node:20-slim AS frontend-builder
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
 
+# --- Stage 2: Build Python Backend ---
+FROM python:3.11-slim AS backend-builder
 WORKDIR /app
-
-# Install minimal system packages for building
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Install dependencies
 COPY requirements.txt .
 RUN pip install --user --no-cache-dir -r requirements.txt
 
-
-# --- Stage 2: Runtime stage (final image) ---
+# --- Stage 3: Runtime ---
 FROM python:3.11-slim
-
 WORKDIR /app
 
-# Copy only the python packages installed in stage 1
-COPY --from=builder /root/.local /root/.local
-# Copy source code
-COPY . .
+# Copy python packages
+COPY --from=backend-builder /root/.local /root/.local
+ENV PATH=/root/.local/bin:$PATH
 
 # Environment variables
-ENV PATH=/root/.local/bin:$PATH
 ENV DATA_DIR=/data
+ENV PORT=8373
 
 # Create data directory
 RUN mkdir -p /data && chmod 777 /data
 
-# Install tini for signal forwarding
+# Install tini
 RUN apt-get update && apt-get install -y --no-install-recommends tini && rm -rf /var/lib/apt/lists/*
 
-# Define volume for data persistence
+# Copy backend source
+COPY backend/ ./backend/
+
+# Copy built frontend to backend/static
+COPY --from=frontend-builder /app/frontend/dist ./backend/static
+
+# Define volume for data persistence (e.g. Tuya wizard files)
 VOLUME ["/data"]
 
-# Port and execution command
-ENV PORT=8373
 EXPOSE $PORT
 STOPSIGNAL SIGINT
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["python", "-u", "web/app.py"]
+CMD ["python", "-u", "backend/app.py"]

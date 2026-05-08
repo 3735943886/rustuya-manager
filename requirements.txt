@@ -4,7 +4,6 @@
 # Web framework & server
 fastapi
 uvicorn
-jinja2
 
 # WebSocket & MQTT
 aiomqtt
@@ -13,7 +12,3 @@ websockets
 # Tuya authentication & device wizard
 cryptography
 tuyawizard
-
-# Rustuya Bridge
-rustuya
-git+https://github.com/3735943886/rustuya-bridge.git#subdirectory=python

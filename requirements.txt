@@ -1,14 +1,2 @@
-# rustuya-manager web requirements
-# Install with: pip install -r requirements.txt
-
-# Web framework & server
-fastapi
-uvicorn
-
-# WebSocket & MQTT
-aiomqtt
-websockets
-
-# Tuya authentication & device wizard
-cryptography
-tuyawizard
+paho-mqtt>=2.0
+rich>=13.0

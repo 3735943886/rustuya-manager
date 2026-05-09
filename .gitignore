@@ -1,12 +1,8 @@
 # Sensitive data files
-tuyacreds.json
-tuyadevices.json
-config.json
+*.json
 
 # Python
 **/__pycache__/
-*.pyc
-*.pyo
 
 # Virtual environments
 .venv/

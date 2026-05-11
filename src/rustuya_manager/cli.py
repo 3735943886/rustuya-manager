@@ -29,12 +29,22 @@ from .state import State
 logger = logging.getLogger(__name__)
 
 
-async def _on_event(matched_as: str, vars_: dict[str, str], parsed: Any) -> None:
-    """Log every bridge publish so the gate can observe the full cycle."""
+async def _on_event(
+    matched_as: str,
+    vars_: dict[str, str],
+    parsed: Any,
+    extras: dict[str, Any] | None,
+) -> None:
+    """Log every bridge publish so the gate can observe the full cycle.
+
+    `extras` carries the manager's resolved key + extracted DPS for event
+    type — the CLI prints the same DPS map that the web UI renders, not
+    whatever the bridge's parse_mqtt_payload happened to leave in `parsed`.
+    """
     if matched_as == "event":
-        device = vars_.get("name") or vars_.get("id") or "?"
-        dps = parsed.get("dps") if isinstance(parsed, dict) else None
-        print(f"  [event] {device}: {dps}")
+        e = extras or {}
+        device = e.get("device_id") or vars_.get("name") or vars_.get("id") or "?"
+        print(f"  [event] {device}: {e.get('dps')}")
     elif matched_as == "message":
         level = vars_.get("level", "?")
         target = vars_.get("id", "?")
@@ -128,8 +138,14 @@ async def run(args: argparse.Namespace) -> int:
     except asyncio.TimeoutError:
         print("⚠ Bootstrap timeout — bridge may be offline; using defaults")
 
-    # Brief settling pause so the initial `status` reply lands.
-    await asyncio.sleep(1.0)
+    # Wait for the bridge's initial `status` reply to land (it bumps state
+    # version when it arrives). Bounded so we still print *something* even
+    # if the reply never comes.
+    bootstrap_version = state.version
+    try:
+        await asyncio.wait_for(state.wait_for_change(bootstrap_version), 3.0)
+    except asyncio.TimeoutError:
+        pass
     _print_diff(state.diff())
 
     # Wire SIGINT/SIGTERM into a clean shutdown.

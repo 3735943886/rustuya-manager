@@ -28,13 +28,22 @@ class Device:
         did = data["id"]
         cid = data.get("node_id") or data.get("cid")
         parent_id = data.get("parent") or data.get("parent_id")
-        ip = data.get("ip") or "Auto"
 
-        # A device is treated as a sub-device when it advertises a cid (or sub flag)
-        # AND it has no direct IP. Cloud entries with explicit IP override this.
-        is_sub = (data.get("sub") is True) or (cid is not None)
-        if ip != "Auto" and not parent_id:
-            is_sub = False
+        # Sub-device classification (per user spec, 2026-05-11, verified against
+        # the full device inventory). Computed against the RAW ip value before
+        # normalization, because "Auto" explicitly set in the JSON is NOT the
+        # same as a missing/empty ip — only the latter is the sub indicator.
+        #   - cid present and non-empty (from "node_id" in cloud JSON or "cid"
+        #     in bridge JSON — both normalized into `cid` above), AND
+        #   - the "ip" key is absent or its value is an empty string.
+        # The cloud JSON's `sub` flag is intentionally ignored; the user
+        # reports it's unreliable (sometimes true for non-subs).
+        raw_ip = data.get("ip")
+        is_sub = bool(cid) and not raw_ip
+
+        # After classification, normalize ip for display/storage. A device with
+        # raw_ip == "" or missing is shown as "Auto" by convention.
+        ip = raw_ip or "Auto"
 
         return cls(
             id=did,
@@ -51,8 +60,10 @@ class Device:
 
     @staticmethod
     def shorten(val: str | None, length: int = 12) -> str:
-        if not val or len(val) <= length:
-            return str(val)
+        if not val:
+            return ""
+        if len(val) <= length:
+            return val
         return f"{val[:4]}...{val[-4:]}"
 
     def routing_info(self) -> str:

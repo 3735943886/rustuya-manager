@@ -165,10 +165,36 @@ class TestDispatch:
             scanner="myhome/tuya/scanner",
             payload="{value}",
         ))
+        # The event topic carries {name} but not {id}; the manager must
+        # reverse-lookup the bridge's device by name to find the canonical
+        # id. Pre-seed bridge state so the lookup resolves.
+        from rustuya_manager.models import Device
+        await state.set_bridge({
+            "bf-kitchen-id": Device(id="bf-kitchen-id", name="kitchen", ip="1.2.3.4"),
+        })
         client, _ = _make_client(state)
         await client._dispatch("myhome/tuya/dev/kitchen/dp/1/state", "true")
-        assert "kitchen" in state.dps
-        assert state.dps["kitchen"] == {"1": True}
+        # DPS is keyed by the bridge's id (not the topic's name).
+        assert "bf-kitchen-id" in state.dps
+        assert state.dps["bf-kitchen-id"] == {"1": True}
+
+    @pytest.mark.asyncio
+    async def test_event_with_unknown_name_skips_silently(self):
+        """Regression: when topic carries {name} but bridge doesn't know that
+        name yet, we used to create a phantom dps entry keyed by name. Now
+        we skip cleanly — no merge, no fake key."""
+        state = State()
+        await state.set_templates(BridgeTemplates(
+            root="myhome/tuya",
+            command="myhome/tuya/cmd/{id}/{action}",
+            event="myhome/tuya/dev/{name}/dp/{dp}/state",
+            message="tuyalog/{level}/{id}",
+            scanner="myhome/tuya/scanner",
+            payload="{value}",
+        ))
+        client, _ = _make_client(state)
+        await client._dispatch("myhome/tuya/dev/unknown/dp/1/state", "true")
+        assert state.dps == {}
 
     @pytest.mark.asyncio
     async def test_message_topic_status_response_sets_bridge_devices(self):

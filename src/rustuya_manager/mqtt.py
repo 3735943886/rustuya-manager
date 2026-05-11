@@ -70,7 +70,7 @@ class BridgeClient:
         state: State,
         *,
         client_id: str = "rustuya-manager",
-        on_event: Callable[[str, dict[str, str], Any], Awaitable[None]] | None = None,
+        on_event: Callable[[str, dict[str, str], Any, dict[str, Any] | None], Awaitable[None]] | None = None,
     ) -> None:
         host, port = _parse_broker_url(broker)
         self.host = host
@@ -91,7 +91,7 @@ class BridgeClient:
         # even with the paho default clean_session=True.
         self._runtime_wildcards: list[str] = []
 
-    # ── paho callbacks (run on paho's loop thread) ───────────────────────
+    # ── paho v2 callbacks (run on paho's loop thread) ────────────────────
     def _on_connect(
         self,
         client: mqtt.Client,
@@ -100,16 +100,10 @@ class BridgeClient:
         reason_code: Any,
         _properties: Any = None,
     ) -> None:
-        # paho v2 passes a ReasonCode object whose truthiness is True on failure.
-        # Older versions / v1 fallback path pass a plain int (0 == success).
-        rc_value = getattr(reason_code, "value", reason_code)
-        rc_failed = (
-            (reason_code.is_failure if hasattr(reason_code, "is_failure") else rc_value != 0)
-            if reason_code is not None
-            else False
-        )
-        if rc_failed:
-            logger.error("MQTT CONNACK failed: rc=%s", reason_code)
+        # `reason_code` is a paho ReasonCode object; its is_failure attribute
+        # is True on a refused/errored CONNACK.
+        if reason_code.is_failure:
+            logger.error("MQTT CONNACK failed: %s", reason_code)
             return
 
         cfg_topic = BRIDGE_CONFIG_TOPIC_TPL.replace("{root}", self.root)
@@ -132,17 +126,18 @@ class BridgeClient:
         self,
         _client: mqtt.Client,
         _userdata: Any,
-        *args: Any,
-        **_kw: Any,
+        _disconnect_flags: Any,
+        reason_code: Any,
+        _properties: Any = None,
     ) -> None:
-        # paho v1 signature: (client, userdata, rc)
-        # paho v2 signature: (client, userdata, disconnect_flags, reason_code, properties)
-        # We just want to log; the auto-reconnect logic in paho handles the rest.
-        rc = args[-1] if args else "?"
-        if rc != 0 and rc != "0":
-            logger.warning("MQTT disconnected unexpectedly: rc=%s (paho will retry)", rc)
-        else:
+        # paho v2 signature. `reason_code` is a ReasonCode object whose
+        # `is_failure` is False for "Normal disconnection" (the clean path
+        # triggered by client.disconnect()) and True for any broker-side
+        # disconnect we should auto-reconnect from.
+        if reason_code is None or not reason_code.is_failure:
             logger.info("MQTT disconnected cleanly")
+        else:
+            logger.warning("MQTT disconnected unexpectedly: %s (paho will retry)", reason_code)
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
         payload = msg.payload.decode("utf-8", errors="replace")
@@ -172,10 +167,9 @@ class BridgeClient:
         self._stopped.set()
 
     def _make_client(self) -> mqtt.Client:
-        try:
-            c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self._client_id)
-        except AttributeError:
-            c = mqtt.Client(client_id=self._client_id)  # paho < 2.0 fallback
+        # paho-mqtt 2.0+ is required (see pyproject); v1 has a different
+        # callback signature and isn't supported here.
+        c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self._client_id)
         c.on_connect = self._on_connect
         c.on_disconnect = self._on_disconnect
         c.on_message = self._on_message
@@ -252,26 +246,32 @@ class BridgeClient:
     def _resolve_device_key(
         self, vars_: dict[str, str], parsed: dict[str, Any]
     ) -> str | None:
-        """Find the device's bridge ID, falling back to name. Custom event
-        topics may carry only {name}, so we look the ID up in bridge state;
-        if even that isn't known yet, we return the name itself as a
-        stable enough key for the live DPS map."""
+        """Find the device's bridge ID.
+
+        Order: topic-extracted `id` → payload-merged `id` → reverse-lookup by
+        topic/payload `name` in current bridge state. Returns None when none
+        of these resolves — the caller skips the update rather than creating
+        a phantom DPS entry under an unresolved key."""
         did = vars_.get("id") or parsed.get("id")
         if did:
             return str(did)
         name = vars_.get("name") or parsed.get("name")
         if not name:
             return None
-        # Reverse lookup: find a bridge device with that name
         for dev in self.state.bridge.values():
             if dev.name == name:
                 return dev.id
-        return str(name)
+        logger.debug(
+            "Cannot resolve device id for event (vars=%s, parsed has id=%s, name=%s); skipping",
+            vars_, parsed.get("id"), name,
+        )
+        return None
 
     async def _route(
         self, matched_as: str, vars_: dict[str, str], parsed: Any, payload_str: str = ""
     ) -> None:
         """Updates State based on what kind of message arrived."""
+        extras: dict[str, Any] = {}
         if matched_as == "message":
             # Response or error reply. The bridge's `status` action has the
             # full device list in `devices`; record it.
@@ -305,10 +305,13 @@ class BridgeClient:
                     await self.state.merge_dps(key, dps)
                     # Data flowing means the device is alive — mark online.
                     await self.state.set_live_status(key, "online", code=0, message="event")
+                # Surface the resolved key+dps to listeners (CLI prints these).
+                extras["device_id"] = key
+                extras["dps"] = dps
         # scanner messages — surfaced via the optional on_event callback only
 
         if self._on_event is not None:
-            await self._on_event(matched_as, vars_, parsed)
+            await self._on_event(matched_as, vars_, parsed, extras)
 
     async def _extract_dps_from_event(
         self, vars_: dict[str, str], parsed: dict[str, Any], payload_str: str
@@ -381,7 +384,7 @@ class BridgeClient:
         await self._subscribe_runtime_topics(templates)
         await self._validate_payload_template(templates.payload)
         if not self._bootstrap_done.is_set():
-            await self._request_initial_status(templates)
+            await self._request_initial_status()
             self._bootstrap_done.set()
             logger.info("Bootstrap complete — templates resolved for root %r", root)
         else:
@@ -414,6 +417,7 @@ class BridgeClient:
         )
         await self.state.set_templates(templates)
         await self._subscribe_runtime_topics(templates)
+        await self._validate_payload_template(templates.payload)
         self._bootstrap_done.set()
 
     async def _subscribe_runtime_topics(self, t: BridgeTemplates) -> None:
@@ -447,7 +451,7 @@ class BridgeClient:
 
         self._runtime_wildcards = new_wildcards
 
-    async def _request_initial_status(self, t: BridgeTemplates) -> None:
+    async def _request_initial_status(self) -> None:
         await self.publish_command("status", target_id="bridge")
 
     # ── command publishing ──────────────────────────────────────────────

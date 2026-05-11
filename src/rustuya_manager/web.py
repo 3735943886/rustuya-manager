@@ -94,7 +94,7 @@ def build_app(
     *,
     creds_path: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version="0.3.0")
+    app = FastAPI(title="rustuya-manager", version="0.3.1")
     # Hold client/state on app so dependency-injection or middleware can reach them
     app.state.bridge_state = state
     app.state.bridge_client = client
@@ -113,7 +113,6 @@ def build_app(
         await state.set_cloud(parsed)
         if state.cloud_path:
             try:
-                from pathlib import Path
                 save_cloud_json(raw, Path(state.cloud_path))
             except OSError as e:
                 logger.warning("wizard fetched devices but persist failed: %s", e)
@@ -163,8 +162,6 @@ def build_app(
         persisted_to: str | None = None
         if state.cloud_path:
             try:
-                from pathlib import Path
-
                 save_cloud_json(raw, Path(state.cloud_path))
                 persisted_to = state.cloud_path
             except OSError as e:

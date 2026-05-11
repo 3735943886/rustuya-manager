@@ -356,57 +356,71 @@ function deviceCard(id, cls, isChild) {
   const primary = cloud || bridge;
   const dps = snapshot.dps[id] || {};
   const lastSeen = snapshot.last_seen[id];
+  const live = snapshot.live_status?.[id];
 
   const card = document.createElement("div");
-  card.className = `bg-white rounded-lg border border-slate-200 p-3 md:p-4 ${isChild ? "ml-4 md:ml-8 border-l-2 border-l-slate-300" : ""}`;
+  card.className = `bg-white rounded-lg border border-slate-200 p-3 ${isChild ? "ml-4 md:ml-8 border-l-2 border-l-slate-300" : ""}`;
 
-  // Header line
+  // Header line: id, name, badges, live_status pill, inline actions, last-seen
   const header = document.createElement("div");
-  header.className = "flex flex-wrap items-center gap-2 mb-2";
+  header.className = "flex flex-wrap items-center gap-1.5";
   header.innerHTML = `
     ${isChild ? '<span class="text-slate-400 text-xs">└</span>' : ""}
     <span class="font-mono text-sm">${escapeHtml(id)}</span>
-    <span class="text-sm text-slate-500">${escapeHtml(primary.name || "")}</span>
+    <span class="text-sm text-slate-500 truncate max-w-[14ch] md:max-w-[24ch]">${escapeHtml(primary.name || "")}</span>
     ${statusPill(cls)}
     ${typePill(primary.type)}
-    ${lastSeen ? `<span class="text-[10px] text-slate-400 ml-auto" data-lastseen="${lastSeen}">${formatAgo(lastSeen)}</span>` : ""}
+    ${liveStatusPill(live)}
   `;
+  // Inline action area (sits between the badges and the last-seen timestamp)
+  const headerActions = document.createElement("span");
+  headerActions.className = "ml-auto flex items-center gap-1.5";
+  appendInlineActions(headerActions, id, cls, cloud, bridge, primary);
+  if (lastSeen) {
+    const ls = document.createElement("span");
+    ls.className = "text-[10px] text-slate-400";
+    ls.dataset.lastseen = String(lastSeen);
+    ls.textContent = formatAgo(lastSeen);
+    headerActions.appendChild(ls);
+  }
+  header.appendChild(headerActions);
   card.appendChild(header);
 
-  // Field grid
+  // Compact field row — single line on desktop, wraps on mobile. STATUS dropped
+  // (the live_status pill in the header replaces it).
   const grid = document.createElement("div");
-  grid.className = "grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-xs text-slate-600";
-  const fields = [
-    ["IP", primary.ip],
-    ["KEY", primary.key ? shorten(primary.key) : "—"],
-  ];
+  grid.className = "mt-1 grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-0.5 text-xs text-slate-600";
+  const fields = [["IP", primary.ip], ["KEY", primary.key ? shorten(primary.key) : "—"]];
   if (primary.type === "SubDevice") {
     fields.push(["CID", primary.cid || "—"], ["PARENT", shorten(primary.parent_id) || "—"]);
   } else {
-    fields.push(["VER", primary.version], ["STATUS", primary.status || "—"]);
+    fields.push(["VER", primary.version]);
+    if (live?.message) {
+      fields.push(["MSG", live.message]);
+    }
   }
   for (const [k, v] of fields) {
     const f = document.createElement("div");
-    f.innerHTML = `<span class="text-slate-400">${k}</span> <span class="font-mono">${escapeHtml(String(v))}</span>`;
+    f.innerHTML = `<span class="text-slate-400">${k}</span> <span class="font-mono truncate">${escapeHtml(String(v))}</span>`;
     grid.appendChild(f);
   }
   card.appendChild(grid);
 
-  // Mismatch reasons
+  // Mismatch reasons (only when applicable — 3rd line)
   if (cls === "mismatch") {
     const m = snapshot.diff.mismatched.find((m) => m.id === id);
     if (m) {
       const reasons = document.createElement("div");
-      reasons.className = "mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1";
+      reasons.className = "mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1";
       reasons.innerHTML = m.reasons.map(escapeHtml).join("<br>");
       card.appendChild(reasons);
     }
   }
 
-  // Live DPS chips
+  // Live DPS chips (only when present)
   if (Object.keys(dps).length > 0) {
     const dpsRow = document.createElement("div");
-    dpsRow.className = "mt-2 flex flex-wrap gap-1";
+    dpsRow.className = "mt-1.5 flex flex-wrap gap-1";
     for (const [k, v] of Object.entries(dps)) {
       const chip = document.createElement("span");
       chip.className = "text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200";
@@ -416,22 +430,40 @@ function deviceCard(id, cls, isChild) {
     card.appendChild(dpsRow);
   }
 
-  // Action row
-  const actions = document.createElement("div");
-  actions.className = "mt-3 flex flex-wrap gap-2";
+  return card;
+}
+
+function appendInlineActions(container, id, cls, cloud, bridge, primary) {
+  // Sync / Update / Remove are the load-bearing actions. Query status is
+  // diagnostic — only show as a small icon-style button to keep the row tight.
   if (cls === "missing") {
-    actions.appendChild(button("Add to bridge", () => sync("add", primary)));
+    container.appendChild(button("Add", () => sync("add", primary)));
   } else if (cls === "orphan") {
-    actions.appendChild(button("Remove from bridge", () => sync("remove", primary), "danger"));
+    container.appendChild(button("Remove", () => sync("remove", primary), "danger"));
   } else if (cls === "mismatch") {
-    actions.appendChild(button("Update bridge", () => sync("add", cloud)));
+    container.appendChild(button("Update", () => sync("add", cloud)));
   }
   if (cls !== "missing") {
-    actions.appendChild(button("Query status", () => publishCommand({ action: "get", id })));
+    const queryBtn = document.createElement("button");
+    queryBtn.className = "text-[11px] px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-100 text-slate-500";
+    queryBtn.title = "Query status from bridge";
+    queryBtn.textContent = "↻";
+    queryBtn.addEventListener("click", () => publishCommand({ action: "get", id }));
+    container.appendChild(queryBtn);
   }
-  if (actions.childElementCount > 0) card.appendChild(actions);
+}
 
-  return card;
+function liveStatusPill(live) {
+  if (!live) return "";
+  const map = {
+    online:  ["bg-emerald-100 text-emerald-700 border-emerald-200", "online"],
+    offline: ["bg-slate-200 text-slate-600 border-slate-300", "offline"],
+    unknown: ["bg-slate-100 text-slate-500 border-slate-200", "unknown"],
+  };
+  const entry = map[live.state] || ["bg-rose-100 text-rose-700 border-rose-200", String(live.state || "?")];
+  const [s, label] = entry;
+  const title = live.code != null ? `code ${live.code}${live.message ? `: ${live.message}` : ""}` : "";
+  return `<span class="text-[10px] px-1.5 py-0.5 rounded-full border ${s} uppercase tracking-wide" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
 }
 
 function missingParentCard(parent_id) {
@@ -456,7 +488,8 @@ function button(label, onClick, variant = "default") {
     danger:  "border-rose-300 bg-white hover:bg-rose-50 text-rose-700",
   }[variant];
   const b = document.createElement("button");
-  b.className = `text-xs px-3 py-1.5 rounded border ${styles}`;
+  // Compact for inline use in the card header row.
+  b.className = `text-[11px] px-2 py-0.5 rounded border ${styles}`;
   b.textContent = label;
   b.addEventListener("click", onClick);
   return b;

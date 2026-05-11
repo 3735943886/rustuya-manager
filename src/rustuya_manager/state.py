@@ -47,6 +47,10 @@ class State:
     last_response: dict[str, dict[str, Any]] = field(default_factory=dict)
     # UNIX seconds of the most recent event/response observed per device id.
     last_seen: dict[str, float] = field(default_factory=dict)
+    # Live online/offline state, surfaced via the bridge's `error` topic and
+    # DPS events. Each entry is {"state": "online"|"offline"|"unknown",
+    # "code": int|None, "message": str|None}.
+    live_status: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Where the cloud devices JSON was last loaded from (None until set).
     cloud_path: str | None = None
 
@@ -92,6 +96,13 @@ class State:
     async def set_cloud_path(self, path: str) -> None:
         async with self._changed:
             self.cloud_path = path
+            self._bump()
+
+    async def set_live_status(
+        self, device_id: str, state: str, code: int | None = None, message: str | None = None
+    ) -> None:
+        async with self._changed:
+            self.live_status[device_id] = {"state": state, "code": code, "message": message}
             self._bump()
 
     def _bump(self) -> None:

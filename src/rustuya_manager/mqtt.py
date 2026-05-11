@@ -276,11 +276,26 @@ class BridgeClient:
             # full device list in `devices`; record it.
             if isinstance(parsed, dict):
                 target = vars_.get("id", "bridge")
+                level = vars_.get("level", "")
                 if parsed.get("action") == "status" and isinstance(parsed.get("devices"), dict):
                     bridge_devs = {
                         did: Device.from_dict(d) for did, d in parsed["devices"].items()
                     }
                     await self.state.set_bridge(bridge_devs)
+                # The bridge publishes per-device connection state under the
+                # `error` level: errorCode=0 means "Connection Successful",
+                # any non-zero code means the device is unreachable / errored.
+                # Translate that into a live_status pill the UI can render.
+                if level == "error" and target != "bridge" and "errorCode" in parsed:
+                    code = parsed.get("errorCode")
+                    msg = parsed.get("errorMsg") or parsed.get("payloadStr") or ""
+                    online = code == 0
+                    await self.state.set_live_status(
+                        target,
+                        "online" if online else "offline",
+                        code=code,
+                        message=msg,
+                    )
                 await self.state.record_response(target, parsed)
         elif matched_as == "event":
             # Device DPS update. parse_payload merges {dp}/{value} into a dps dict.
@@ -289,6 +304,8 @@ class BridgeClient:
                 dps = parsed.get("dps")
                 if key and isinstance(dps, dict):
                     await self.state.merge_dps(key, dps)
+                    # Data flowing means the device is alive — mark online.
+                    await self.state.set_live_status(key, "online", code=0, message="event")
         # scanner messages — surfaced via the optional on_event callback only
 
         if self._on_event is not None:

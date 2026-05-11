@@ -199,6 +199,70 @@ class TestDispatch:
         assert "bridge" in state.last_response
 
     @pytest.mark.asyncio
+    async def test_error_level_marks_device_online_or_offline(self):
+        """Bridge publishes per-device connection state to {root}/error/<id>.
+        errorCode=0 means "Connection Successful" (online); any other code
+        means the device is unreachable."""
+        state = State()
+        await state.set_templates(BridgeTemplates(
+            root="rustuya",
+            command="rustuya/command",
+            event="rustuya/event/{type}/{id}",
+            message="rustuya/{level}/{id}",
+            scanner="rustuya/scanner",
+            payload="{value}",
+        ))
+        # Override the client root to match the templates above
+        client, _ = _make_client(state)
+        client.root = "rustuya"
+
+        # 1) Online: errorCode 0
+        await client._dispatch(
+            "rustuya/error/devA",
+            json.dumps({"errorCode": 0, "errorMsg": "Connection Successful", "id": "devA"}),
+        )
+        assert state.live_status["devA"]["state"] == "online"
+        assert state.live_status["devA"]["code"] == 0
+
+        # 2) Offline: errorCode 905
+        await client._dispatch(
+            "rustuya/error/devB",
+            json.dumps({
+                "errorCode": 905,
+                "errorMsg": "Network Error: Device Unreachable",
+                "id": "devB",
+                "payloadStr": "Device offline",
+            }),
+        )
+        assert state.live_status["devB"]["state"] == "offline"
+        assert state.live_status["devB"]["code"] == 905
+        assert "Unreachable" in state.live_status["devB"]["message"]
+
+        # 3) Bridge-level error (id=bridge) is NOT stamped as a device live_status
+        await client._dispatch(
+            "rustuya/error/bridge",
+            json.dumps({"errorCode": 0, "errorMsg": "Bridge ok", "id": "bridge"}),
+        )
+        assert "bridge" not in state.live_status
+
+    @pytest.mark.asyncio
+    async def test_event_marks_device_online(self):
+        """DPS events imply the device is alive — set live_status to online."""
+        state = State()
+        await state.set_templates(BridgeTemplates(
+            root="rustuya",
+            command="rustuya/command",
+            event="rustuya/event/{type}/{id}",
+            message="rustuya/{level}/{id}",
+            scanner="rustuya/scanner",
+            payload="{value}",
+        ))
+        client, _ = _make_client(state)
+        client.root = "rustuya"
+        await client._dispatch("rustuya/event/active/devX", json.dumps({"dps": {"1": True}}))
+        assert state.live_status["devX"]["state"] == "online"
+
+    @pytest.mark.asyncio
     async def test_empty_payload_skipped(self):
         """Retain-clearing publishes empty payload — must not crash or pollute state."""
         state = State()

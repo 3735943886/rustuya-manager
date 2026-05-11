@@ -354,6 +354,14 @@ function deviceCard(id, cls, isChild) {
   const cloud = snapshot.cloud[id];
   const bridge = snapshot.bridge[id];
   const primary = cloud || bridge;
+  // IP source priority is always the bridge when the device is registered
+  // with it — that's the operational truth. "Auto" means the bridge is
+  // auto-discovering via LAN UDP scan; the resolved address isn't
+  // surfaced back through the status API, so we report it as "Auto"
+  // honestly rather than substituting the cloud's value (which is usually
+  // the external NAT'd IP seen by Tuya's servers, not the device's LAN
+  // address). The tooltip exposes the cloud value for transparency.
+  const ipInfo = resolveIp(bridge, cloud);
   const dps = snapshot.dps[id] || {};
   const lastSeen = snapshot.last_seen[id];
   const live = snapshot.live_status?.[id];
@@ -390,7 +398,7 @@ function deviceCard(id, cls, isChild) {
   // (the live_status pill in the header replaces it).
   const grid = document.createElement("div");
   grid.className = "mt-1 grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-0.5 text-xs text-slate-600";
-  const fields = [["IP", primary.ip], ["KEY", primary.key ? shorten(primary.key) : "—"]];
+  const fields = [["IP", ipInfo.value, ipInfo.tooltip], ["KEY", primary.key ? shorten(primary.key) : "—"]];
   if (primary.type === "SubDevice") {
     fields.push(["CID", primary.cid || "—"], ["PARENT", shorten(primary.parent_id) || "—"]);
   } else {
@@ -399,9 +407,11 @@ function deviceCard(id, cls, isChild) {
       fields.push(["MSG", live.message]);
     }
   }
-  for (const [k, v] of fields) {
+  for (const entry of fields) {
+    const [k, v, tooltip] = entry;
     const f = document.createElement("div");
-    f.innerHTML = `<span class="text-slate-400">${k}</span> <span class="font-mono truncate">${escapeHtml(String(v))}</span>`;
+    const titleAttr = tooltip ? ` title="${escapeHtml(tooltip)}"` : "";
+    f.innerHTML = `<span class="text-slate-400">${k}</span> <span class="font-mono truncate"${titleAttr}>${escapeHtml(String(v))}</span>`;
     grid.appendChild(f);
   }
   card.appendChild(grid);
@@ -451,6 +461,32 @@ function appendInlineActions(container, id, cls, cloud, bridge, primary) {
     queryBtn.addEventListener("click", () => publishCommand({ action: "get", id }));
     container.appendChild(queryBtn);
   }
+}
+
+// Decides which IP to surface in the card and what extra context to put in
+// the tooltip. See the call site for the policy.
+function resolveIp(bridge, cloud) {
+  const cloudIp = cloud?.ip;
+  if (bridge) {
+    if (bridge.ip && bridge.ip !== "Auto") {
+      // Bridge has a concrete IP — operational truth.
+      if (cloudIp && cloudIp !== "Auto" && cloudIp !== bridge.ip) {
+        return {
+          value: bridge.ip,
+          tooltip: `Bridge connects to ${bridge.ip}; cloud reports ${cloudIp}`,
+        };
+      }
+      return { value: bridge.ip, tooltip: "" };
+    }
+    // bridge.ip === "Auto" → bridge is auto-discovering via LAN UDP scan.
+    // The resolved address isn't surfaced back via status, so be honest.
+    const tip =
+      "Bridge is auto-discovering via LAN scan; actual IP isn't reported back" +
+      (cloudIp && cloudIp !== "Auto" ? `\n(cloud reports: ${cloudIp})` : "");
+    return { value: "Auto", tooltip: tip };
+  }
+  // Device not in bridge — cloud is all we have.
+  return { value: cloudIp || "—", tooltip: "" };
 }
 
 function liveStatusPill(live) {

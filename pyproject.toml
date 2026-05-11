@@ -14,6 +14,14 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "pyrustuyabridge>=0.1.0,<0.2",
+    "tuyawizard>=0.1.5",
+    # tuya-sharing-sdk (transitively pulled by tuyawizard) imports cryptography
+    # at runtime but doesn't list it in its own deps — declare it ourselves so
+    # `pip install rustuya-manager` never fails with a hidden ImportError.
+    "cryptography>=41",
+    # tuyawizard's --postprocess scan stage enriches devices with IP/version
+    # via UDP discovery; it's optional upstream but we want it by default.
+    "rustuya>=0.2",
 ]
 
 [project.scripts]

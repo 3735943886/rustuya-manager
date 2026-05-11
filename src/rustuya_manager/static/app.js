@@ -25,6 +25,17 @@ const $banner = document.getElementById("cloud-banner");
 const $dropzone = document.getElementById("cloud-dropzone");
 const $pickBtn = document.getElementById("cloud-pick-btn");
 const $fileInput = document.getElementById("cloud-file-input");
+const $wizardOpen = document.getElementById("wizard-open-btn");
+const $wizardModal = document.getElementById("wizard-modal");
+const $wizardClose = document.getElementById("wizard-close");
+const $wizardCancel = document.getElementById("wizard-cancel");
+const $wizardStart = document.getElementById("wizard-start");
+const $wizardUserCode = document.getElementById("wizard-user-code");
+const $wizardBody = document.getElementById("wizard-body");
+const $wizardQrImage = document.getElementById("wizard-qr-image");
+const $wizardWorkingMsg = document.getElementById("wizard-working-message");
+const $wizardDoneMsg = document.getElementById("wizard-done-message");
+const $wizardErrorMsg = document.getElementById("wizard-error-message");
 const $syncBar = document.getElementById("sync-bar");
 const $modal = document.getElementById("sync-modal");
 const $modalBody = document.getElementById("sync-modal-body");
@@ -765,6 +776,146 @@ $syncBar.addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-sync-scope]");
   if (!btn) return;
   openSyncModal(btn.dataset.syncScope);
+});
+
+// ── Wizard (Tuya Cloud login) ──────────────────────────────────────────────
+// State machine mirrors the backend's WizardState enum. Backend response on
+// any wizard endpoint is { state, qr_image_data_url, message, error, ... };
+// we render the matching pane and poll while the flow is in progress.
+let wizardPollTimer = null;
+
+function openWizardModal() {
+  showWizardPane("idle");
+  $wizardModal.classList.remove("hidden");
+  $wizardStart.disabled = false;
+  $wizardStart.textContent = "Start";
+  $wizardUserCode.value = localStorage.getItem("tuyaUserCode") || "";
+  $wizardUserCode.focus();
+}
+
+function closeWizardModal() {
+  stopWizardPoll();
+  $wizardModal.classList.add("hidden");
+}
+
+function showWizardPane(name) {
+  for (const pane of $wizardBody.querySelectorAll("[data-wizard-pane]")) {
+    pane.classList.toggle("hidden", pane.dataset.wizardPane !== name);
+  }
+}
+
+function applyWizardSession(s) {
+  switch (s.state) {
+    case "idle":
+      showWizardPane("idle");
+      $wizardStart.disabled = false;
+      $wizardStart.textContent = "Start";
+      break;
+    case "requesting_qr":
+      showWizardPane("requesting_qr");
+      $wizardStart.disabled = true;
+      break;
+    case "awaiting_scan":
+      showWizardPane("awaiting_scan");
+      if (s.qr_image_data_url) $wizardQrImage.src = s.qr_image_data_url;
+      $wizardStart.disabled = true;
+      break;
+    case "logged_in":
+    case "fetching":
+      showWizardPane("working");
+      $wizardWorkingMsg.textContent = s.message || "Working…";
+      $wizardStart.disabled = true;
+      break;
+    case "done":
+      showWizardPane("done");
+      $wizardDoneMsg.textContent = s.message || `Loaded ${s.devices_count} devices`;
+      $wizardStart.disabled = true;
+      $wizardStart.textContent = "Close";
+      $wizardStart.disabled = false;
+      stopWizardPoll();
+      // Auto-close after a brief moment so the user sees the success state
+      setTimeout(() => {
+        if (wizardCurrentState() === "done") closeWizardModal();
+      }, 2500);
+      break;
+    case "error":
+      showWizardPane("error");
+      $wizardErrorMsg.textContent = s.error || s.message || "Unknown error";
+      $wizardStart.disabled = false;
+      $wizardStart.textContent = "Try again";
+      stopWizardPoll();
+      break;
+  }
+}
+
+function wizardCurrentState() {
+  for (const pane of $wizardBody.querySelectorAll("[data-wizard-pane]")) {
+    if (!pane.classList.contains("hidden")) return pane.dataset.wizardPane;
+  }
+  return null;
+}
+
+async function startWizard() {
+  const userCode = $wizardUserCode.value.trim();
+  if (userCode) localStorage.setItem("tuyaUserCode", userCode);
+
+  // If we're sitting on the "done" or "error" pane, restart cleanly
+  const cur = wizardCurrentState();
+  if (cur === "done") { closeWizardModal(); return; }
+  if (cur === "idle" || cur === "error") {
+    try {
+      const res = await fetch("/api/wizard/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_code: userCode }),
+      });
+      const session = await res.json();
+      applyWizardSession(session);
+      startWizardPoll();
+    } catch (e) {
+      $wizardErrorMsg.textContent = `network error: ${e.message}`;
+      showWizardPane("error");
+    }
+  }
+}
+
+function startWizardPoll() {
+  stopWizardPoll();
+  wizardPollTimer = setInterval(async () => {
+    try {
+      const res = await fetch("/api/wizard/status");
+      const session = await res.json();
+      applyWizardSession(session);
+    } catch (e) {
+      // Transient network errors are fine; keep polling.
+    }
+  }, 1500);
+}
+
+function stopWizardPoll() {
+  if (wizardPollTimer) {
+    clearInterval(wizardPollTimer);
+    wizardPollTimer = null;
+  }
+}
+
+async function cancelWizard() {
+  stopWizardPoll();
+  try {
+    await fetch("/api/wizard/cancel", { method: "POST" });
+  } catch (e) { /* ignore */ }
+  closeWizardModal();
+}
+
+$wizardOpen?.addEventListener("click", openWizardModal);
+$wizardClose?.addEventListener("click", cancelWizard);
+$wizardCancel?.addEventListener("click", cancelWizard);
+$wizardStart?.addEventListener("click", startWizard);
+$wizardModal?.addEventListener("click", (e) => {
+  if (e.target === $wizardModal) cancelWizard();
+});
+$wizardUserCode?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") startWizard();
 });
 
 // ── Toasts ─────────────────────────────────────────────────────────────────

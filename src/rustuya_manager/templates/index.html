@@ -63,16 +63,22 @@
     </div>
   </section>
 
-  <!-- Cloud upload banner (visible only when no cloud loaded) -->
+  <!-- Cloud source picker — visible when no cloud loaded -->
   <section id="cloud-banner" class="hidden">
-    <div id="cloud-dropzone" class="rounded-lg border-2 border-dashed border-amber-300 bg-amber-50 p-4 md:p-5 text-sm text-amber-900 space-y-2">
+    <div id="cloud-dropzone" class="rounded-lg border-2 border-dashed border-amber-300 bg-amber-50 p-4 md:p-5 text-sm text-amber-900 space-y-3">
       <div class="font-medium">No <code class="bg-amber-100 px-1 rounded">tuyadevices.json</code> loaded</div>
       <p class="text-xs text-amber-800">
-        Bridge devices are listed below as <em>Ungrouped</em>. Diff and sync need cloud data.
-        Drop the file here or
-        <button type="button" id="cloud-pick-btn" class="underline font-medium">browse</button>
-        to upload. Generate one with <a class="underline" href="https://github.com/3735943886/tuyawizard" target="_blank" rel="noopener">tuyawizard</a> (or wait for the embedded login flow in a future update).
+        Bridge devices are listed below as <em>Ungrouped</em>. Pick a source to enable diff and sync:
       </p>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" id="wizard-open-btn" class="text-xs px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-medium">
+          Connect Tuya Cloud
+        </button>
+        <button type="button" id="cloud-pick-btn" class="text-xs px-3 py-1.5 rounded border border-amber-400 bg-white hover:bg-amber-100 text-amber-800">
+          Upload tuyadevices.json
+        </button>
+        <span class="text-[11px] text-amber-700 self-center">…or drop the file here</span>
+      </div>
       <input type="file" id="cloud-file-input" class="hidden" accept="application/json,.json">
     </div>
   </section>
@@ -141,6 +147,65 @@
 
 <!-- Toast container -->
 <div id="toast-container" class="fixed bottom-4 right-4 space-y-2 pointer-events-none"></div>
+
+<!-- Tuya Cloud wizard modal -->
+<div id="wizard-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
+  <div class="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col">
+    <div class="px-4 py-3 border-b border-slate-200 flex items-center gap-3">
+      <h2 class="text-base font-semibold">Connect to Tuya Cloud</h2>
+      <button id="wizard-close" class="ml-auto text-slate-500 hover:text-slate-900 text-xl leading-none">×</button>
+    </div>
+    <div class="p-4 space-y-3" id="wizard-body">
+      <!-- Idle: user_code input -->
+      <div data-wizard-pane="idle" class="space-y-3">
+        <p class="text-sm text-slate-700">
+          Sign in with the Smart Life or Tuya Smart app on your phone. Get your <strong>User Code</strong> from the app:
+          <span class="text-xs text-slate-500">Me → Settings → Account and Security.</span>
+        </p>
+        <label class="block">
+          <span class="text-xs text-slate-500">User code</span>
+          <input id="wizard-user-code" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" placeholder="e.g. XXXXXXXX">
+        </label>
+        <p class="text-[11px] text-slate-500">
+          Credentials are cached in <code>tuyacreds.json</code> on the manager host. Future runs will reuse them automatically.
+        </p>
+      </div>
+
+      <!-- Requesting QR / loading -->
+      <div data-wizard-pane="requesting_qr" class="hidden text-center text-slate-600 py-6">
+        <div class="text-sm">Requesting QR code from Tuya…</div>
+      </div>
+
+      <!-- QR display while awaiting scan -->
+      <div data-wizard-pane="awaiting_scan" class="hidden text-center space-y-3">
+        <img id="wizard-qr-image" src="" alt="QR code" class="mx-auto w-56 h-56 border border-slate-200 rounded bg-white">
+        <div class="text-sm text-slate-700">Open <strong>Smart Life</strong> or <strong>Tuya Smart</strong> and scan this QR.</div>
+        <div class="text-xs text-slate-500"><span class="pulse-dot">●</span> Waiting for scan…</div>
+      </div>
+
+      <!-- Logged in / fetching -->
+      <div data-wizard-pane="working" class="hidden text-center text-slate-700 py-4">
+        <div class="text-sm" id="wizard-working-message">Logged in. Fetching devices…</div>
+      </div>
+
+      <!-- Done -->
+      <div data-wizard-pane="done" class="hidden text-center text-emerald-700 py-4 space-y-2">
+        <div class="text-lg">✓</div>
+        <div class="text-sm" id="wizard-done-message">Done.</div>
+      </div>
+
+      <!-- Error -->
+      <div data-wizard-pane="error" class="hidden text-center py-4 space-y-2">
+        <div class="text-lg text-rose-600">✘</div>
+        <div class="text-sm text-rose-700" id="wizard-error-message">Failed.</div>
+      </div>
+    </div>
+    <div class="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
+      <button id="wizard-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-100">Cancel</button>
+      <button id="wizard-start" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-white">Start</button>
+    </div>
+  </div>
+</div>
 
 <!-- Sync confirm modal -->
 <div id="sync-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">

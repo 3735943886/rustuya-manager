@@ -26,6 +26,7 @@ from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
 from .mqtt import BridgeClient
 from .models import Device
 from .state import State
+from .wizard import WizardManager
 
 _PKG_ROOT = Path(__file__).resolve().parent
 _TEMPLATES_DIR = _PKG_ROOT / "templates"
@@ -85,15 +86,60 @@ def serialize_state(state: State) -> dict[str, Any]:
     }
 
 
-def build_app(state: State, client: BridgeClient) -> FastAPI:
+def build_app(
+    state: State,
+    client: BridgeClient,
+    *,
+    creds_path: str | None = None,
+) -> FastAPI:
     app = FastAPI(title="rustuya-manager", version="0.2.0")
     # Hold client/state on app so dependency-injection or middleware can reach them
     app.state.bridge_state = state
     app.state.bridge_client = client
 
+    # Tuya cloud login wizard. When devices come back from tuyawizard, write
+    # them through cloud.py so state.cloud is populated identically to a JSON
+    # upload, and persist to disk if a cloud_path is known.
+    async def _on_wizard_devices(devices: list[dict[str, Any]]) -> None:
+        import json as _json
+        raw = _json.dumps(devices, ensure_ascii=False)
+        try:
+            parsed = parse_cloud_json(raw)
+        except CloudFormatError as e:
+            logger.warning("wizard returned unparseable device shape: %s", e)
+            return
+        await state.set_cloud(parsed)
+        if state.cloud_path:
+            try:
+                from pathlib import Path
+                save_cloud_json(raw, Path(state.cloud_path))
+            except OSError as e:
+                logger.warning("wizard fetched devices but persist failed: %s", e)
+
+    wizard_creds = creds_path or "tuyacreds.json"
+    wizard = WizardManager(creds_path=wizard_creds, on_devices=_on_wizard_devices)
+    app.state.wizard = wizard
+
     @app.get("/api/state")
     async def get_state() -> dict[str, Any]:
         return serialize_state(state)
+
+    @app.post("/api/wizard/start")
+    async def wizard_start(body: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Kick off the QR login flow. `user_code` is the Tuya account ID
+        retrieved from Smart Life → Me → Settings → Account and Security."""
+        user_code = (body or {}).get("user_code") if isinstance(body, dict) else None
+        session = await wizard.start(user_code=user_code or None)
+        return session.to_dict()
+
+    @app.get("/api/wizard/status")
+    async def wizard_status() -> dict[str, Any]:
+        return wizard.session.to_dict()
+
+    @app.post("/api/wizard/cancel")
+    async def wizard_cancel() -> dict[str, Any]:
+        await wizard.cancel()
+        return wizard.session.to_dict()
 
     @app.post("/api/cloud")
     async def post_cloud(request: Request) -> dict[str, Any]:

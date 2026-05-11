@@ -144,7 +144,8 @@ async def run(args: argparse.Namespace) -> int:
     if args.web:
         from .web import build_app
 
-        app = build_app(state, client)
+        creds_path = args.creds or str(cloud_path.parent / "tuyacreds.json")
+        app = build_app(state, client, creds_path=creds_path)
         print(f"Serving web UI on http://{args.host}:{args.port}")
         web_task = asyncio.create_task(_serve_web(args.host, args.port, app))
         # When the user hits Ctrl+C, stop both web and MQTT tasks.
@@ -195,6 +196,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--port", type=int, default=8080, help="Web server port (--web only)"
+    )
+    parser.add_argument(
+        "--creds",
+        default=None,
+        help="Path to tuyacreds.json (tuyawizard's session cache). "
+             "Default: tuyacreds.json next to the cloud file.",
     )
     args = parser.parse_args(argv)
     try:

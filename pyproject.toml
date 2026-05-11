@@ -13,9 +13,7 @@ dependencies = [
     "rich>=13.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
-    # pyrustuyabridge is built from ../rustuya-bridge/python via maturin and
-    # installed editably into the active venv. It is intentionally not listed
-    # here because pip cannot resolve it from PyPI.
+    "pyrustuyabridge>=0.1.0,<0.2",
 ]
 
 [project.scripts]

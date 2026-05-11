@@ -304,7 +304,12 @@ class BridgeClient:
                 if key and dps:
                     await self.state.merge_dps(key, dps)
                     # Data flowing means the device is alive — mark online.
-                    await self.state.set_live_status(key, "online", code=0, message="event")
+                    # Leave message empty: the bridge's error-channel sends
+                    # human-readable strings like "Connection Successful",
+                    # and event-derived liveness has no equivalent to put
+                    # in the MSG row. The online dot + edge color already
+                    # convey state; MSG should only fire for real diagnostics.
+                    await self.state.set_live_status(key, "online", code=0, message="")
                 # Surface the resolved key+dps to listeners (CLI prints these).
                 extras["device_id"] = key
                 extras["dps"] = dps

@@ -192,36 +192,45 @@ async def test_dps_event_arrives_through_custom_topic(bridge: str):
     client = BridgeClient(broker="mqtt://localhost:1883", root=bridge, state=state)
 
     async def check():
-        # Add a device first so the bridge knows it
+        # Add a device on the bridge AND populate the manager's view of it via
+        # a status round-trip. Without this, the event below would carry a
+        # device `name` the manager has never seen — _resolve_device_key
+        # correctly drops such events to avoid phantom DPS entries.
         subprocess.run(
             ["mosquitto_pub", "-h", "localhost",
              "-t", f"{bridge}/cmd/bf-test-evt/add",
              "-m", '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"living_room"}'],
             check=True,
         )
-        await asyncio.sleep(0.5)
+        await client.publish_command("status", target_id="bridge")
+        for _ in range(40):
+            await asyncio.sleep(0.1)
+            if "bf-test-evt" in state.bridge:
+                break
+        assert "bf-test-evt" in state.bridge, (
+            f"manager never learned about the device: {list(state.bridge.keys())}"
+        )
 
         # Simulate a DPS update being published on the custom event topic.
-        # NOTE: in reality the bridge itself publishes these from device data,
-        # but for this test we synthesise the same publish a real device would
-        # cause — what matters is whether the manager's match/parse pipeline
-        # accepts the topic + payload pair correctly.
+        # In reality the bridge itself publishes these from device data; here
+        # we synthesise the same shape to verify the manager's match/parse
+        # pipeline accepts the topic+payload pair and resolves `name` →
+        # the bridge id `bf-test-evt`.
         subprocess.run(
             ["mosquitto_pub", "-h", "localhost",
              "-t", f"{bridge}/dev/living_room/dp/1/state",
              "-m", "true"],
             check=True,
         )
-        # Wait for state update
         for _ in range(30):
             await asyncio.sleep(0.1)
-            if state.dps:
+            if state.dps.get("bf-test-evt"):
                 break
 
-        # The key may be the device id (if name resolved via bridge state) or
-        # the name fallback — either is acceptable, but the dps value must match.
-        all_dps = {dp: v for d in state.dps.values() for dp, v in d.items()}
-        assert all_dps == {"1": True}, f"dps: {state.dps}"
+        # Pinning the resolved key catches a regression of the phantom-key
+        # fallback that 0.3.1 removed: if DPS shows up under "living_room"
+        # instead of "bf-test-evt", we lost the reverse-lookup behavior.
+        assert state.dps.get("bf-test-evt") == {"1": True}, f"dps: {state.dps}"
 
     await _run_client_briefly(client, check)
 
@@ -242,6 +251,25 @@ async def test_reconnect_preserves_subscriptions(bridge: str):
         # Sanity: runtime subscriptions should have been recorded after bootstrap
         assert client._runtime_wildcards, "no runtime wildcards cached"
         initial_subs = list(client._runtime_wildcards)
+
+        # Pre-add a device + status round-trip BEFORE the disconnect so the
+        # manager knows the device name. Otherwise the event we publish after
+        # reconnect would be silently dropped at _resolve_device_key, masking
+        # the actual subscription-survival question this test is asking.
+        subprocess.run(
+            ["mosquitto_pub", "-h", "localhost",
+             "-t", f"{bridge}/cmd/bf-reconnect-dev/add",
+             "-m", '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"post_reconnect_dev"}'],
+            check=True,
+        )
+        await client.publish_command("status", target_id="bridge")
+        for _ in range(40):
+            await asyncio.sleep(0.1)
+            if "bf-reconnect-dev" in state.bridge:
+                break
+        assert "bf-reconnect-dev" in state.bridge, (
+            f"manager never learned about the device: {list(state.bridge.keys())}"
+        )
 
         # Slam the socket shut. paho's loop will observe the broken pipe, fire
         # on_disconnect with a non-zero reason, then auto-reconnect (we set
@@ -266,13 +294,10 @@ async def test_reconnect_preserves_subscriptions(bridge: str):
                  "-m", "42"],
                 check=True,
             )
-            # Settle, then check whether the event made it through
             await asyncio.sleep(0.1)
-            all_dps = {dp: v for d in state.dps.values() for dp, v in d.items()}
-            if all_dps.get("7") == 42:
+            if state.dps.get("bf-reconnect-dev", {}).get("7") == 42:
                 break
-        all_dps = {dp: v for d in state.dps.values() for dp, v in d.items()}
-        assert all_dps.get("7") == 42, (
+        assert state.dps.get("bf-reconnect-dev", {}).get("7") == 42, (
             f"event still not received after reconnect — runtime subs lost. "
             f"cached wildcards: {initial_subs}, dps: {state.dps}"
         )

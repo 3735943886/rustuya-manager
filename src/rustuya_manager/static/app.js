@@ -383,58 +383,78 @@ function deviceCard(id, cls, isChild) {
   const cloud = snapshot.cloud[id];
   const bridge = snapshot.bridge[id];
   const primary = cloud || bridge;
-  // IP source priority is always the bridge when the device is registered
-  // with it — that's the operational truth. "Auto" means the bridge is
-  // auto-discovering via LAN UDP scan; the resolved address isn't
-  // surfaced back through the status API, so we report it as "Auto"
-  // honestly rather than substituting the cloud's value (which is usually
-  // the external NAT'd IP seen by Tuya's servers, not the device's LAN
-  // address). The tooltip exposes the cloud value for transparency.
   const ipInfo = resolveIp(bridge, cloud);
   const dps = snapshot.dps[id] || {};
   const lastSeen = snapshot.last_seen[id];
   const live = snapshot.live_status?.[id];
 
-  const card = document.createElement("div");
-  card.className = `bg-white rounded-lg border border-slate-200 p-3 ${isChild ? "ml-4 md:ml-8 border-l-2 border-l-slate-300" : ""}`;
+  // Sync-class color goes on the card's left edge — readable in one glance
+  // when scanning vertically, costs no row space, doesn't wrap on mobile.
+  const syncEdgeColors = {
+    synced:    "border-l-emerald-400",
+    mismatch:  "border-l-amber-400",
+    missing:   "border-l-sky-400",
+    orphan:    "border-l-rose-400",
+    ungrouped: "border-l-slate-300",
+  };
+  const indent = isChild ? "ml-4 md:ml-8" : "";
 
-  // Header line: id, name, badges, live_status pill, inline actions, last-seen
-  const header = document.createElement("div");
-  header.className = "flex flex-wrap items-center gap-1.5";
-  header.innerHTML = `
-    ${isChild ? '<span class="text-slate-400 text-xs">└</span>' : ""}
-    <span class="font-mono text-sm">${escapeHtml(id)}</span>
-    <span class="text-sm text-slate-500 truncate max-w-[14ch] md:max-w-[24ch]">${escapeHtml(primary.name || "")}</span>
-    ${statusPill(cls)}
-    ${typePill(primary.type)}
-    ${liveStatusPill(live)}
+  const card = document.createElement("div");
+  card.className = `bg-white rounded-lg border border-slate-200 border-l-4 ${syncEdgeColors[cls]} p-3 ${indent}`;
+  card.title = `${cls}${primary.type ? ` · ${primary.type}` : ""}`;
+
+  // ── Header row 1: name (or id) + status icons + actions ────────────────
+  const headerTop = document.createElement("div");
+  headerTop.className = "flex items-center gap-2 min-w-0";
+  const nameOrId = primary.name && primary.name !== "N/A" ? primary.name : id;
+  headerTop.innerHTML = `
+    ${isChild ? '<span class="text-slate-300 text-sm shrink-0">└</span>' : ""}
+    <span class="font-medium text-sm text-slate-900 truncate min-w-0">${escapeHtml(nameOrId)}</span>
   `;
-  // Inline action area (sits between the badges and the last-seen timestamp)
-  const headerActions = document.createElement("span");
-  headerActions.className = "ml-auto flex items-center gap-1.5";
-  appendInlineActions(headerActions, id, cls, cloud, bridge, primary);
+  const rightCluster = document.createElement("span");
+  rightCluster.className = "ml-auto flex items-center gap-2 shrink-0";
+  rightCluster.appendChild(liveDot(live));
+  rightCluster.appendChild(typeBadge(primary.type));
+  appendInlineActions(rightCluster, id, cls, cloud, bridge, primary);
+  headerTop.appendChild(rightCluster);
+  card.appendChild(headerTop);
+
+  // ── Header row 2: id (when name was shown) + last-seen ─────────────────
+  const showSecondaryId =
+    primary.name && primary.name !== "N/A" && primary.name !== id;
+  const headerBottom = document.createElement("div");
+  headerBottom.className = "flex items-center gap-2 mt-0.5";
+  headerBottom.innerHTML = showSecondaryId
+    ? `<span class="font-mono text-[11px] text-slate-400 truncate">${escapeHtml(id)}</span>`
+    : `<span></span>`;
   if (lastSeen) {
     const ls = document.createElement("span");
-    ls.className = "text-[10px] text-slate-400";
+    ls.className = "ml-auto text-[10px] text-slate-400 shrink-0";
     ls.dataset.lastseen = String(lastSeen);
     ls.textContent = formatAgo(lastSeen);
-    headerActions.appendChild(ls);
+    headerBottom.appendChild(ls);
   }
-  header.appendChild(headerActions);
-  card.appendChild(header);
+  card.appendChild(headerBottom);
 
-  // Compact field row — single line on desktop, wraps on mobile. STATUS dropped
-  // (the live_status pill in the header replaces it).
+  // ── Field grid ─────────────────────────────────────────────────────────
+  // Sub-devices live behind a gateway, so IP and KEY are meaningless for
+  // them — only the CID and parent relationship matter. WiFi devices show
+  // IP/KEY/VER + any live error message from the bridge.
   const grid = document.createElement("div");
-  grid.className = "mt-1 grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-0.5 text-xs text-slate-600";
-  const fields = [["IP", ipInfo.value, ipInfo.tooltip], ["KEY", primary.key ? shorten(primary.key) : "—"]];
+  grid.className = "mt-2 grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-0.5 text-xs text-slate-600";
+  let fields;
   if (primary.type === "SubDevice") {
-    fields.push(["CID", primary.cid || "—"], ["PARENT", shorten(primary.parent_id) || "—"]);
+    fields = [
+      ["CID", primary.cid || "—"],
+      ["PARENT", shorten(primary.parent_id) || "—"],
+    ];
   } else {
-    fields.push(["VER", primary.version]);
-    if (live?.message) {
-      fields.push(["MSG", live.message]);
-    }
+    fields = [
+      ["IP", ipInfo.value, ipInfo.tooltip],
+      ["KEY", primary.key ? shorten(primary.key) : "—"],
+      ["VER", primary.version],
+    ];
+    if (live?.message) fields.push(["MSG", live.message]);
   }
   for (const entry of fields) {
     const [k, v, tooltip] = entry;
@@ -445,7 +465,7 @@ function deviceCard(id, cls, isChild) {
   }
   card.appendChild(grid);
 
-  // Mismatch reasons (only when applicable — 3rd line)
+  // ── Mismatch reasons ───────────────────────────────────────────────────
   if (cls === "mismatch") {
     const m = snapshot.diff.mismatched.find((m) => m.id === id);
     if (m) {
@@ -456,11 +476,14 @@ function deviceCard(id, cls, isChild) {
     }
   }
 
-  // Live DPS chips (only when present)
-  if (Object.keys(dps).length > 0) {
+  // ── Live DPS chips (non-empty only) ────────────────────────────────────
+  const dpsEntries = Object.entries(dps).filter(
+    ([, v]) => v !== "" && v !== null && v !== undefined
+  );
+  if (dpsEntries.length > 0) {
     const dpsRow = document.createElement("div");
     dpsRow.className = "mt-1.5 flex flex-wrap gap-1";
-    for (const [k, v] of Object.entries(dps)) {
+    for (const [k, v] of dpsEntries) {
       const chip = document.createElement("span");
       chip.className = "text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200";
       chip.textContent = `dp${k}=${formatDpsValue(v)}`;
@@ -470,6 +493,44 @@ function deviceCard(id, cls, isChild) {
   }
 
   return card;
+}
+
+// Online/offline dot — one character of color, fits anywhere.
+function liveDot(live) {
+  const span = document.createElement("span");
+  if (!live) {
+    span.className = "text-slate-300 text-xs";
+    span.textContent = "○";
+    span.title = "no status received";
+    return span;
+  }
+  const map = {
+    online:  ["text-emerald-500", "●", "online"],
+    offline: ["text-slate-400",   "○", "offline"],
+    unknown: ["text-slate-300",   "○", "unknown"],
+  };
+  const [color, glyph, label] = map[live.state] || ["text-rose-500", "✕", String(live.state)];
+  span.className = `${color} text-sm leading-none`;
+  span.textContent = glyph;
+  const code = live.code != null ? ` (code ${live.code})` : "";
+  const msg = live.message ? `: ${live.message}` : "";
+  span.title = `${label}${code}${msg}`;
+  return span;
+}
+
+// Type marker — single letter, subtle, fits in narrow layouts.
+function typeBadge(t) {
+  const span = document.createElement("span");
+  span.className =
+    "text-[10px] font-mono w-4 h-4 inline-flex items-center justify-center rounded border border-slate-200 text-slate-500";
+  if (t === "SubDevice") {
+    span.textContent = "S";
+    span.title = "Sub-device";
+  } else {
+    span.textContent = "W";
+    span.title = "WiFi device";
+  }
+  return span;
 }
 
 function appendInlineActions(container, id, cls, cloud, bridge, primary) {
@@ -519,19 +580,6 @@ function resolveIp(bridge, cloud) {
   return { value: cloudIp || "—", tooltip: "" };
 }
 
-function liveStatusPill(live) {
-  if (!live) return "";
-  const map = {
-    online:  ["bg-emerald-100 text-emerald-700 border-emerald-200", "online"],
-    offline: ["bg-slate-200 text-slate-600 border-slate-300", "offline"],
-    unknown: ["bg-slate-100 text-slate-500 border-slate-200", "unknown"],
-  };
-  const entry = map[live.state] || ["bg-rose-100 text-rose-700 border-rose-200", String(live.state || "?")];
-  const [s, label] = entry;
-  const title = live.code != null ? `code ${live.code}${live.message ? `: ${live.message}` : ""}` : "";
-  return `<span class="text-[10px] px-1.5 py-0.5 rounded-full border ${s} uppercase tracking-wide" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
-}
-
 function missingParentCard(parent_id) {
   const card = document.createElement("div");
   card.className = "bg-white rounded-lg border-2 border-dashed border-sky-300 p-3 md:p-4";
@@ -562,6 +610,8 @@ function button(label, onClick, variant = "default") {
 }
 
 function statusPill(cls) {
+  // Used only by missingParentCard now; device cards use the left-edge color
+  // strip + liveDot/typeBadge for the same information without text labels.
   const map = {
     synced:    ["bg-emerald-100 text-emerald-700 border-emerald-200", "synced"],
     mismatch:  ["bg-amber-100 text-amber-700 border-amber-200", "mismatch"],
@@ -571,10 +621,6 @@ function statusPill(cls) {
   };
   const [s, label] = map[cls];
   return `<span class="text-[10px] px-1.5 py-0.5 rounded-full border ${s} uppercase tracking-wide">${label}</span>`;
-}
-
-function typePill(t) {
-  return `<span class="text-[10px] px-1.5 py-0.5 rounded-full border bg-slate-100 text-slate-600 border-slate-300">${escapeHtml(t)}</span>`;
 }
 
 // ── Actions (POST /api/command) ────────────────────────────────────────────

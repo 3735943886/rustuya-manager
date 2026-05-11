@@ -304,7 +304,6 @@ class BridgeClient:
 
         # Bridge may publish its own root; honor it.
         root = cfg.get("mqtt_root_topic") or self.root
-        self.root = root
 
         # Substitute {root} once — same step the bridge itself performs.
         def resolve(key: str, default: str = "") -> str:
@@ -319,11 +318,26 @@ class BridgeClient:
             scanner=resolve("mqtt_scanner_topic", "{root}/scanner"),
             payload=cfg.get("mqtt_payload_template") or "{value}",
         )
+
+        # Idempotence check: the retained bridge/config message can be
+        # re-delivered every time we subscribe to a wildcard that also matches
+        # it (e.g. message_topic="{root}/{level}/{id}" → wildcard "{root}/+/+"
+        # which matches "{root}/bridge/config" too). Without this guard, each
+        # re-delivery triggers another re-subscribe → another re-delivery →
+        # infinite bootstrap loop.
+        if self.state.templates == templates and self._bootstrap_done.is_set():
+            logger.debug("bridge/config re-delivered, templates unchanged — skipping")
+            return
+
+        self.root = root
         await self.state.set_templates(templates)
         await self._subscribe_runtime_topics(templates)
-        await self._request_initial_status(templates)
-        self._bootstrap_done.set()
-        logger.info("Bootstrap complete — templates resolved for root %r", root)
+        if not self._bootstrap_done.is_set():
+            await self._request_initial_status(templates)
+            self._bootstrap_done.set()
+            logger.info("Bootstrap complete — templates resolved for root %r", root)
+        else:
+            logger.info("Bridge config updated — templates re-resolved for root %r", root)
 
     async def _apply_default_templates(self) -> None:
         """Fallback when bridge/config didn't arrive (bridge offline)."""
@@ -350,13 +364,29 @@ class BridgeClient:
         # Deduplicate while preserving order — custom templates can collapse to
         # the same wildcard (e.g. event {root}/x/{id} and message {root}/x/{id}).
         seen: set[str] = set()
-        self._runtime_wildcards = [w for w in wildcards if not (w in seen or seen.add(w))]
-        for wildcard in self._runtime_wildcards:
+        new_wildcards = [w for w in wildcards if not (w in seen or seen.add(w))]
+
+        # Unsubscribe wildcards we no longer need.
+        for stale in self._runtime_wildcards:
+            if stale not in new_wildcards:
+                self._client.unsubscribe(stale)
+                logger.info("Unsubscribed: %s", stale)
+
+        # Subscribe only the newcomers — re-subscribing an existing wildcard
+        # forces the broker to re-deliver every retained message, which is
+        # both wasteful and (in the case of bridge/config) the trigger for an
+        # infinite bootstrap loop.
+        previously = set(self._runtime_wildcards)
+        for wildcard in new_wildcards:
+            if wildcard in previously:
+                continue
             rc, _mid = self._client.subscribe(wildcard)
             if rc != mqtt.MQTT_ERR_SUCCESS:
                 logger.error("Subscribe FAILED rc=%s for %s", rc, wildcard)
             else:
                 logger.info("Subscribed: %s", wildcard)
+
+        self._runtime_wildcards = new_wildcards
 
     async def _request_initial_status(self, t: BridgeTemplates) -> None:
         await self.publish_command("status", target_id="bridge")

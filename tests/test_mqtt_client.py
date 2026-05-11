@@ -103,6 +103,38 @@ class TestOnConnect:
 
 class TestDispatch:
     @pytest.mark.asyncio
+    async def test_bridge_config_redelivery_does_not_resubscribe(self):
+        """Regression: when the bridge uses the default message topic
+        `{root}/{level}/{id}` the wildcard `{root}/+/+` also matches the
+        retained `{root}/bridge/config` topic, so the broker re-delivers it
+        every time we subscribe. Without idempotence this caused an infinite
+        bootstrap loop on a real test server.
+
+        After the first bootstrap, a second dispatch of the same config must
+        NOT issue any more subscribe calls."""
+        state = State()
+        client, paho = _make_client(state)
+        cfg_topic = BRIDGE_CONFIG_TOPIC_TPL.replace("{root}", "myhome/tuya")
+        cfg_payload = json.dumps({
+            "mqtt_root_topic": "myhome/tuya",
+            "mqtt_command_topic": "{root}/command",
+            "mqtt_event_topic": "{root}/event/{type}/{id}",
+            "mqtt_message_topic": "{root}/{level}/{id}",
+            "mqtt_scanner_topic": "{root}/scanner",
+            "mqtt_payload_template": "{value}",
+        })
+        await client._dispatch(cfg_topic, cfg_payload)
+        first_subscribe_count = paho.subscribe.call_count
+        first_publish_count = paho.publish.call_count
+        assert first_subscribe_count >= 3, "expected runtime wildcards subscribed once"
+
+        # The broker re-delivers the SAME retained config. Manager must be a
+        # no-op — no additional subscribes, no additional status request.
+        await client._dispatch(cfg_topic, cfg_payload)
+        assert paho.subscribe.call_count == first_subscribe_count
+        assert paho.publish.call_count == first_publish_count
+
+    @pytest.mark.asyncio
     async def test_bridge_config_resolves_templates(self):
         state = State()
         client, _ = _make_client(state)

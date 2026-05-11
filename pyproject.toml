@@ -24,6 +24,9 @@ rustuya-manager = "rustuya_manager.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+rustuya_manager = ["templates/*.html", "static/*.js", "static/*.css"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

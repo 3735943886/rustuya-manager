@@ -12,11 +12,16 @@ consume the same change stream.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from .diff import DiffResult, diff
 from .models import Device
+
+
+def _now() -> float:
+    return time.time()
 
 
 @dataclass
@@ -40,6 +45,10 @@ class State:
     dps: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Last action result keyed by device id ("ok", "error", or message text).
     last_response: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # UNIX seconds of the most recent event/response observed per device id.
+    last_seen: dict[str, float] = field(default_factory=dict)
+    # Where the cloud devices JSON was last loaded from (None until set).
+    cloud_path: str | None = None
 
     _version: int = 0
     _changed: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
@@ -67,15 +76,22 @@ class State:
             self.templates = t
             self._bump()
 
-    async def merge_dps(self, device_id: str, new_dps: dict[str, Any]) -> None:
+    async def merge_dps(self, device_id: str, new_dps: dict[str, Any], at: float | None = None) -> None:
         async with self._changed:
             existing = self.dps.setdefault(device_id, {})
             existing.update(new_dps)
+            self.last_seen[device_id] = at if at is not None else _now()
             self._bump()
 
-    async def record_response(self, target_id: str, response: dict[str, Any]) -> None:
+    async def record_response(self, target_id: str, response: dict[str, Any], at: float | None = None) -> None:
         async with self._changed:
             self.last_response[target_id] = response
+            self.last_seen[target_id] = at if at is not None else _now()
+            self._bump()
+
+    async def set_cloud_path(self, path: str) -> None:
+        async with self._changed:
+            self.cloud_path = path
             self._bump()
 
     def _bump(self) -> None:

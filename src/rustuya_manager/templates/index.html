@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rustuya-manager</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28'%3E%E2%9A%99%EF%B8%8F%3C/text%3E%3C/svg%3E">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            // semantic categories for the sync status — kept in one place
+            sync: { synced: '#16a34a', mismatch: '#eab308', missing: '#0ea5e9', orphan: '#ef4444' },
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Single piece of custom CSS: pulse the "connecting" dot until we're live */
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+    .pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+
+<header class="bg-white border-b border-slate-200 sticky top-0 z-10">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+    <h1 class="text-lg font-semibold tracking-tight">rustuya-manager</h1>
+    <div id="conn-badge" class="text-xs px-2 py-1 rounded-full border bg-slate-100 text-slate-600 border-slate-300">
+      <span class="pulse-dot">●</span> connecting…
+    </div>
+    <div class="text-xs text-slate-500" id="root-label"></div>
+    <div class="ml-auto flex items-center gap-2">
+      <button id="refresh-btn" class="text-xs px-2 py-1 rounded border border-slate-300 hover:bg-slate-100">
+        ↻ refresh
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-6xl mx-auto px-4 py-6 space-y-6">
+
+  <!-- Summary cards -->
+  <section class="grid grid-cols-2 md:grid-cols-4 gap-3" id="summary">
+    <div class="bg-white rounded-lg border border-slate-200 p-4">
+      <div class="text-2xl font-bold text-sync-synced" data-summary="synced">0</div>
+      <div class="text-xs text-slate-500 uppercase tracking-wide mt-1">synced</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 p-4">
+      <div class="text-2xl font-bold text-sync-mismatch" data-summary="mismatched">0</div>
+      <div class="text-xs text-slate-500 uppercase tracking-wide mt-1">mismatch</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 p-4">
+      <div class="text-2xl font-bold text-sync-missing" data-summary="missing">0</div>
+      <div class="text-xs text-slate-500 uppercase tracking-wide mt-1">missing</div>
+    </div>
+    <div class="bg-white rounded-lg border border-slate-200 p-4">
+      <div class="text-2xl font-bold text-sync-orphan" data-summary="orphaned">0</div>
+      <div class="text-xs text-slate-500 uppercase tracking-wide mt-1">orphan</div>
+    </div>
+  </section>
+
+  <!-- Cloud upload banner (visible only when no cloud loaded) -->
+  <section id="cloud-banner" class="hidden">
+    <div id="cloud-dropzone" class="rounded-lg border-2 border-dashed border-amber-300 bg-amber-50 p-4 md:p-5 text-sm text-amber-900 space-y-2">
+      <div class="font-medium">No <code class="bg-amber-100 px-1 rounded">tuyadevices.json</code> loaded</div>
+      <p class="text-xs text-amber-800">
+        Bridge devices are listed below as <em>Ungrouped</em>. Diff and sync need cloud data.
+        Drop the file here or
+        <button type="button" id="cloud-pick-btn" class="underline font-medium">browse</button>
+        to upload. Generate one with <a class="underline" href="https://github.com/3735943886/tuyawizard" target="_blank" rel="noopener">tuyawizard</a> (or wait for the embedded login flow in a future update).
+      </p>
+      <input type="file" id="cloud-file-input" class="hidden" accept="application/json,.json">
+    </div>
+  </section>
+
+  <!-- Device list -->
+  <section>
+    <div class="flex flex-wrap items-center gap-2 mb-2">
+      <h2 class="text-sm font-semibold text-slate-700">Devices</h2>
+      <div class="flex gap-1 text-xs ml-auto" id="filter-tabs">
+        <button data-filter="all" class="px-2 py-1 rounded border border-slate-300 bg-white">all</button>
+        <button data-filter="mismatch" class="px-2 py-1 rounded border border-slate-300 bg-white">mismatch</button>
+        <button data-filter="missing" class="px-2 py-1 rounded border border-slate-300 bg-white">missing</button>
+        <button data-filter="orphan" class="px-2 py-1 rounded border border-slate-300 bg-white">orphan</button>
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <input id="search-input" type="search" placeholder="search id / name / ip / cid"
+             class="flex-1 min-w-[180px] text-sm px-3 py-1.5 rounded border border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-400">
+      <label class="text-xs text-slate-500">
+        sort
+        <select id="sort-select" class="ml-1 text-xs px-2 py-1 rounded border border-slate-300 bg-white">
+          <option value="id">id</option>
+          <option value="name">name</option>
+          <option value="type">type</option>
+          <option value="status">status</option>
+          <option value="last_seen">last-seen</option>
+        </select>
+      </label>
+    </div>
+    <div id="device-list" class="space-y-2"></div>
+    <div id="empty-state" class="hidden bg-white rounded-lg border border-dashed border-slate-300 p-6 text-center text-slate-500 text-sm">
+      No devices.
+    </div>
+  </section>
+
+  <!-- Resolved bridge templates (debug aid) -->
+  <section>
+    <details class="bg-white rounded-lg border border-slate-200">
+      <summary class="px-4 py-2 text-sm text-slate-600 cursor-pointer hover:bg-slate-50">Bridge templates</summary>
+      <div class="px-4 py-3 border-t border-slate-200 text-xs font-mono text-slate-700 space-y-1" id="templates-block">
+        <div class="text-slate-400">(waiting for bootstrap)</div>
+      </div>
+    </details>
+  </section>
+
+</main>
+
+<!-- Toast container -->
+<div id="toast-container" class="fixed bottom-4 right-4 space-y-2 pointer-events-none"></div>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

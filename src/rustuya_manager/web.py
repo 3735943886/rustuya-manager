@@ -15,15 +15,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
+from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
 from .mqtt import BridgeClient
 from .models import Device
 from .state import State
+
+_PKG_ROOT = Path(__file__).resolve().parent
+_TEMPLATES_DIR = _PKG_ROOT / "templates"
+_STATIC_DIR = _PKG_ROOT / "static"
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +79,9 @@ def serialize_state(state: State) -> dict[str, Any]:
         },
         "dps": state.dps,
         "last_response": state.last_response,
+        "last_seen": state.last_seen,
+        "cloud_path": state.cloud_path,
+        "cloud_loaded": bool(state.cloud),
     }
 
 
@@ -85,6 +94,39 @@ def build_app(state: State, client: BridgeClient) -> FastAPI:
     @app.get("/api/state")
     async def get_state() -> dict[str, Any]:
         return serialize_state(state)
+
+    @app.post("/api/cloud")
+    async def post_cloud(request: Request) -> dict[str, Any]:
+        """Accepts a Tuya devices JSON upload and applies it to state.
+
+        The browser sends raw JSON (Content-Type: application/json or text/plain).
+        If state already knows a cloud_path, the upload is also persisted there
+        so the manager re-loads it on restart."""
+        raw = await request.body()
+        if not raw:
+            raise HTTPException(400, "empty body")
+        try:
+            devices = parse_cloud_json(raw)
+        except CloudFormatError as e:
+            raise HTTPException(400, str(e)) from None
+
+        await state.set_cloud(devices)
+
+        persisted_to: str | None = None
+        if state.cloud_path:
+            try:
+                from pathlib import Path
+
+                save_cloud_json(raw, Path(state.cloud_path))
+                persisted_to = state.cloud_path
+            except OSError as e:
+                logger.warning("cloud upload accepted but persist failed: %s", e)
+
+        return {
+            "ok": True,
+            "count": len(devices),
+            "persisted_to": persisted_to,
+        }
 
     @app.post("/api/command")
     async def post_command(body: dict[str, Any]) -> dict[str, Any]:
@@ -128,19 +170,16 @@ def build_app(state: State, client: BridgeClient) -> FastAPI:
             except Exception:
                 pass
 
+    # Static assets (JS, eventual CSS, icons). Tailwind comes from a CDN inside
+    # the HTML, so there's no build step.
+    if _STATIC_DIR.is_dir():
+        app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
     @app.get("/")
-    async def root() -> JSONResponse:
-        # Step-4 will replace this with a real HTML page. For now, return a
-        # tiny pointer so curl users aren't greeted with 404.
-        return JSONResponse(
-            {
-                "service": "rustuya-manager",
-                "endpoints": {
-                    "state": "/api/state",
-                    "command": "POST /api/command",
-                    "ws": "/ws",
-                },
-            }
-        )
+    async def root() -> FileResponse:
+        index = _TEMPLATES_DIR / "index.html"
+        if not index.exists():
+            raise HTTPException(500, "index.html missing from package")
+        return FileResponse(index, media_type="text/html")
 
     return app

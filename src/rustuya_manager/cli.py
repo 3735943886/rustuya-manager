@@ -96,12 +96,15 @@ async def run(args: argparse.Namespace) -> int:
 
     state = State()
     cloud_path = Path(args.cloud)
+    # Remember where to persist later uploads, even if the file doesn't exist yet.
+    await state.set_cloud_path(str(cloud_path.resolve()))
     if cloud_path.exists():
         cloud = _load_cloud(cloud_path)
         await state.set_cloud(cloud)
         print(f"Loaded {len(cloud)} cloud devices from {cloud_path}")
     else:
-        print(f"WARN: cloud file {cloud_path} not found — running with empty cloud set")
+        print(f"NOTE: cloud file {cloud_path} not found — bridge devices will show as 'ungrouped'.")
+        print(f"      Upload tuyadevices.json via the web UI to enable diff/sync.")
 
     # Quiet-mode for the event callback when running with --web: stdout becomes
     # uvicorn's territory, so don't interleave per-event prints there.

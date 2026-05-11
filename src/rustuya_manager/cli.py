@@ -138,14 +138,12 @@ async def run(args: argparse.Namespace) -> int:
     except asyncio.TimeoutError:
         print("⚠ Bootstrap timeout — bridge may be offline; using defaults")
 
-    # Wait for the bridge's initial `status` reply to land (it bumps state
-    # version when it arrives). Bounded so we still print *something* even
-    # if the reply never comes.
-    bootstrap_version = state.version
-    try:
-        await asyncio.wait_for(state.wait_for_change(bootstrap_version), 3.0)
-    except asyncio.TimeoutError:
-        pass
+    # Wait for the bridge's initial `status` reply to land (which populates
+    # state.bridge). A naive "wait for any state change" wakes up on retained
+    # events that arrive first when mqtt_retain=true is set; here we wait for
+    # the specific semantic condition. Bounded so we still print *something*
+    # if the bridge never replies.
+    await state.wait_for(lambda: bool(state.bridge), timeout=3.0)
     _print_diff(state.diff())
 
     # Wire SIGINT/SIGTERM into a clean shutdown.

@@ -136,3 +136,19 @@ class State:
         async with self._changed:
             await self._changed.wait_for(lambda: self._version > since_version)
             return self._version
+
+    async def wait_for(self, predicate, timeout: float | None = None) -> bool:
+        """Awaits until `predicate()` is True (re-checked on every mutation).
+
+        Returns True on success, False on timeout. Useful when the caller
+        cares about a *semantic* condition (e.g. "bridge state is populated")
+        rather than "any state change happened" — retained messages can fire
+        version bumps that aren't the change you're waiting for."""
+        async with self._changed:
+            if predicate():
+                return True
+            try:
+                await asyncio.wait_for(self._changed.wait_for(predicate), timeout)
+                return True
+            except asyncio.TimeoutError:
+                return False

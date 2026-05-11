@@ -77,6 +77,25 @@
     </div>
   </section>
 
+  <!-- Sync actions bar -->
+  <section id="sync-bar" class="hidden">
+    <div class="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
+      <span class="text-xs text-slate-500">Pending changes:</span>
+      <button data-sync-scope="mismatch" class="hidden text-xs px-2.5 py-1 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800">
+        Apply mismatches <span data-count></span>
+      </button>
+      <button data-sync-scope="missing" class="hidden text-xs px-2.5 py-1 rounded border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-800">
+        Add missing <span data-count></span>
+      </button>
+      <button data-sync-scope="orphan" class="hidden text-xs px-2.5 py-1 rounded border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-800">
+        Remove orphans <span data-count></span>
+      </button>
+      <button data-sync-scope="all" class="ml-auto text-xs px-3 py-1 rounded bg-slate-900 hover:bg-slate-800 text-white font-medium">
+        Sync everything
+      </button>
+    </div>
+  </section>
+
   <!-- Device list -->
   <section>
     <div class="flex flex-wrap items-center gap-2 mb-2">
@@ -122,6 +141,29 @@
 
 <!-- Toast container -->
 <div id="toast-container" class="fixed bottom-4 right-4 space-y-2 pointer-events-none"></div>
+
+<!-- Sync confirm modal -->
+<div id="sync-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
+  <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+    <div class="px-4 py-3 border-b border-slate-200 flex items-center gap-3">
+      <h2 class="text-base font-semibold" id="sync-modal-title">Sync changes</h2>
+      <span class="text-xs text-slate-500" id="sync-modal-subtitle"></span>
+      <button id="sync-modal-close" class="ml-auto text-slate-500 hover:text-slate-900 text-xl leading-none">×</button>
+    </div>
+    <div id="sync-modal-body" class="overflow-y-auto p-4 space-y-4"></div>
+    <div class="px-4 py-3 border-t border-slate-200 flex flex-wrap items-center gap-2">
+      <span id="sync-modal-progress" class="text-xs text-slate-500"></span>
+      <div class="ml-auto flex gap-2">
+        <button id="sync-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-100">
+          Cancel
+        </button>
+        <button id="sync-modal-apply" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50 disabled:cursor-not-allowed">
+          Apply
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script type="module" src="/static/app.js"></script>
 </body>

@@ -25,6 +25,15 @@ const $banner = document.getElementById("cloud-banner");
 const $dropzone = document.getElementById("cloud-dropzone");
 const $pickBtn = document.getElementById("cloud-pick-btn");
 const $fileInput = document.getElementById("cloud-file-input");
+const $syncBar = document.getElementById("sync-bar");
+const $modal = document.getElementById("sync-modal");
+const $modalBody = document.getElementById("sync-modal-body");
+const $modalTitle = document.getElementById("sync-modal-title");
+const $modalSubtitle = document.getElementById("sync-modal-subtitle");
+const $modalApply = document.getElementById("sync-modal-apply");
+const $modalCancel = document.getElementById("sync-modal-cancel");
+const $modalClose = document.getElementById("sync-modal-close");
+const $modalProgress = document.getElementById("sync-modal-progress");
 
 // ── Connection ──────────────────────────────────────────────────────────────
 function wsUrl() {
@@ -117,7 +126,35 @@ function render() {
   renderTemplates();
   renderSummary();
   renderBanner();
+  renderSyncBar();
   renderDevices();
+}
+
+function renderSyncBar() {
+  if (!snapshot.cloud_loaded) {
+    $syncBar.classList.add("hidden");
+    return;
+  }
+  const counts = {
+    mismatch: snapshot.diff.mismatched.length,
+    missing: snapshot.diff.missing.length,
+    orphan: snapshot.diff.orphaned.length,
+  };
+  const total = counts.mismatch + counts.missing + counts.orphan;
+  if (total === 0) {
+    $syncBar.classList.add("hidden");
+    return;
+  }
+  $syncBar.classList.remove("hidden");
+
+  for (const btn of $syncBar.querySelectorAll("[data-sync-scope]")) {
+    const scope = btn.dataset.syncScope;
+    if (scope === "all") continue; // always visible when total > 0
+    const n = counts[scope] || 0;
+    btn.classList.toggle("hidden", n === 0);
+    const countSpan = btn.querySelector("[data-count]");
+    if (countSpan) countSpan.textContent = `(${n})`;
+  }
 }
 
 function renderRoot() {
@@ -431,7 +468,7 @@ function typePill(t) {
 }
 
 // ── Actions (POST /api/command) ────────────────────────────────────────────
-async function sync(action, dev) {
+function buildCommandBody(action, dev) {
   const body = { action, id: dev.id, name: dev.name };
   if (action === "add") {
     if (dev.type === "WiFi") {
@@ -443,26 +480,292 @@ async function sync(action, dev) {
       if (dev.parent_id) body.parent_id = dev.parent_id;
     }
   }
-  await publishCommand(body);
+  return body;
+}
+
+async function sync(action, dev) {
+  await publishCommand(buildCommandBody(action, dev));
 }
 
 async function publishCommand(body) {
+  const result = await postCommand(body);
+  if (result.ok) {
+    toast(`${body.action} → ${body.id || "bridge"} sent`, "ok");
+  } else {
+    toast(`error: ${result.error}`, "error");
+  }
+  return result;
+}
+
+// Silent variant: returns {ok, error} without toasting. Used in batch loops
+// where we want per-item status reporting in the modal instead of a flood of
+// toasts.
+async function postCommand(body) {
   try {
     const res = await fetch("/api/command", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const err = await res.text();
-      toast(`error: ${err}`, "error");
-      return;
-    }
-    toast(`${body.action} → ${body.id || "bridge"} sent`, "ok");
+    if (!res.ok) return { ok: false, error: await res.text() };
+    return { ok: true };
   } catch (e) {
-    toast(`network error: ${e.message}`, "error");
+    return { ok: false, error: e.message };
   }
 }
+
+// ── Sync confirm modal ─────────────────────────────────────────────────────
+// Plan: list of items the user is about to apply. The modal lets them
+// uncheck individual rows, then we publish each checked item sequentially
+// and reflect per-row status.
+let currentPlan = null;
+let applying = false;
+
+function buildPlan(scope) {
+  const plan = [];
+  if (scope === "all" || scope === "mismatch") {
+    for (const m of snapshot.diff.mismatched) {
+      const dev = snapshot.cloud[m.id];
+      if (!dev) continue;
+      plan.push({
+        scope: "mismatch",
+        id: m.id,
+        action: "add",  // re-publishing add updates fields on the bridge
+        dev,
+        reasons: m.reasons,
+        checked: true,
+        status: "pending",
+        error: null,
+      });
+    }
+  }
+  if (scope === "all" || scope === "missing") {
+    for (const id of snapshot.diff.missing) {
+      const dev = snapshot.cloud[id];
+      if (!dev) continue;
+      plan.push({
+        scope: "missing",
+        id, action: "add", dev, reasons: [],
+        checked: true, status: "pending", error: null,
+      });
+    }
+  }
+  if (scope === "all" || scope === "orphan") {
+    for (const id of snapshot.diff.orphaned) {
+      const dev = snapshot.bridge[id];
+      if (!dev) continue;
+      plan.push({
+        scope: "orphan",
+        id, action: "remove", dev, reasons: [],
+        checked: true, status: "pending", error: null,
+      });
+    }
+  }
+  return plan;
+}
+
+function openSyncModal(scope) {
+  if (!snapshot) return;
+  currentPlan = buildPlan(scope);
+  if (currentPlan.length === 0) {
+    toast("Nothing to sync in that category", "ok");
+    return;
+  }
+  const titles = {
+    all: "Sync everything",
+    mismatch: "Apply mismatches",
+    missing: "Add missing devices",
+    orphan: "Remove orphans",
+  };
+  $modalTitle.textContent = titles[scope] || "Sync changes";
+  applying = false;
+  $modalApply.disabled = false;
+  $modalApply.textContent = "Apply";
+  $modalCancel.disabled = false;
+  $modalClose.disabled = false;
+  $modalProgress.textContent = "";
+  renderModal();
+  $modal.classList.remove("hidden");
+}
+
+function closeSyncModal() {
+  if (applying) return; // refuse to close mid-apply
+  $modal.classList.add("hidden");
+  currentPlan = null;
+}
+
+function renderModal() {
+  $modalBody.innerHTML = "";
+
+  // Group by scope
+  const groups = { mismatch: [], missing: [], orphan: [] };
+  for (const item of currentPlan) groups[item.scope].push(item);
+
+  const titles = {
+    mismatch: ["Update mismatched", "border-amber-200 bg-amber-50 text-amber-800"],
+    missing:  ["Add missing",       "border-sky-200 bg-sky-50 text-sky-800"],
+    orphan:   ["Remove orphans",    "border-rose-200 bg-rose-50 text-rose-800"],
+  };
+
+  for (const scope of ["mismatch", "missing", "orphan"]) {
+    const items = groups[scope];
+    if (items.length === 0) continue;
+    const [title, cls] = titles[scope];
+
+    const section = document.createElement("section");
+    section.className = `border rounded ${cls}`;
+    section.innerHTML = `
+      <div class="px-3 py-2 flex items-center gap-2 border-b border-current/10">
+        <strong class="text-sm">${title}</strong>
+        <span class="text-xs">${items.length}</span>
+        <label class="ml-auto text-xs flex items-center gap-1 cursor-pointer">
+          <input type="checkbox" data-toggle-all="${scope}" checked class="rounded">
+          <span>select all</span>
+        </label>
+      </div>
+    `;
+    const list = document.createElement("ul");
+    list.className = "divide-y divide-current/10 bg-white/60";
+    for (const item of items) {
+      const idx = currentPlan.indexOf(item);
+      list.appendChild(renderPlanRow(item, idx));
+    }
+    section.appendChild(list);
+    $modalBody.appendChild(section);
+  }
+
+  updateApplyButton();
+}
+
+function renderPlanRow(item, index) {
+  const li = document.createElement("li");
+  li.className = "px-3 py-2 flex items-center gap-2 text-sm";
+  li.innerHTML = `
+    <input type="checkbox" data-plan-idx="${index}" ${item.checked ? "checked" : ""} class="rounded shrink-0" ${applying ? "disabled" : ""}>
+    <div class="flex-1 min-w-0">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="font-mono text-xs">${escapeHtml(item.id)}</span>
+        <span class="text-xs text-slate-500">${escapeHtml(item.dev.name || "—")}</span>
+        <span class="text-[10px] uppercase tracking-wide text-slate-500">${item.action}</span>
+      </div>
+      ${item.reasons.length ? `<div class="text-[11px] text-slate-600 mt-1">${item.reasons.map(escapeHtml).join("<br>")}</div>` : ""}
+    </div>
+    <span data-status-idx="${index}" class="text-xs shrink-0">${statusLabel(item)}</span>
+  `;
+  return li;
+}
+
+function statusLabel(item) {
+  switch (item.status) {
+    case "pending":     return '<span class="text-slate-400">pending</span>';
+    case "in_progress": return '<span class="text-slate-700">…</span>';
+    case "ok":          return '<span class="text-emerald-600">✓</span>';
+    case "error":       return `<span class="text-rose-600" title="${escapeHtml(item.error || "")}">✘</span>`;
+    default:            return "";
+  }
+}
+
+function updateApplyButton() {
+  const selected = currentPlan?.filter((i) => i.checked).length ?? 0;
+  $modalApply.textContent = applying
+    ? `Applying… (${currentPlan.filter((i) => i.status === "ok" || i.status === "error").length}/${selected})`
+    : selected === 0
+      ? "Apply"
+      : `Apply ${selected} change${selected === 1 ? "" : "s"}`;
+  $modalApply.disabled = applying || selected === 0;
+}
+
+async function applyBatch() {
+  if (!currentPlan || applying) return;
+  const selected = currentPlan.filter((i) => i.checked);
+  if (selected.length === 0) return;
+
+  applying = true;
+  $modalCancel.disabled = true;
+  $modalClose.disabled = true;
+  // Disable all row checkboxes
+  for (const el of $modalBody.querySelectorAll('input[type="checkbox"]')) el.disabled = true;
+  updateApplyButton();
+
+  let okCount = 0;
+  let errCount = 0;
+  for (const item of selected) {
+    item.status = "in_progress";
+    updateRowStatus(item);
+    updateApplyButton();
+    const res = await postCommand(buildCommandBody(item.action, item.dev));
+    if (res.ok) {
+      item.status = "ok";
+      okCount++;
+    } else {
+      item.status = "error";
+      item.error = res.error;
+      errCount++;
+    }
+    updateRowStatus(item);
+    updateApplyButton();
+  }
+
+  applying = false;
+  $modalProgress.textContent = errCount === 0
+    ? `All ${okCount} change${okCount === 1 ? "" : "s"} applied`
+    : `${okCount} succeeded, ${errCount} failed`;
+  toast(errCount === 0 ? `Synced ${okCount}` : `Synced ${okCount}, failed ${errCount}`, errCount === 0 ? "ok" : "error");
+  // Re-enable cancel/close so the user can dismiss after reviewing
+  $modalCancel.disabled = false;
+  $modalClose.disabled = false;
+  $modalApply.textContent = "Done";
+  $modalApply.disabled = false;
+  // Repurpose the apply button to a "close" once done
+  $modalApply.onclick = () => { closeSyncModal(); $modalApply.onclick = applyBatch; };
+}
+
+function updateRowStatus(item) {
+  const idx = currentPlan.indexOf(item);
+  const el = $modalBody.querySelector(`[data-status-idx="${idx}"]`);
+  if (el) el.innerHTML = statusLabel(item);
+}
+
+// Modal event wiring
+$modalBody.addEventListener("change", (ev) => {
+  const t = ev.target;
+  if (!(t instanceof HTMLInputElement) || t.type !== "checkbox") return;
+  if (applying) { t.checked = !t.checked; return; }
+  if (t.dataset.toggleAll) {
+    const scope = t.dataset.toggleAll;
+    for (const item of currentPlan) {
+      if (item.scope === scope) item.checked = t.checked;
+    }
+    renderModal();
+    return;
+  }
+  if (t.dataset.planIdx !== undefined) {
+    const idx = Number(t.dataset.planIdx);
+    if (currentPlan[idx]) currentPlan[idx].checked = t.checked;
+    updateApplyButton();
+  }
+});
+
+$modalCancel.addEventListener("click", closeSyncModal);
+$modalClose.addEventListener("click", closeSyncModal);
+$modalApply.onclick = applyBatch;
+// Esc closes when not applying
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$modal.classList.contains("hidden")) {
+    closeSyncModal();
+  }
+});
+// Backdrop click closes (only when not mid-apply)
+$modal.addEventListener("click", (e) => {
+  if (e.target === $modal) closeSyncModal();
+});
+
+// Top-bar category buttons → open modal
+$syncBar.addEventListener("click", (ev) => {
+  const btn = ev.target.closest("button[data-sync-scope]");
+  if (!btn) return;
+  openSyncModal(btn.dataset.syncScope);
+});
 
 // ── Toasts ─────────────────────────────────────────────────────────────────
 function toast(msg, kind = "ok") {

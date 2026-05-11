@@ -26,7 +26,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from typing import Any, Awaitable, Callable
 
 import paho.mqtt.client as mqtt
@@ -85,12 +84,64 @@ class BridgeClient:
         self._client: mqtt.Client | None = None
         self._stopped = asyncio.Event()
         self._bootstrap_done = asyncio.Event()
+        # Cache of the runtime wildcards we want to keep subscribed. Refreshed
+        # whenever templates are resolved. The on_connect callback replays this
+        # list on every (re)connect so subscriptions survive broker hiccups
+        # even with the paho default clean_session=True.
+        self._runtime_wildcards: list[str] = []
 
     # ── paho callbacks (run on paho's loop thread) ───────────────────────
-    def _on_connect(self, client: mqtt.Client, *_args, **_kw) -> None:
+    def _on_connect(
+        self,
+        client: mqtt.Client,
+        _userdata: Any,
+        _flags: Any,
+        reason_code: Any,
+        _properties: Any = None,
+    ) -> None:
+        # paho v2 passes a ReasonCode object whose truthiness is True on failure.
+        # Older versions / v1 fallback path pass a plain int (0 == success).
+        rc_value = getattr(reason_code, "value", reason_code)
+        rc_failed = (
+            (reason_code.is_failure if hasattr(reason_code, "is_failure") else rc_value != 0)
+            if reason_code is not None
+            else False
+        )
+        if rc_failed:
+            logger.error("MQTT CONNACK failed: rc=%s", reason_code)
+            return
+
         cfg_topic = BRIDGE_CONFIG_TOPIC_TPL.replace("{root}", self.root)
-        client.subscribe(cfg_topic)
-        logger.info("Subscribed to bridge config: %s", cfg_topic)
+        rc, _mid = client.subscribe(cfg_topic)
+        if rc != mqtt.MQTT_ERR_SUCCESS:
+            logger.error("Subscribe FAILED rc=%s for %s", rc, cfg_topic)
+        else:
+            logger.info("Subscribed to bridge config: %s", cfg_topic)
+
+        # Replay runtime subscriptions on reconnect. First connect has an empty
+        # list; subsequent connects after bootstrap re-establish the wildcards.
+        for wildcard in self._runtime_wildcards:
+            rc, _mid = client.subscribe(wildcard)
+            if rc != mqtt.MQTT_ERR_SUCCESS:
+                logger.error("Re-subscribe FAILED rc=%s for %s", rc, wildcard)
+            else:
+                logger.info("Re-subscribed: %s", wildcard)
+
+    def _on_disconnect(
+        self,
+        _client: mqtt.Client,
+        _userdata: Any,
+        *args: Any,
+        **_kw: Any,
+    ) -> None:
+        # paho v1 signature: (client, userdata, rc)
+        # paho v2 signature: (client, userdata, disconnect_flags, reason_code, properties)
+        # We just want to log; the auto-reconnect logic in paho handles the rest.
+        rc = args[-1] if args else "?"
+        if rc != 0 and rc != "0":
+            logger.warning("MQTT disconnected unexpectedly: rc=%s (paho will retry)", rc)
+        else:
+            logger.info("MQTT disconnected cleanly")
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
         payload = msg.payload.decode("utf-8", errors="replace")
@@ -125,7 +176,10 @@ class BridgeClient:
         except AttributeError:
             c = mqtt.Client(client_id=self._client_id)  # paho < 2.0 fallback
         c.on_connect = self._on_connect
+        c.on_disconnect = self._on_disconnect
         c.on_message = self._on_message
+        # Bound exponential backoff for transient broker outages.
+        c.reconnect_delay_set(min_delay=1, max_delay=60)
         return c
 
     # ── async loops ──────────────────────────────────────────────────────
@@ -291,10 +345,18 @@ class BridgeClient:
 
     async def _subscribe_runtime_topics(self, t: BridgeTemplates) -> None:
         assert self._client is not None
-        for tpl in (t.event, t.message, t.scanner):
-            wildcard = pb.tpl_to_wildcard(tpl, t.root)
-            self._client.subscribe(wildcard)
-            logger.info("Subscribed: %s", wildcard)
+        # Recompute the wildcard list and cache it for reconnect replay.
+        wildcards = [pb.tpl_to_wildcard(tpl, t.root) for tpl in (t.event, t.message, t.scanner)]
+        # Deduplicate while preserving order — custom templates can collapse to
+        # the same wildcard (e.g. event {root}/x/{id} and message {root}/x/{id}).
+        seen: set[str] = set()
+        self._runtime_wildcards = [w for w in wildcards if not (w in seen or seen.add(w))]
+        for wildcard in self._runtime_wildcards:
+            rc, _mid = self._client.subscribe(wildcard)
+            if rc != mqtt.MQTT_ERR_SUCCESS:
+                logger.error("Subscribe FAILED rc=%s for %s", rc, wildcard)
+            else:
+                logger.info("Subscribed: %s", wildcard)
 
     async def _request_initial_status(self, t: BridgeTemplates) -> None:
         await self.publish_command("status", target_id="bridge")

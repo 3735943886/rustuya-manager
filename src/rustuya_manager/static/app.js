@@ -9,6 +9,19 @@ let snapshot = null;
 let filter = "all";
 let query = "";
 let sortKey = localStorage.getItem("sortKey") || "id";
+// Per-device collapse state, persisted across reloads. Default: all collapsed.
+const expandedIds = new Set(
+  JSON.parse(localStorage.getItem("expandedIds") || "[]")
+);
+function saveExpanded() {
+  localStorage.setItem("expandedIds", JSON.stringify([...expandedIds]));
+}
+function toggleExpand(id) {
+  if (expandedIds.has(id)) expandedIds.delete(id);
+  else expandedIds.add(id);
+  saveExpanded();
+  renderDevices();
+}
 
 // ── Element refs ────────────────────────────────────────────────────────────
 const $list = document.getElementById("device-list");
@@ -59,7 +72,10 @@ function setConn(state) {
     lost:       ["bg-rose-100 text-rose-700 border-rose-300", "● disconnected — retrying", true],
   };
   const [cls, label, pulse] = styles[state];
-  $conn.className = `text-xs px-2 py-1 rounded-full border ${cls}`;
+  // Fixed width prevents the header from reflowing when the badge text length
+  // changes (live / connecting… / disconnected — retrying) — that reflow
+  // shifts the rest of the page and causes scroll jumps.
+  $conn.className = `text-xs px-2 py-1 rounded-full border ${cls} inline-flex items-center justify-center w-[180px] whitespace-nowrap`;
   $conn.innerHTML = pulse
     ? `<span class="pulse-dot">${label.split(" ")[0]}</span>${label.slice(1)}`
     : label;
@@ -219,6 +235,24 @@ function renderTemplates() {
   }
 }
 
+// Filter tab styling. Each tab is colored per sync class so the row
+// communicates state at a glance even without reading the labels. Active tab
+// gets the saturated variant; inactive tabs get a tinted background with a
+// colored border.
+const FILTER_STYLES = {
+  all:      { active: "bg-slate-700 text-white border-slate-700",
+              idle:   "bg-white text-slate-700 border-slate-300" },
+  synced:   { active: "bg-emerald-600 text-white border-emerald-600",
+              idle:   "bg-emerald-50 text-emerald-700 border-emerald-300" },
+  mismatch: { active: "bg-amber-600 text-white border-amber-600",
+              idle:   "bg-amber-50 text-amber-700 border-amber-300" },
+  missing:  { active: "bg-sky-600 text-white border-sky-600",
+              idle:   "bg-sky-50 text-sky-700 border-sky-300" },
+  orphan:   { active: "bg-rose-600 text-white border-rose-600",
+              idle:   "bg-rose-50 text-rose-700 border-rose-300" },
+};
+const _FILTER_BASE = "px-2 py-1 rounded border text-xs";
+
 // Counts live inside the filter tabs themselves — one row that doubles as
 // summary + filter UI. The "all" count is total devices (cloud ∪ bridge).
 function renderFilterCounts() {
@@ -236,11 +270,12 @@ function renderFilterCounts() {
   for (const btn of $filterTabs.querySelectorAll("button[data-filter]")) {
     const key = btn.dataset.filter;
     const span = btn.querySelector("[data-count]");
-    if (!span) continue;
     const n = counts[key] ?? 0;
-    span.textContent = n > 0 ? n : "";
+    if (span) span.textContent = n > 0 ? n : "";
+    const style = FILTER_STYLES[key] || FILTER_STYLES.all;
+    btn.className = `${_FILTER_BASE} ${filter === key ? style.active : style.idle}`;
     // Tabs with 0 fade to a quieter style so the eye lands on actionable ones.
-    btn.classList.toggle("opacity-50", n === 0 && key !== "all");
+    btn.classList.toggle("opacity-50", n === 0 && key !== "all" && filter !== key);
   }
 }
 
@@ -399,24 +434,22 @@ function deviceCard(id, cls, isChild) {
   const dps = snapshot.dps[id] || {};
   const lastSeen = snapshot.last_seen[id];
   const live = snapshot.live_status?.[id];
+  const isExpanded = expandedIds.has(id);
 
-  // The card's left edge color carries the most actionable status:
-  //   - When sync needs attention (mismatch/missing/orphan): show the
-  //     sync-class color directly so the row jumps out.
-  //   - When sync is fine but the device is offline: show gray. All-green
-  //     everywhere would mean "all good"; a gray stripe pops out as
-  //     "synced but the bridge can't reach this device".
-  //   - When everything's fine (synced + online): vibrant green.
-  //   - Unknown live state (no events yet): muted slate.
-  // Ungrouped (no cloud) uses muted slate too — there's no sync notion.
   const edgeColor = computeEdgeColor(cls, live);
   const indent = isChild ? "ml-4 md:ml-8" : "";
 
   const card = document.createElement("div");
-  card.className = `bg-white rounded-lg border border-slate-200 border-l-4 ${edgeColor} p-3 ${indent}`;
+  card.className = `bg-white rounded-lg border border-slate-200 border-l-4 ${edgeColor} p-3 ${indent} cursor-pointer`;
   card.title = `${cls}${primary.type ? ` · ${primary.type}` : ""}${live?.state ? ` · ${live.state}` : ""}`;
+  // Tap anywhere on the card to expand/collapse. Buttons inside stop the
+  // event from propagating up so they don't accidentally toggle.
+  card.addEventListener("click", (ev) => {
+    if (ev.target.closest("button, input, a, [contenteditable]")) return;
+    toggleExpand(id);
+  });
 
-  // ── Header row 1: name (or id) + status icons + actions ────────────────
+  // ── Header row 1: name (or id) + caret + status icons + actions ────────
   const headerTop = document.createElement("div");
   headerTop.className = "flex items-center gap-2 min-w-0";
   const nameOrId = primary.name && primary.name !== "N/A" ? primary.name : id;
@@ -425,10 +458,11 @@ function deviceCard(id, cls, isChild) {
     <span class="font-medium text-sm text-slate-900 truncate min-w-0">${escapeHtml(nameOrId)}</span>
   `;
   const rightCluster = document.createElement("span");
-  rightCluster.className = "ml-auto flex items-center gap-2 shrink-0";
+  rightCluster.className = "ml-auto flex items-center gap-1.5 shrink-0";
   rightCluster.appendChild(liveDot(live));
   rightCluster.appendChild(typeBadge(primary.type));
   appendInlineActions(rightCluster, id, cls, cloud, bridge, primary);
+  rightCluster.appendChild(expandCaret(id, isExpanded));
   headerTop.appendChild(rightCluster);
   card.appendChild(headerTop);
 
@@ -449,7 +483,9 @@ function deviceCard(id, cls, isChild) {
   }
   card.appendChild(headerBottom);
 
-  // ── Field grid ─────────────────────────────────────────────────────────
+  if (!isExpanded) return card;
+
+  // ── Expanded body: field grid + mismatch reasons + DPS chips ───────────
   // Sub-devices live behind a gateway, so IP and KEY are meaningless for
   // them — only the CID and parent relationship matter. WiFi devices show
   // IP/KEY/VER + any live error message from the bridge.
@@ -472,9 +508,6 @@ function deviceCard(id, cls, isChild) {
   for (const entry of fields) {
     const [k, v, tooltip] = entry;
     const f = document.createElement("div");
-    // `min-w-0` on the cell + on the value span lets truncate clip long values
-    // (long error messages, full keys) instead of overflowing into the next
-    // grid column. The label is `shrink-0` so it never gets clipped.
     f.className = "flex gap-1 min-w-0";
     const titleAttr = tooltip || String(v).length > 16
       ? ` title="${escapeHtml(tooltip || String(v))}"` : "";
@@ -483,7 +516,6 @@ function deviceCard(id, cls, isChild) {
   }
   card.appendChild(grid);
 
-  // ── Mismatch reasons ───────────────────────────────────────────────────
   if (cls === "mismatch") {
     const m = snapshot.diff.mismatched.find((m) => m.id === id);
     if (m) {
@@ -494,7 +526,6 @@ function deviceCard(id, cls, isChild) {
     }
   }
 
-  // ── Live DPS chips (non-empty only) ────────────────────────────────────
   const dpsEntries = Object.entries(dps).filter(
     ([, v]) => v !== "" && v !== null && v !== undefined
   );
@@ -524,11 +555,16 @@ function computeEdgeColor(cls, live) {
   return "border-l-slate-200";  // synced but no live signal yet
 }
 
-// Online/offline dot — one character of color, fits anywhere.
+// Header-row icons are all 20×20 (h-5 w-5) with centered content so they
+// line up vertically next to the text buttons. liveDot / typeBadge /
+// iconButton share the same outer dimensions.
+
+const _ICON_BASE = "w-5 h-5 inline-flex items-center justify-center";
+
 function liveDot(live) {
   const span = document.createElement("span");
   if (!live) {
-    span.className = "text-slate-300 text-xs";
+    span.className = `${_ICON_BASE} text-slate-300 text-xs`;
     span.textContent = "○";
     span.title = "no status received";
     return span;
@@ -539,7 +575,7 @@ function liveDot(live) {
     unknown: ["text-slate-300",   "○", "unknown"],
   };
   const [color, glyph, label] = map[live.state] || ["text-rose-500", "✕", String(live.state)];
-  span.className = `${color} text-sm leading-none`;
+  span.className = `${_ICON_BASE} ${color} text-sm leading-none`;
   span.textContent = glyph;
   const code = live.code != null ? ` (code ${live.code})` : "";
   const msg = live.message ? `: ${live.message}` : "";
@@ -547,11 +583,10 @@ function liveDot(live) {
   return span;
 }
 
-// Type marker — single letter, subtle, fits in narrow layouts.
 function typeBadge(t) {
   const span = document.createElement("span");
   span.className =
-    "text-[10px] font-mono w-4 h-4 inline-flex items-center justify-center rounded border border-slate-200 text-slate-500";
+    `${_ICON_BASE} text-[10px] font-mono rounded border border-slate-200 text-slate-500`;
   if (t === "SubDevice") {
     span.textContent = "S";
     span.title = "Sub-device";
@@ -562,9 +597,31 @@ function typeBadge(t) {
   return span;
 }
 
+function expandCaret(id, isExpanded) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = `${_ICON_BASE} text-slate-400 hover:text-slate-700 text-xs`;
+  b.textContent = isExpanded ? "▾" : "▸";
+  b.title = isExpanded ? "Collapse" : "Expand";
+  b.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    toggleExpand(id);
+  });
+  return b;
+}
+
+function iconButton(glyph, onClick, title) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className =
+    `${_ICON_BASE} rounded border border-slate-200 bg-white hover:bg-slate-100 text-slate-500 text-xs`;
+  b.textContent = glyph;
+  b.title = title;
+  b.addEventListener("click", (ev) => { ev.stopPropagation(); onClick(); });
+  return b;
+}
+
 function appendInlineActions(container, id, cls, cloud, bridge, primary) {
-  // Sync / Update / Remove are the load-bearing actions. Query status is
-  // diagnostic — only show as a small icon-style button to keep the row tight.
   if (cls === "missing") {
     container.appendChild(button("Add", () => sync("add", primary)));
   } else if (cls === "orphan") {
@@ -573,12 +630,9 @@ function appendInlineActions(container, id, cls, cloud, bridge, primary) {
     container.appendChild(button("Update", () => sync("add", cloud)));
   }
   if (cls !== "missing") {
-    const queryBtn = document.createElement("button");
-    queryBtn.className = "text-[11px] px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-100 text-slate-500";
-    queryBtn.title = "Query status from bridge";
-    queryBtn.textContent = "↻";
-    queryBtn.addEventListener("click", () => publishCommand({ action: "get", id }));
-    container.appendChild(queryBtn);
+    container.appendChild(
+      iconButton("↻", () => publishCommand({ action: "get", id }), "Query status from bridge"),
+    );
   }
 }
 
@@ -631,10 +685,11 @@ function button(label, onClick, variant = "default") {
     danger:  "border-rose-300 bg-white hover:bg-rose-50 text-rose-700",
   }[variant];
   const b = document.createElement("button");
-  // Compact for inline use in the card header row.
-  b.className = `text-[11px] px-2 py-0.5 rounded border ${styles}`;
+  b.type = "button";
+  // h-5 matches the icons/dots so everything in the right cluster aligns.
+  b.className = `h-5 px-2 inline-flex items-center rounded border text-[11px] ${styles}`;
   b.textContent = label;
-  b.addEventListener("click", onClick);
+  b.addEventListener("click", (ev) => { ev.stopPropagation(); onClick(); });
   return b;
 }
 
@@ -1148,16 +1203,9 @@ $filterTabs.addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-filter]");
   if (!btn) return;
   filter = btn.dataset.filter;
-  for (const b of $filterTabs.querySelectorAll("button")) {
-    b.classList.toggle("bg-slate-900", b === btn);
-    b.classList.toggle("text-white", b === btn);
-    b.classList.toggle("bg-white", b !== btn);
-  }
+  if (snapshot) renderFilterCounts();   // reapply active/idle styles
   renderDevices();
 });
-
-$filterTabs.querySelector('[data-filter="all"]').classList.add("bg-slate-900", "text-white");
-$filterTabs.querySelector('[data-filter="all"]').classList.remove("bg-white");
 
 $search.addEventListener("input", (e) => {
   query = e.target.value.trim();

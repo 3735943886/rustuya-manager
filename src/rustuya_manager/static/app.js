@@ -1079,10 +1079,29 @@ $sort.addEventListener("change", (e) => {
   renderDevices();
 });
 
-document.getElementById("refresh-btn").addEventListener("click", async () => {
-  const res = await fetch("/api/state");
-  snapshot = await res.json();
-  render();
+const $refreshBtn = document.getElementById("refresh-btn");
+$refreshBtn.addEventListener("click", async () => {
+  $refreshBtn.disabled = true;
+  const originalLabel = $refreshBtn.textContent;
+  $refreshBtn.textContent = "refreshing…";
+  try {
+    // 1. Pull the latest state snapshot from our own /api (no bridge round-trip).
+    const res = await fetch("/api/state");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    snapshot = await res.json();
+    render();
+    // 2. Also ask the bridge to re-publish its current state; the response
+    //    arrives over WS and will bump the snapshot again shortly.
+    await postCommand({ action: "status", id: "bridge" });
+    const bridgeCount = Object.keys(snapshot.bridge).length;
+    const cloudCount = Object.keys(snapshot.cloud).length;
+    toast(`Refreshed — bridge ${bridgeCount}, cloud ${cloudCount}`, "ok");
+  } catch (e) {
+    toast(`Refresh failed: ${e.message}`, "error");
+  } finally {
+    $refreshBtn.disabled = false;
+    $refreshBtn.textContent = originalLabel;
+  }
 });
 
 connect();

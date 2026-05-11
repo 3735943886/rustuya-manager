@@ -137,16 +137,18 @@ function renderModal() {
 
 function renderPlanRow(item, index) {
   const li = document.createElement("li");
-  li.className = "px-3 py-2 flex items-center gap-2 text-sm";
+  // items-start so a wrapped reasons block doesn't push the checkbox down to
+  // center on a tall row.
+  li.className = "px-3 py-2 flex items-start gap-2 text-sm";
   li.innerHTML = `
-    <input type="checkbox" data-plan-idx="${index}" ${item.checked ? "checked" : ""} class="rounded shrink-0" ${applying ? "disabled" : ""}>
+    <input type="checkbox" data-plan-idx="${index}" ${item.checked ? "checked" : ""} class="mt-1 rounded shrink-0" ${applying ? "disabled" : ""}>
     <div class="flex-1 min-w-0">
       <div class="flex flex-wrap items-center gap-2">
-        <span class="font-mono text-xs">${escapeHtml(item.id)}</span>
-        <span class="text-xs text-slate-500 dark:text-slate-400">${escapeHtml(item.dev.name || "—")}</span>
+        <span class="font-mono text-xs break-all">${escapeHtml(item.id)}</span>
+        <span class="text-xs text-slate-500 dark:text-slate-400 break-words">${escapeHtml(item.dev.name || "—")}</span>
         <span class="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">${item.action}</span>
       </div>
-      ${item.reasons.length ? `<div class="text-[11px] text-slate-600 dark:text-slate-300 mt-1">${item.reasons.map(escapeHtml).join("<br>")}</div>` : ""}
+      ${item.reasons.length ? `<div class="text-[11px] text-slate-600 dark:text-slate-300 mt-1 break-all">${item.reasons.map(escapeHtml).join("<br>")}</div>` : ""}
     </div>
     <span data-status-idx="${index}" class="text-xs shrink-0">${statusLabel(item)}</span>
   `;

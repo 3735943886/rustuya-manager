@@ -198,7 +198,10 @@ export function deviceCard(id, cls, isChild) {
     const m = snap.diff.mismatched.find((m) => m.id === id);
     if (m) {
       const reasons = document.createElement("div");
-      reasons.className = "mt-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded px-2 py-1";
+      // break-all (not break-words) because reasons often contain long
+      // monospace keys/IDs with no whitespace to break on. The user wants
+      // to *read* these in full, so wrap rather than truncate+ellipsis.
+      reasons.className = "mt-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded px-2 py-1 break-all";
       reasons.innerHTML = m.reasons.map(escapeHtml).join("<br>");
       card.appendChild(reasons);
     }

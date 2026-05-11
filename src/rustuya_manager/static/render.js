@@ -43,9 +43,11 @@ export function renderWarnings() {
     const cls = styles[w.level] || styles.warning;
     const banner = document.createElement("div");
     banner.className = `rounded-lg border p-3 text-sm ${cls}`;
+    // break-words on the message so a long unbroken token (e.g. a template
+    // dumped into the warning text) wraps within the banner.
     banner.innerHTML = `
-      <div class="font-medium uppercase tracking-wide text-[11px] mb-0.5">${escapeHtml(w.level || "warning")} · ${escapeHtml(k)}</div>
-      <div>${escapeHtml(w.message || "")}</div>
+      <div class="font-medium uppercase tracking-wide text-[11px] mb-0.5 break-all">${escapeHtml(w.level || "warning")} · ${escapeHtml(k)}</div>
+      <div class="break-words">${escapeHtml(w.message || "")}</div>
     `;
     $warnings.appendChild(banner);
   }
@@ -95,7 +97,10 @@ export function renderTemplates() {
   ];
   for (const [k, v] of lines) {
     const row = document.createElement("div");
-    row.innerHTML = `<span class="text-slate-400 dark:text-slate-500 w-20 inline-block">${k}</span><span>${escapeHtml(v)}</span>`;
+    // flex + min-w-0 + break-all so long payload templates wrap within the
+    // value column instead of running off the right edge of the panel.
+    row.className = "flex";
+    row.innerHTML = `<span class="text-slate-400 dark:text-slate-500 w-20 shrink-0">${k}</span><span class="flex-1 min-w-0 break-all">${escapeHtml(v)}</span>`;
     $templates.appendChild(row);
   }
 }

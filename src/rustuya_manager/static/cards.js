@@ -208,12 +208,19 @@ export function deviceCard(id, cls, isChild) {
     ([, v]) => v !== "" && v !== null && v !== undefined
   );
   if (dpsEntries.length > 0) {
+    // min-w-0 on the wrapper is what actually allows truncate to kick in
+    // inside a flex layout — without it, the parent stretches to the chip's
+    // natural width and overflows the card. Each chip caps at max-w-[20rem]
+    // and uses `truncate` to ellipsize long values (e.g. base64 status
+    // blobs); the full value is still available via the hover title.
     const dpsRow = document.createElement("div");
-    dpsRow.className = "mt-1.5 flex flex-wrap gap-1";
+    dpsRow.className = "mt-1.5 flex flex-wrap gap-1 min-w-0";
     for (const [k, v] of dpsEntries) {
       const chip = document.createElement("span");
-      chip.className = "text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200";
-      chip.textContent = `dp${k}=${formatDpsValue(v)}`;
+      chip.className = "inline-block align-middle text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 max-w-full md:max-w-[18rem] truncate";
+      const text = `dp${k}=${formatDpsValue(v)}`;
+      chip.textContent = text;
+      chip.title = text;
       dpsRow.appendChild(chip);
     }
     card.appendChild(dpsRow);

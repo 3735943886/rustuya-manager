@@ -3,9 +3,15 @@
 
 # Python
 **/__pycache__/
+.pytest_cache/
 
 # Virtual environments
 .venv/
 
 # Env files
 .env
+
+# Editor / tool state
+.claude/
+.vscode/
+.idea/

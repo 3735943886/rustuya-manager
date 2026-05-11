@@ -1139,6 +1139,10 @@ async function cancelWizard() {
 }
 
 $wizardOpen?.addEventListener("click", openWizardModal);
+// Header has its own permanent entry point — same modal, same handler. Lets
+// users re-fetch from Tuya cloud after the initial run (e.g. after adding a
+// new device on the phone), without having to delete tuyadevices.json first.
+document.getElementById("wizard-header-btn")?.addEventListener("click", openWizardModal);
 $wizardClose?.addEventListener("click", cancelWizard);
 $wizardCancel?.addEventListener("click", cancelWizard);
 $wizardStart?.addEventListener("click", startWizard);

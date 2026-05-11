@@ -4,6 +4,9 @@
 # Python
 **/__pycache__/
 .pytest_cache/
+*.egg-info/
+build/
+dist/
 
 # Virtual environments
 .venv/

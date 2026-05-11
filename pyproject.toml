@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rustuya-manager"
+version = "0.2.0"
+description = "Management tool for rustuya-bridge — keeps Tuya Cloud devices and the bridge in sync"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "paho-mqtt>=2.0",
+    "rich>=13.0",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    # pyrustuyabridge is built from ../rustuya-bridge/python via maturin and
+    # installed editably into the active venv. It is intentionally not listed
+    # here because pip cannot resolve it from PyPI.
+]
+
+[project.scripts]
+rustuya-manager = "rustuya_manager.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

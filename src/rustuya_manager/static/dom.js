@@ -64,20 +64,6 @@ export function liveDot(live) {
   return wrap;
 }
 
-export function typeBadge(t) {
-  const span = document.createElement("span");
-  span.className =
-    `${ICON_BASE} text-[10px] font-mono rounded border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400`;
-  if (t === "SubDevice") {
-    span.textContent = "S";
-    span.title = "Sub-device";
-  } else {
-    span.textContent = "W";
-    span.title = "WiFi device";
-  }
-  return span;
-}
-
 export function iconButton(glyph, onClick, title) {
   const b = document.createElement("button");
   b.type = "button";
@@ -105,7 +91,7 @@ export function button(label, onClick, variant = "default") {
 
 export function statusPill(cls) {
   // Used by the synthetic missing-parent card; device cards use the left-edge
-  // color strip + liveDot/typeBadge for the same information without labels.
+  // color strip + liveDot for the same information without labels.
   const map = {
     synced:    ["bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700", "synced"],
     mismatch:  ["bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700", "mismatch"],

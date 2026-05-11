@@ -141,8 +141,13 @@ class BridgeClient:
 
     def _on_message(self, _client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
         payload = msg.payload.decode("utf-8", errors="replace")
+        # Carry the retain flag through to listeners — the CLI suppresses prints
+        # for retained messages so the initial subscribe burst (which can be
+        # hundreds of lines on a busy broker) doesn't drown live activity.
         if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, (msg.topic, payload))
+            self._loop.call_soon_threadsafe(
+                self._queue.put_nowait, (msg.topic, payload, bool(msg.retain))
+            )
 
     # ── lifecycle ────────────────────────────────────────────────────────
     async def run(self) -> None:
@@ -194,13 +199,19 @@ class BridgeClient:
 
     async def _consume_loop(self) -> None:
         while True:
-            topic, payload = await self._queue.get()
+            item = await self._queue.get()
+            # Older callers may queue (topic, payload); accept both shapes.
+            if len(item) == 3:
+                topic, payload, retain = item
+            else:
+                topic, payload = item
+                retain = False
             try:
-                await self._dispatch(topic, payload)
+                await self._dispatch(topic, payload, retain=retain)
             except Exception:  # noqa: BLE001 - log and keep running, never let the loop die
                 logger.exception("Failed to handle MQTT message on %s", topic)
 
-    async def _dispatch(self, topic: str, payload: str) -> None:
+    async def _dispatch(self, topic: str, payload: str, *, retain: bool = False) -> None:
         # The retained bridge/config arrives first; once it does we resolve
         # templates and subscribe to event/message/scanner.
         cfg_topic = BRIDGE_CONFIG_TOPIC_TPL.replace("{root}", self.root)
@@ -241,7 +252,7 @@ class BridgeClient:
             logger.warning("parse_payload failed for %s: %s", topic, e)
             return
 
-        await self._route(matched_as, vars_, parsed, payload)
+        await self._route(matched_as, vars_, parsed, payload, retain=retain)
 
     def _resolve_device_key(
         self, vars_: dict[str, str], parsed: dict[str, Any]
@@ -268,10 +279,16 @@ class BridgeClient:
         return None
 
     async def _route(
-        self, matched_as: str, vars_: dict[str, str], parsed: Any, payload_str: str = ""
+        self,
+        matched_as: str,
+        vars_: dict[str, str],
+        parsed: Any,
+        payload_str: str = "",
+        *,
+        retain: bool = False,
     ) -> None:
         """Updates State based on what kind of message arrived."""
-        extras: dict[str, Any] = {}
+        extras: dict[str, Any] = {"retain": retain}
         if matched_as == "message":
             # Response or error reply. The bridge's `status` action has the
             # full device list in `devices`; record it.

@@ -40,9 +40,15 @@ async def _on_event(
     `extras` carries the manager's resolved key + extracted DPS for event
     type — the CLI prints the same DPS map that the web UI renders, not
     whatever the bridge's parse_mqtt_payload happened to leave in `parsed`.
+
+    Retained messages (`extras["retain"]`) are skipped: on a busy broker the
+    initial subscribe burst is hundreds of lines of stale state, and the
+    diff summary printed after bootstrap already captures the net effect.
     """
+    e = extras or {}
+    if e.get("retain"):
+        return
     if matched_as == "event":
-        e = extras or {}
         device = e.get("device_id") or vars_.get("name") or vars_.get("id") or "?"
         print(f"  [event] {device}: {e.get('dps')}")
     elif matched_as == "message":
@@ -144,7 +150,13 @@ async def run(args: argparse.Namespace) -> int:
     # the specific semantic condition. Bounded so we still print *something*
     # if the bridge never replies.
     await state.wait_for(lambda: bool(state.bridge), timeout=3.0)
-    _print_diff(state.diff())
+    # Skip the diff dump when there's no cloud — without a reference set,
+    # every bridge device would land in "ORPHANED" which contradicts the
+    # "showing as ungrouped" NOTE printed at startup.
+    if state.cloud:
+        _print_diff(state.diff())
+    else:
+        print(f"\n=== Bridge: {len(state.bridge)} device(s) (no cloud loaded — diff skipped) ===\n")
 
     # Wire SIGINT/SIGTERM into a clean shutdown.
     stop_event = asyncio.Event()

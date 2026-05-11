@@ -52,7 +52,24 @@ def _device_to_dict(d: Device) -> dict[str, Any]:
 
 def serialize_state(state: State) -> dict[str, Any]:
     """Render the full state as a JSON-safe dict — used by both REST and WS."""
-    diff = state.diff()
+    # Without a cloud, every bridge device would appear as "orphaned" in the
+    # raw diff — mathematically correct but semantically meaningless and
+    # confusing in the UI (the filter tab shows N orphans but the cards are
+    # rendered as "ungrouped"). Suppress the diff arrays in that case so the
+    # presentation matches what `classifyDevice` in the client computes.
+    cloud_loaded = bool(state.cloud)
+    if cloud_loaded:
+        diff = state.diff()
+        diff_payload = {
+            "synced": [d.id for d in diff.synced],
+            "mismatched": [
+                {"id": d.id, "reasons": reasons} for d, reasons in diff.mismatched
+            ],
+            "missing": [d.id for d in diff.missing],
+            "orphaned": [d.id for d in diff.orphaned],
+        }
+    else:
+        diff_payload = {"synced": [], "mismatched": [], "missing": [], "orphaned": []}
     tpl = state.templates
     return {
         "version": state.version,
@@ -70,14 +87,7 @@ def serialize_state(state: State) -> dict[str, Any]:
         ),
         "cloud": {did: _device_to_dict(d) for did, d in state.cloud.items()},
         "bridge": {did: _device_to_dict(d) for did, d in state.bridge.items()},
-        "diff": {
-            "synced": [d.id for d in diff.synced],
-            "mismatched": [
-                {"id": d.id, "reasons": reasons} for d, reasons in diff.mismatched
-            ],
-            "missing": [d.id for d in diff.missing],
-            "orphaned": [d.id for d in diff.orphaned],
-        },
+        "diff": diff_payload,
         "dps": state.dps,
         "last_response": state.last_response,
         "last_seen": state.last_seen,
@@ -94,7 +104,7 @@ def build_app(
     *,
     creds_path: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version="0.4.2")
+    app = FastAPI(title="rustuya-manager", version="0.4.3")
     # Hold client/state on app so dependency-injection or middleware can reach them
     app.state.bridge_state = state
     app.state.bridge_client = client

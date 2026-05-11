@@ -52,7 +52,7 @@ Common flags:
 
 ## How the manager stays in sync with the bridge
 
-Rather than re-implementing the bridge's MQTT templating in Python (which was the source of the previously abandoned web app's bugs), the manager imports the bridge's own templating helpers via the `pyrustuyabridge` Python binding:
+The manager imports the bridge's own templating helpers via the `pyrustuyabridge` Python binding, so it never re-implements topic/payload parsing in Python:
 
 - `tpl_to_wildcard(template, root)` — converts a topic template to its MQTT subscription wildcard.
 - `match_topic(topic, template)` — reverse-parses an incoming topic into a `{var: value}` map.

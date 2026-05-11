@@ -4,7 +4,7 @@
 import { state, expandedIds, saveExpanded } from "./state.js";
 import {
   ICON_BASE, escapeHtml, shorten, formatDpsValue, formatAgo,
-  liveDot, typeBadge, iconButton, button, statusPill,
+  liveDot, iconButton, button, statusPill,
 } from "./dom.js";
 import { sync, publishCommand } from "./api.js";
 // Cycle: render.js imports deviceCard from this module. The import is fine
@@ -137,7 +137,8 @@ export function deviceCard(id, cls, isChild) {
   const rightCluster = document.createElement("span");
   rightCluster.className = "ml-auto flex items-center gap-1.5 shrink-0";
   rightCluster.appendChild(liveDot(live));
-  rightCluster.appendChild(typeBadge(primary.type));
+  // No type badge — sub-devices are visually distinguished by their tree
+  // indentation under the parent gateway, so a "W"/"S" letter is redundant.
   appendInlineActions(rightCluster, id, cls, cloud, bridge, primary);
   rightCluster.appendChild(expandCaret(id, isExpanded));
   headerTop.appendChild(rightCluster);

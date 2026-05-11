@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Awaitable, Callable
 
 import paho.mqtt.client as mqtt
@@ -33,6 +34,20 @@ import pyrustuyabridge as pb
 
 from .models import Device
 from .state import BridgeTemplates, State
+
+# Heuristic to find the JSON key the user mapped `{value}` to in their
+# `mqtt_payload_template`. Matches `"foo": {value}` / `"foo":{value}` etc.
+# Returns None if `{value}` isn't placed under a string key (e.g. bare-scalar
+# templates like `{value}` itself — in that case parse_payload already wraps
+# the value into dps and we don't need this fallback).
+_VALUE_FIELD_RE = re.compile(r'"([^"]+)"\s*:\s*\{value\}')
+
+
+def _value_field_from_template(payload_template: str | None) -> str | None:
+    if not payload_template:
+        return None
+    m = _VALUE_FIELD_RE.search(payload_template)
+    return m.group(1) if m else None
 
 logger = logging.getLogger(__name__)
 
@@ -298,11 +313,22 @@ class BridgeClient:
                     )
                 await self.state.record_response(target, parsed)
         elif matched_as == "event":
-            # Device DPS update. parse_payload merges {dp}/{value} into a dps dict.
+            # Device DPS update. parse_payload handles bare-scalar payloads by
+            # constructing `dps` from the topic's {dp}; but when the user's
+            # `mqtt_payload_template` wraps the value inside a JSON object
+            # (e.g. `{"type":"{type}","value":{value}}`), parse_payload only
+            # merges topic vars in and leaves the actual value under whatever
+            # key the user picked. We recover it here using the template.
             if isinstance(parsed, dict):
                 key = self._resolve_device_key(vars_, parsed)
                 dps = parsed.get("dps")
-                if key and isinstance(dps, dict):
+                if not isinstance(dps, dict):
+                    dp = vars_.get("dp")
+                    if dp and self.state.templates:
+                        field = _value_field_from_template(self.state.templates.payload)
+                        if field and field in parsed:
+                            dps = {dp: parsed[field]}
+                if key and isinstance(dps, dict) and dps:
                     await self.state.merge_dps(key, dps)
                     # Data flowing means the device is alive — mark online.
                     await self.state.set_live_status(key, "online", code=0, message="event")

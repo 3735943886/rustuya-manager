@@ -246,6 +246,33 @@ class TestDispatch:
         assert "bridge" not in state.live_status
 
     @pytest.mark.asyncio
+    async def test_event_with_object_payload_template_yields_dps(self):
+        """Regression: when the user's `mqtt_payload_template` wraps the value
+        inside a JSON object (e.g. `{"type":"{type}","value":{value}}`), the
+        bridge's parse_mqtt_payload only merges topic vars in and doesn't
+        synthesize `dps`. The manager has to use the template to find the
+        value's JSON key and reconstruct dps[dp]. Without this, live DPS
+        chips never showed up on the test server."""
+        state = State()
+        await state.set_templates(BridgeTemplates(
+            root="rustuya",
+            command="rustuya/command",
+            event="rustuya/event/{id}/{dp}",
+            message="rustuya/{level}/{id}",
+            scanner="rustuya/scanner",
+            payload='{"type": "{type}", "value": {value}}',
+        ))
+        client, _ = _make_client(state)
+        client.root = "rustuya"
+
+        await client._dispatch(
+            "rustuya/event/devY/14",
+            '{"type": "active", "value": "off"}',
+        )
+        assert state.dps.get("devY") == {"14": "off"}
+        assert state.live_status["devY"]["state"] == "online"
+
+    @pytest.mark.asyncio
     async def test_event_marks_device_online(self):
         """DPS events imply the device is alive — set live_status to online."""
         state = State()

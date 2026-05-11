@@ -27,7 +27,6 @@ function toggleExpand(id) {
 const $list = document.getElementById("device-list");
 const $empty = document.getElementById("empty-state");
 const $conn = document.getElementById("conn-badge");
-const $rootLabel = document.getElementById("root-label");
 const $templates = document.getElementById("templates-block");
 const $filterTabs = document.getElementById("filter-tabs");
 const $toasts = document.getElementById("toast-container");
@@ -146,7 +145,6 @@ if ($dropzone) {
 // ── Rendering ───────────────────────────────────────────────────────────────
 function render() {
   if (!snapshot) return;
-  renderRoot();
   renderTemplates();
   renderFilterCounts();
   renderWarnings();
@@ -209,16 +207,14 @@ function renderSyncBar() {
   }
 }
 
-function renderRoot() {
-  const root = snapshot.templates?.root || "";
-  $rootLabel.textContent = root ? `root: ${root}` : "";
-}
-
 function renderTemplates() {
   const t = snapshot.templates;
   if (!t) return;
   $templates.innerHTML = "";
+  // Root is now surfaced here (was previously a header label) so the header
+  // stays compact and doesn't wrap to two lines on narrow viewports.
   const lines = [
+    ["root",    t.root],
     ["command", t.command],
     ["event",   t.event],
     ["message", t.message],
@@ -435,7 +431,10 @@ function deviceCard(id, cls, isChild) {
   const indent = isChild ? "ml-4 md:ml-8" : "";
 
   const card = document.createElement("div");
-  card.className = `bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 border-l-4 ${edgeColor} p-3 ${indent} cursor-pointer`;
+  // 4 px strip in light mode, 6 px in dark — the wider stripe gives the
+  // color more visual mass against the darker card so it remains a usable
+  // scanning cue.
+  card.className = `bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 border-l-4 dark:border-l-[6px] ${edgeColor} p-3 ${indent} cursor-pointer`;
   card.title = `${cls}${primary.type ? ` · ${primary.type}` : ""}${live?.state ? ` · ${live.state}` : ""}`;
   // Tap anywhere on the card to expand/collapse. Buttons inside stop the
   // event from propagating up so they don't accidentally toggle.
@@ -540,14 +539,17 @@ function deviceCard(id, cls, isChild) {
 }
 
 function computeEdgeColor(cls, live) {
-  if (cls === "mismatch") return "border-l-amber-400";
-  if (cls === "missing")  return "border-l-sky-400";
-  if (cls === "orphan")   return "border-l-rose-400";
-  if (cls === "ungrouped") return "border-l-slate-300";
-  // synced — differentiate by live online state
-  if (live?.state === "offline") return "border-l-slate-400";
-  if (live?.state === "online")  return "border-l-emerald-400";
-  return "border-l-slate-200";  // synced but no live signal yet
+  // 400 in light mode, 500 in dark — the more saturated 500 reads better
+  // against the slate-800 card background. Slate variants step away from
+  // mid-gray (which would blend with the card border) into colors that
+  // can be told apart at a glance when scanning a column.
+  if (cls === "mismatch") return "border-l-amber-400 dark:border-l-amber-500";
+  if (cls === "missing")  return "border-l-sky-400 dark:border-l-sky-500";
+  if (cls === "orphan")   return "border-l-rose-400 dark:border-l-rose-500";
+  if (cls === "ungrouped") return "border-l-slate-300 dark:border-l-slate-500";
+  if (live?.state === "offline") return "border-l-slate-400 dark:border-l-slate-500";
+  if (live?.state === "online")  return "border-l-emerald-400 dark:border-l-emerald-500";
+  return "border-l-slate-200 dark:border-l-slate-600";
 }
 
 // Header-row icons are all 20×20 (h-5 w-5) with centered content so they

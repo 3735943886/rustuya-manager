@@ -82,6 +82,7 @@ def serialize_state(state: State) -> dict[str, Any]:
         "last_response": state.last_response,
         "last_seen": state.last_seen,
         "live_status": state.live_status,
+        "warnings": state.warnings,
         "cloud_path": state.cloud_path,
         "cloud_loaded": bool(state.cloud),
     }
@@ -93,7 +94,7 @@ def build_app(
     *,
     creds_path: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version="0.2.5")
+    app = FastAPI(title="rustuya-manager", version="0.3.0")
     # Hold client/state on app so dependency-injection or middleware can reach them
     app.state.bridge_state = state
     app.state.bridge_client = client

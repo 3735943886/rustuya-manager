@@ -26,28 +26,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from typing import Any, Awaitable, Callable
 
 import paho.mqtt.client as mqtt
 import pyrustuyabridge as pb
 
 from .models import Device
+from .payload import parse_payload_with_template, validate_payload_template
 from .state import BridgeTemplates, State
-
-# Heuristic to find the JSON key the user mapped `{value}` to in their
-# `mqtt_payload_template`. Matches `"foo": {value}` / `"foo":{value}` etc.
-# Returns None if `{value}` isn't placed under a string key (e.g. bare-scalar
-# templates like `{value}` itself — in that case parse_payload already wraps
-# the value into dps and we don't need this fallback).
-_VALUE_FIELD_RE = re.compile(r'"([^"]+)"\s*:\s*\{value\}')
-
-
-def _value_field_from_template(payload_template: str | None) -> str | None:
-    if not payload_template:
-        return None
-    m = _VALUE_FIELD_RE.search(payload_template)
-    return m.group(1) if m else None
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +247,7 @@ class BridgeClient:
             logger.warning("parse_payload failed for %s: %s", topic, e)
             return
 
-        await self._route(matched_as, vars_, parsed)
+        await self._route(matched_as, vars_, parsed, payload)
 
     def _resolve_device_key(
         self, vars_: dict[str, str], parsed: dict[str, Any]
@@ -283,7 +269,7 @@ class BridgeClient:
         return str(name)
 
     async def _route(
-        self, matched_as: str, vars_: dict[str, str], parsed: Any
+        self, matched_as: str, vars_: dict[str, str], parsed: Any, payload_str: str = ""
     ) -> None:
         """Updates State based on what kind of message arrived."""
         if matched_as == "message":
@@ -300,7 +286,6 @@ class BridgeClient:
                 # The bridge publishes per-device connection state under the
                 # `error` level: errorCode=0 means "Connection Successful",
                 # any non-zero code means the device is unreachable / errored.
-                # Translate that into a live_status pill the UI can render.
                 if level == "error" and target != "bridge" and "errorCode" in parsed:
                     code = parsed.get("errorCode")
                     msg = parsed.get("errorMsg") or parsed.get("payloadStr") or ""
@@ -313,22 +298,10 @@ class BridgeClient:
                     )
                 await self.state.record_response(target, parsed)
         elif matched_as == "event":
-            # Device DPS update. parse_payload handles bare-scalar payloads by
-            # constructing `dps` from the topic's {dp}; but when the user's
-            # `mqtt_payload_template` wraps the value inside a JSON object
-            # (e.g. `{"type":"{type}","value":{value}}`), parse_payload only
-            # merges topic vars in and leaves the actual value under whatever
-            # key the user picked. We recover it here using the template.
             if isinstance(parsed, dict):
                 key = self._resolve_device_key(vars_, parsed)
-                dps = parsed.get("dps")
-                if not isinstance(dps, dict):
-                    dp = vars_.get("dp")
-                    if dp and self.state.templates:
-                        field = _value_field_from_template(self.state.templates.payload)
-                        if field and field in parsed:
-                            dps = {dp: parsed[field]}
-                if key and isinstance(dps, dict) and dps:
+                dps = await self._extract_dps_from_event(vars_, parsed, payload_str)
+                if key and dps:
                     await self.state.merge_dps(key, dps)
                     # Data flowing means the device is alive — mark online.
                     await self.state.set_live_status(key, "online", code=0, message="event")
@@ -336,6 +309,37 @@ class BridgeClient:
 
         if self._on_event is not None:
             await self._on_event(matched_as, vars_, parsed)
+
+    async def _extract_dps_from_event(
+        self, vars_: dict[str, str], parsed: dict[str, Any], payload_str: str
+    ) -> dict[str, Any] | None:
+        """Returns a {dp: value} map extracted from an event payload, or None.
+
+        Order of attempts:
+          1. parse_payload_with_template — JSON tree walk against the user's
+             `mqtt_payload_template`. Handles arbitrary JSON-shaped templates
+             with any combination of {value}, {dps}, {name}, etc.
+          2. Bridge's parse_mqtt_payload already produced a `dps` dict (the
+             bare-scalar template case: payload `true` + topic {dp}=1 →
+             {"dps":{"1":true}}). Use it.
+
+        If neither works, returns None — the user's template isn't a shape
+        the manager can read, and a warning has already been raised at
+        bootstrap to nudge them to fix it."""
+        tpls = self.state.templates
+        if tpls and payload_str:
+            captures = parse_payload_with_template(payload_str, tpls.payload)
+            if captures:
+                if isinstance(captures.get("dps"), dict):
+                    return captures["dps"]
+                if "value" in captures and vars_.get("dp"):
+                    return {vars_["dp"]: captures["value"]}
+
+        # Fall back to whatever the bridge's parse_payload produced.
+        dps = parsed.get("dps")
+        if isinstance(dps, dict) and dps:
+            return dps
+        return None
 
     # ── bridge-config handling ──────────────────────────────────────────
     async def _on_bridge_config(self, payload: str) -> None:
@@ -375,12 +379,24 @@ class BridgeClient:
         self.root = root
         await self.state.set_templates(templates)
         await self._subscribe_runtime_topics(templates)
+        await self._validate_payload_template(templates.payload)
         if not self._bootstrap_done.is_set():
             await self._request_initial_status(templates)
             self._bootstrap_done.set()
             logger.info("Bootstrap complete — templates resolved for root %r", root)
         else:
             logger.info("Bridge config updated — templates re-resolved for root %r", root)
+
+    async def _validate_payload_template(self, template: str | None) -> None:
+        """Surface a UI warning when the bridge's payload template isn't a
+        shape the manager can extract from. The fix is at the bridge config
+        level (mqtt_payload_template), not in the manager."""
+        ok, message = validate_payload_template(template)
+        if ok:
+            await self.state.clear_warning("payload_template")
+        else:
+            logger.warning("Payload template not parseable: %s", message)
+            await self.state.set_warning("payload_template", "warning", message)
 
     async def _apply_default_templates(self) -> None:
         """Fallback when bridge/config didn't arrive (bridge offline)."""

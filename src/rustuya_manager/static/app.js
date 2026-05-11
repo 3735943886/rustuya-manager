@@ -36,6 +36,7 @@ const $wizardQrImage = document.getElementById("wizard-qr-image");
 const $wizardWorkingMsg = document.getElementById("wizard-working-message");
 const $wizardDoneMsg = document.getElementById("wizard-done-message");
 const $wizardErrorMsg = document.getElementById("wizard-error-message");
+const $warnings = document.getElementById("warnings");
 const $syncBar = document.getElementById("sync-bar");
 const $modal = document.getElementById("sync-modal");
 const $modalBody = document.getElementById("sync-modal-body");
@@ -136,9 +137,37 @@ function render() {
   renderRoot();
   renderTemplates();
   renderSummary();
+  renderWarnings();
   renderBanner();
   renderSyncBar();
   renderDevices();
+}
+
+function renderWarnings() {
+  const ws = snapshot.warnings || {};
+  const keys = Object.keys(ws);
+  if (keys.length === 0) {
+    $warnings.classList.add("hidden");
+    $warnings.innerHTML = "";
+    return;
+  }
+  $warnings.classList.remove("hidden");
+  $warnings.innerHTML = "";
+  const styles = {
+    warning: "bg-amber-50 border-amber-300 text-amber-900",
+    error:   "bg-rose-50 border-rose-300 text-rose-900",
+  };
+  for (const k of keys) {
+    const w = ws[k];
+    const cls = styles[w.level] || styles.warning;
+    const banner = document.createElement("div");
+    banner.className = `rounded-lg border p-3 text-sm ${cls}`;
+    banner.innerHTML = `
+      <div class="font-medium uppercase tracking-wide text-[11px] mb-0.5">${escapeHtml(w.level || "warning")} · ${escapeHtml(k)}</div>
+      <div>${escapeHtml(w.message || "")}</div>
+    `;
+    $warnings.appendChild(banner);
+  }
 }
 
 function renderSyncBar() {

@@ -51,6 +51,9 @@ class State:
     # DPS events. Each entry is {"state": "online"|"offline"|"unknown",
     # "code": int|None, "message": str|None}.
     live_status: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # Manager-emitted warnings/notes for the user, keyed by stable id (so the
+    # UI deduplicates them). Each entry is {level, message, at}.
+    warnings: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Where the cloud devices JSON was last loaded from (None until set).
     cloud_path: str | None = None
 
@@ -104,6 +107,22 @@ class State:
         async with self._changed:
             self.live_status[device_id] = {"state": state, "code": code, "message": message}
             self._bump()
+
+    async def set_warning(self, key: str, level: str, message: str) -> None:
+        """Surface a manager-detected issue (e.g. unparseable payload template)
+        to the UI. `key` deduplicates repeats."""
+        async with self._changed:
+            existing = self.warnings.get(key)
+            if existing and existing["level"] == level and existing["message"] == message:
+                return  # no-op, don't bump version
+            self.warnings[key] = {"level": level, "message": message, "at": _now()}
+            self._bump()
+
+    async def clear_warning(self, key: str) -> None:
+        async with self._changed:
+            if key in self.warnings:
+                del self.warnings[key]
+                self._bump()
 
     def _bump(self) -> None:
         self._version += 1

@@ -16,7 +16,6 @@ const $empty = document.getElementById("empty-state");
 const $conn = document.getElementById("conn-badge");
 const $rootLabel = document.getElementById("root-label");
 const $templates = document.getElementById("templates-block");
-const $summary = document.getElementById("summary");
 const $filterTabs = document.getElementById("filter-tabs");
 const $toasts = document.getElementById("toast-container");
 const $search = document.getElementById("search-input");
@@ -136,7 +135,7 @@ function render() {
   if (!snapshot) return;
   renderRoot();
   renderTemplates();
-  renderSummary();
+  renderFilterCounts();
   renderWarnings();
   renderBanner();
   renderSyncBar();
@@ -220,15 +219,28 @@ function renderTemplates() {
   }
 }
 
-function renderSummary() {
+// Counts live inside the filter tabs themselves — one row that doubles as
+// summary + filter UI. The "all" count is total devices (cloud ∪ bridge).
+function renderFilterCounts() {
+  const totalIds = new Set([
+    ...Object.keys(snapshot.cloud),
+    ...Object.keys(snapshot.bridge),
+  ]);
   const counts = {
+    all: totalIds.size,
     synced: snapshot.diff.synced.length,
-    mismatched: snapshot.diff.mismatched.length,
+    mismatch: snapshot.diff.mismatched.length,
     missing: snapshot.diff.missing.length,
-    orphaned: snapshot.diff.orphaned.length,
+    orphan: snapshot.diff.orphaned.length,
   };
-  for (const el of $summary.querySelectorAll("[data-summary]")) {
-    el.textContent = counts[el.dataset.summary] ?? 0;
+  for (const btn of $filterTabs.querySelectorAll("button[data-filter]")) {
+    const key = btn.dataset.filter;
+    const span = btn.querySelector("[data-count]");
+    if (!span) continue;
+    const n = counts[key] ?? 0;
+    span.textContent = n > 0 ? n : "";
+    // Tabs with 0 fade to a quieter style so the eye lands on actionable ones.
+    btn.classList.toggle("opacity-50", n === 0 && key !== "all");
   }
 }
 
@@ -388,20 +400,21 @@ function deviceCard(id, cls, isChild) {
   const lastSeen = snapshot.last_seen[id];
   const live = snapshot.live_status?.[id];
 
-  // Sync-class color goes on the card's left edge — readable in one glance
-  // when scanning vertically, costs no row space, doesn't wrap on mobile.
-  const syncEdgeColors = {
-    synced:    "border-l-emerald-400",
-    mismatch:  "border-l-amber-400",
-    missing:   "border-l-sky-400",
-    orphan:    "border-l-rose-400",
-    ungrouped: "border-l-slate-300",
-  };
+  // The card's left edge color carries the most actionable status:
+  //   - When sync needs attention (mismatch/missing/orphan): show the
+  //     sync-class color directly so the row jumps out.
+  //   - When sync is fine but the device is offline: show gray. All-green
+  //     everywhere would mean "all good"; a gray stripe pops out as
+  //     "synced but the bridge can't reach this device".
+  //   - When everything's fine (synced + online): vibrant green.
+  //   - Unknown live state (no events yet): muted slate.
+  // Ungrouped (no cloud) uses muted slate too — there's no sync notion.
+  const edgeColor = computeEdgeColor(cls, live);
   const indent = isChild ? "ml-4 md:ml-8" : "";
 
   const card = document.createElement("div");
-  card.className = `bg-white rounded-lg border border-slate-200 border-l-4 ${syncEdgeColors[cls]} p-3 ${indent}`;
-  card.title = `${cls}${primary.type ? ` · ${primary.type}` : ""}`;
+  card.className = `bg-white rounded-lg border border-slate-200 border-l-4 ${edgeColor} p-3 ${indent}`;
+  card.title = `${cls}${primary.type ? ` · ${primary.type}` : ""}${live?.state ? ` · ${live.state}` : ""}`;
 
   // ── Header row 1: name (or id) + status icons + actions ────────────────
   const headerTop = document.createElement("div");
@@ -459,8 +472,13 @@ function deviceCard(id, cls, isChild) {
   for (const entry of fields) {
     const [k, v, tooltip] = entry;
     const f = document.createElement("div");
-    const titleAttr = tooltip ? ` title="${escapeHtml(tooltip)}"` : "";
-    f.innerHTML = `<span class="text-slate-400">${k}</span> <span class="font-mono truncate"${titleAttr}>${escapeHtml(String(v))}</span>`;
+    // `min-w-0` on the cell + on the value span lets truncate clip long values
+    // (long error messages, full keys) instead of overflowing into the next
+    // grid column. The label is `shrink-0` so it never gets clipped.
+    f.className = "flex gap-1 min-w-0";
+    const titleAttr = tooltip || String(v).length > 16
+      ? ` title="${escapeHtml(tooltip || String(v))}"` : "";
+    f.innerHTML = `<span class="text-slate-400 shrink-0">${k}</span><span class="font-mono truncate min-w-0"${titleAttr}>${escapeHtml(String(v))}</span>`;
     grid.appendChild(f);
   }
   card.appendChild(grid);
@@ -493,6 +511,17 @@ function deviceCard(id, cls, isChild) {
   }
 
   return card;
+}
+
+function computeEdgeColor(cls, live) {
+  if (cls === "mismatch") return "border-l-amber-400";
+  if (cls === "missing")  return "border-l-sky-400";
+  if (cls === "orphan")   return "border-l-rose-400";
+  if (cls === "ungrouped") return "border-l-slate-300";
+  // synced — differentiate by live online state
+  if (live?.state === "offline") return "border-l-slate-400";
+  if (live?.state === "online")  return "border-l-emerald-400";
+  return "border-l-slate-200";  // synced but no live signal yet
 }
 
 // Online/offline dot — one character of color, fits anywhere.
@@ -1156,17 +1185,15 @@ $sort.addEventListener("change", (e) => {
 
 const $refreshBtn = document.getElementById("refresh-btn");
 $refreshBtn.addEventListener("click", async () => {
+  // Keep the label stable — the refresh usually completes in <100ms and a
+  // "refreshing…" flicker just makes the button size jitter. Disabled is
+  // enough visual feedback; the toast confirms completion.
   $refreshBtn.disabled = true;
-  const originalLabel = $refreshBtn.textContent;
-  $refreshBtn.textContent = "refreshing…";
   try {
-    // 1. Pull the latest state snapshot from our own /api (no bridge round-trip).
     const res = await fetch("/api/state");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     snapshot = await res.json();
     render();
-    // 2. Also ask the bridge to re-publish its current state; the response
-    //    arrives over WS and will bump the snapshot again shortly.
     await postCommand({ action: "status", id: "bridge" });
     const bridgeCount = Object.keys(snapshot.bridge).length;
     const cloudCount = Object.keys(snapshot.cloud).length;
@@ -1175,7 +1202,6 @@ $refreshBtn.addEventListener("click", async () => {
     toast(`Refresh failed: ${e.message}`, "error");
   } finally {
     $refreshBtn.disabled = false;
-    $refreshBtn.textContent = originalLabel;
   }
 });
 

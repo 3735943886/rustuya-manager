@@ -6,11 +6,17 @@
 // modules. Per-device expand/collapse is persisted in localStorage so a
 // reload doesn't fold cards the user just opened.
 
+// Whitelist the persisted sortKey so users carrying retired values
+// ("type", "last_seen") in localStorage fall back cleanly to "id" instead
+// of getting a no-op select.
+const VALID_SORT_KEYS = new Set(["id", "name", "status"]);
+const savedSortKey = localStorage.getItem("sortKey");
+
 export const state = {
   snapshot: null,
   filter: "all",
   query: "",
-  sortKey: localStorage.getItem("sortKey") || "id",
+  sortKey: VALID_SORT_KEYS.has(savedSortKey) ? savedSortKey : "id",
 };
 
 export const expandedIds = new Set(

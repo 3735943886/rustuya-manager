@@ -198,19 +198,20 @@ function matchesFilter(cls) {
   return cls === state.filter;
 }
 
+// Live-status rank: online first so actionable devices bubble to the top.
+// Unknown/no-status sinks to the bottom so the noise stays out of the way.
+const LIVE_RANK = { online: 0, offline: 1, unknown: 2 };
+
 function sortValue(id) {
   const dev = primaryDevice(id);
   if (!dev) return "";
   switch (state.sortKey) {
-    case "name":      return (dev.name || "").toLowerCase();
-    case "type":      return dev.type || "";
-    case "status":    return dev.status || "";
-    case "last_seen": {
-      const t = state.snapshot.last_seen[id];
-      // Sort most-recent first → negate for natural ascending compare
-      return t ? -t : Infinity;
+    case "name":   return (dev.name || "").toLowerCase();
+    case "status": {
+      const live = state.snapshot.live_status?.[id];
+      return live ? (LIVE_RANK[live.state] ?? 9) : 9;
     }
-    default:          return id;
+    default:       return id;
   }
 }
 

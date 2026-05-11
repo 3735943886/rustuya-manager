@@ -27,15 +27,27 @@ SAMPLE_DEVICES = [
 ]
 
 
-def _make_mock_wizard(*, get_qr_returns=("token123", "tuyaSmart--qrLogin?token=abc"),
-                     wait_returns=True, fetch_returns=None):
-    """Returns a mock TuyaWizard with the methods our wrapper calls."""
+def _make_mock_wizard(*, login_returns=True, fetch_returns=None,
+                     qr_url="tuyaSmart--qrLogin?token=abc",
+                     fire_qr=True, login_delay=0.0):
+    """Returns a mock TuyaWizard whose `login_auto(user_code, creds, qr_cb)`
+    matches the upstream contract: optionally fires qr_cb (when the saved-creds
+    path falls back to QR), then returns True/False. `fire_qr=False` simulates
+    the "saved credentials still valid" path where no QR is needed.
+    """
     fetch_returns = fetch_returns if fetch_returns is not None else SAMPLE_DEVICES
     mock = MagicMock()
     mock.info = {}
-    mock.get_qr_url.return_value = get_qr_returns
-    mock.wait_for_login_result.return_value = wait_returns
-    mock.init_manager.return_value = None
+
+    def login_auto(user_code, creds, qr_callback):
+        if login_delay:
+            import time
+            time.sleep(login_delay)
+        if fire_qr and qr_callback is not None:
+            qr_callback(qr_url)
+        return login_returns
+
+    mock.login_auto.side_effect = login_auto
     mock.fetch_devices.return_value = fetch_returns
     return mock
 
@@ -73,13 +85,38 @@ class TestWizardManager:
         assert wm.session.qr_image_data_url.startswith("data:image/svg+xml;base64,")
 
     async def test_timeout_yields_error_state(self, tmp_path: Path):
+        # QR was shown (fire_qr=True) but login eventually returned False —
+        # this represents the user not scanning in time.
         wm = WizardManager(creds_path=str(tmp_path / "creds.json"), postprocess_mode="")
-        mock_wizard = _make_mock_wizard(wait_returns=False)
+        mock_wizard = _make_mock_wizard(login_returns=False, fire_qr=True)
         with patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard):
             await wm.start()
             await wm._task
         assert wm.session.state == WizardState.ERROR
         assert "not completed" in (wm.session.error or "").lower()
+
+    async def test_login_fail_without_qr_yields_user_code_hint(self, tmp_path: Path):
+        # login_auto returns False and never fires qr_callback — this
+        # represents "no saved creds AND no user_code provided" on the fresh
+        # login path. The error should hint the user to paste a user_code.
+        wm = WizardManager(creds_path=str(tmp_path / "creds.json"), postprocess_mode="")
+        mock_wizard = _make_mock_wizard(login_returns=False, fire_qr=False)
+        with patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard):
+            await wm.start()
+            await wm._task
+        assert wm.session.state == WizardState.ERROR
+        assert "user code" in (wm.session.error or "").lower()
+
+    async def test_saved_creds_skip_qr(self, tmp_path: Path):
+        # The "valid tuyacreds.json" path: login_auto returns True without
+        # ever firing qr_callback. Session must reach DONE with no QR image.
+        wm = WizardManager(creds_path=str(tmp_path / "creds.json"), postprocess_mode="")
+        mock_wizard = _make_mock_wizard(fire_qr=False, login_returns=True)
+        with patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard):
+            await wm.start()
+            await wm._task
+        assert wm.session.state == WizardState.DONE
+        assert wm.session.qr_image_data_url is None
 
     async def test_exception_in_fetch_yields_error(self, tmp_path: Path):
         wm = WizardManager(creds_path=str(tmp_path / "creds.json"), postprocess_mode="")
@@ -95,14 +132,9 @@ class TestWizardManager:
         """A second start() while one is still running must not spawn a 2nd
         task. Otherwise we'd race on tuyacreds.json."""
         wm = WizardManager(creds_path=str(tmp_path / "creds.json"), postprocess_mode="")
-        mock_wizard = _make_mock_wizard()
-        # Make wait_for_login_result sleep so the task is still running when
-        # we call start() the second time.
-        import time
-        def slow_wait(*args, **kwargs):
-            time.sleep(0.3)
-            return True
-        mock_wizard.wait_for_login_result.side_effect = slow_wait
+        # login_auto sleeps 0.3s so the first task is still in-flight when
+        # we hit start() again.
+        mock_wizard = _make_mock_wizard(login_delay=0.3)
         with patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard):
             await wm.start()
             first_task = wm._task

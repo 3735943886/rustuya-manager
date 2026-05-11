@@ -104,7 +104,7 @@ def build_app(
     *,
     creds_path: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version="0.4.3")
+    app = FastAPI(title="rustuya-manager", version="0.4.4")
     # Hold client/state on app so dependency-injection or middleware can reach them
     app.state.bridge_state = state
     app.state.bridge_client = client
@@ -146,6 +146,15 @@ def build_app(
     @app.get("/api/wizard/status")
     async def wizard_status() -> dict[str, Any]:
         return wizard.session.to_dict()
+
+    @app.get("/api/wizard/info")
+    async def wizard_info() -> dict[str, Any]:
+        """One-shot endpoint called when the modal opens. Returns the
+        user_code persisted in tuyacreds.json (if any) so the input can be
+        pre-filled across browsers. Kept separate from /status because that
+        gets polled every 1.5s during the flow — we don't want to re-read
+        the file on every tick."""
+        return {"saved_user_code": wizard.read_saved_user_code() or ""}
 
     @app.post("/api/wizard/cancel")
     async def wizard_cancel() -> dict[str, Any]:

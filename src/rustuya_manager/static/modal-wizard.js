@@ -19,13 +19,25 @@ const $wizardHeaderBtn = document.getElementById("wizard-header-btn");
 
 let wizardPollTimer = null;
 
-function openWizardModal() {
+async function openWizardModal() {
   showWizardPane("idle");
   $wizardModal.classList.remove("hidden");
   $wizardStart.disabled = false;
   $wizardStart.textContent = "Start";
+  // Prefill priority: server's tuyacreds.json (cross-browser) > localStorage
+  // (this-browser fallback). The server read is best-effort and shouldn't
+  // block the modal — open first, populate when the response lands.
   $wizardUserCode.value = localStorage.getItem("tuyaUserCode") || "";
   $wizardUserCode.focus();
+  try {
+    const res = await fetch("/api/wizard/info");
+    if (res.ok) {
+      const { saved_user_code } = await res.json();
+      if (saved_user_code && !$wizardUserCode.value) {
+        $wizardUserCode.value = saved_user_code;
+      }
+    }
+  } catch (e) { /* offline / endpoint missing — fall back to localStorage value */ }
 }
 
 function closeWizardModal() {

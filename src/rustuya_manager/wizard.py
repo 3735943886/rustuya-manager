@@ -25,7 +25,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import json
 import logging
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Awaitable, Callable
@@ -121,38 +123,78 @@ class WizardManager:
                 self.session.state = WizardState.IDLE
                 self.session.message = "cancelled"
 
+    def read_saved_user_code(self) -> str | None:
+        """Return the user_code persisted in tuyacreds.json, if any.
+
+        The tuyawizard library strips `user_code` from the dict when it loads
+        the file (treating it as per-session input), but it leaves the value
+        on disk after a successful login. We read it directly so the web UI
+        can pre-fill the wizard input — saving the user from re-typing it on
+        every new browser / re-fetch attempt.
+
+        Returns None if the file is missing, unreadable, or has no user_code.
+        """
+        if not self.creds_path or not os.path.exists(self.creds_path):
+            return None
+        try:
+            with open(self.creds_path, "r", encoding="utf-8") as f:
+                info = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Could not read user_code from %s: %s", self.creds_path, e)
+            return None
+        code = info.get("user_code") if isinstance(info, dict) else None
+        return code if isinstance(code, str) and code else None
+
     async def _run(self, user_code: str | None) -> None:
         """The blocking wizard flow, broken into thread-pool calls so the
-        event loop stays responsive."""
+        event loop stays responsive.
+
+        Uses `tuyawizard.login_auto` which:
+          - tries saved tokens in tuyacreds.json first (no QR, no user_code)
+          - falls back to QR login if saved tokens are stale/missing
+        `qr_callback` only fires on the QR fallback path, so re-fetches with
+        valid saved credentials skip AWAITING_SCAN entirely.
+        """
         loop = asyncio.get_running_loop()
         wizard = TuyaWizard(info_file=self.creds_path, logger=logger)
-        if user_code:
-            wizard.info["user_code"] = user_code
-        try:
-            qr_token, qr_url = await loop.run_in_executor(None, wizard.get_qr_url)
+
+        def qr_callback(qr_url: str | None) -> None:
+            # Called from tuyawizard's thread — qr_url is set when the QR is
+            # ready to be scanned, then called again with None when the scan
+            # completes (so login proceeds). We only act on the show-QR call.
+            if qr_url is None:
+                return
             self.session.qr_url = qr_url
             self.session.qr_image_data_url = _qr_to_data_url(qr_url)
             self.session.state = WizardState.AWAITING_SCAN
             self.session.message = "Scan the QR code with Smart Life or Tuya Smart app"
 
-            success = await loop.run_in_executor(
-                None,
-                wizard.wait_for_login_result,
-                qr_token,
-                QR_POLL_RETRY_SEC,
-                QR_POLL_TIMEOUT_SEC,
+        try:
+            self.session.message = "Connecting to Tuya…"
+            # login_auto signature: (user_code, creds, qr_callback)
+            ok = await loop.run_in_executor(
+                None, wizard.login_auto, user_code or None, None, qr_callback
             )
-            if not success:
+            if not ok:
+                # Distinguish "QR scan timed out" (qr_callback fired at least
+                # once so qr_image_data_url is set) from "missing user_code on
+                # fresh login" (qr_callback never fired).
+                qr_was_shown = self.session.qr_image_data_url is not None
                 self.session.state = WizardState.ERROR
-                self.session.error = "Login was not completed in time. Try again."
+                if qr_was_shown:
+                    self.session.error = "Login was not completed in time. Try again."
+                else:
+                    self.session.error = (
+                        "Login failed. If this is the first time, paste the "
+                        "User Code from Smart Life → Me → Settings → Account "
+                        "and Security."
+                    )
                 return
 
             self.session.state = WizardState.LOGGED_IN
             self.session.message = "Logged in. Fetching devices..."
 
-            await loop.run_in_executor(None, wizard.init_manager)
             self.session.state = WizardState.FETCHING
-
             devices = await loop.run_in_executor(None, wizard.fetch_devices)
             self.session.devices_count = len(devices)
             self.session.message = f"Fetched {len(devices)} devices"

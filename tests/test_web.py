@@ -54,9 +54,29 @@ class TestHTTP:
         with TestClient(build_app(state, client)) as tc:
             r = tc.get("/static/app.js")
             assert r.status_code == 200
-            # Sanity: it's actual JS, not the HTML page
-            assert "WebSocket" in r.text
-            assert "publishCommand" in r.text
+            # Sanity: it's the ES-module entry point, not the HTML page
+            assert "import" in r.text
+            assert "./ws.js" in r.text
+
+    def test_static_modules_served(self):
+        # Every ES module the entry imports must be reachable on /static/*.
+        # Catches missing files and bad package-data globs in pyproject.
+        state, client = _fixture_state()
+        modules = {
+            "state.js":        "expandedIds",
+            "dom.js":          "escapeHtml",
+            "api.js":          "publishCommand",
+            "ws.js":           "WebSocket",
+            "cards.js":        "deviceCard",
+            "render.js":       "renderDevices",
+            "modal-sync.js":   "openSyncModal",
+            "modal-wizard.js": "applyWizardSession",
+        }
+        with TestClient(build_app(state, client)) as tc:
+            for name, marker in modules.items():
+                r = tc.get(f"/static/{name}")
+                assert r.status_code == 200, f"{name} not served"
+                assert marker in r.text, f"{name} missing expected marker {marker!r}"
 
     def test_api_state_returns_full_snapshot(self):
         state, client = _fixture_state()

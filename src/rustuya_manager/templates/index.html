@@ -8,33 +8,46 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
+      darkMode: 'class',
       theme: {
         extend: {
           colors: {
-            // semantic categories for the sync status — kept in one place
             sync: { synced: '#16a34a', mismatch: '#eab308', missing: '#0ea5e9', orphan: '#ef4444' },
           }
         }
       }
     }
   </script>
+  <script>
+    // Apply theme before first paint to avoid a flash of light content.
+    (() => {
+      const saved = localStorage.getItem('theme');
+      const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (saved === 'dark' || (saved === null && sysDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
   <style>
-    /* Single piece of custom CSS: pulse the "connecting" dot until we're live */
+    /* Pulse the connection-state dot until we're live */
     @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
     .pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen">
+<body class="bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 min-h-screen">
 
-<header class="bg-white border-b border-slate-200 sticky top-0 z-10">
+<header class="bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-10">
   <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
     <h1 class="text-lg font-semibold tracking-tight">rustuya-manager</h1>
-    <div id="conn-badge" class="text-xs px-2 py-1 rounded-full border bg-slate-100 text-slate-600 border-slate-300">
-      <span class="pulse-dot">●</span> connecting…
+    <div id="conn-badge" class="text-xs px-2 py-1 rounded-full border bg-slate-100 text-slate-600 border-slate-300 inline-flex items-center justify-center w-[96px] whitespace-nowrap gap-1">
+      <span class="pulse-dot leading-none">●</span><span>connecting</span>
     </div>
-    <div class="text-xs text-slate-500" id="root-label"></div>
+    <div class="text-xs text-slate-500 dark:text-slate-400" id="root-label"></div>
     <div class="ml-auto flex items-center gap-2">
-      <button id="refresh-btn" class="text-xs px-2 py-1 rounded border border-slate-300 hover:bg-slate-100">
+      <button id="theme-btn" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300" title="Toggle dark mode">
+        <span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span>
+      </button>
+      <button id="refresh-btn" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">
         ↻ refresh
       </button>
     </div>
@@ -51,19 +64,19 @@
 
   <!-- Cloud source picker — visible when no cloud loaded -->
   <section id="cloud-banner" class="hidden">
-    <div id="cloud-dropzone" class="rounded-lg border-2 border-dashed border-amber-300 bg-amber-50 p-4 md:p-5 text-sm text-amber-900 space-y-3">
-      <div class="font-medium">No <code class="bg-amber-100 px-1 rounded">tuyadevices.json</code> loaded</div>
-      <p class="text-xs text-amber-800">
+    <div id="cloud-dropzone" class="rounded-lg border-2 border-dashed border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 p-4 md:p-5 text-sm text-amber-900 dark:text-amber-200 space-y-3">
+      <div class="font-medium">No <code class="bg-amber-100 dark:bg-amber-900/60 px-1 rounded">tuyadevices.json</code> loaded</div>
+      <p class="text-xs text-amber-800 dark:text-amber-300">
         Bridge devices are listed below as <em>Ungrouped</em>. Pick a source to enable diff and sync:
       </p>
       <div class="flex flex-wrap gap-2">
         <button type="button" id="wizard-open-btn" class="text-xs px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-medium">
           Connect Tuya Cloud
         </button>
-        <button type="button" id="cloud-pick-btn" class="text-xs px-3 py-1.5 rounded border border-amber-400 bg-white hover:bg-amber-100 text-amber-800">
+        <button type="button" id="cloud-pick-btn" class="text-xs px-3 py-1.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 text-amber-800 dark:text-amber-200">
           Upload tuyadevices.json
         </button>
-        <span class="text-[11px] text-amber-700 self-center">…or drop the file here</span>
+        <span class="text-[11px] text-amber-700 dark:text-amber-300 self-center">…or drop the file here</span>
       </div>
       <input type="file" id="cloud-file-input" class="hidden" accept="application/json,.json">
     </div>
@@ -71,18 +84,18 @@
 
   <!-- Sync actions bar -->
   <section id="sync-bar" class="hidden">
-    <div class="flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
-      <span class="text-xs text-slate-500">Pending changes:</span>
-      <button data-sync-scope="mismatch" class="hidden text-xs px-2.5 py-1 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800">
+    <div class="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2">
+      <span class="text-xs text-slate-500 dark:text-slate-400">Pending changes:</span>
+      <button data-sync-scope="mismatch" class="hidden text-xs px-2.5 py-1 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200">
         Apply mismatches <span data-count></span>
       </button>
-      <button data-sync-scope="missing" class="hidden text-xs px-2.5 py-1 rounded border border-sky-300 bg-sky-50 hover:bg-sky-100 text-sky-800">
+      <button data-sync-scope="missing" class="hidden text-xs px-2.5 py-1 rounded border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/40 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-200">
         Add missing <span data-count></span>
       </button>
-      <button data-sync-scope="orphan" class="hidden text-xs px-2.5 py-1 rounded border border-rose-300 bg-rose-50 hover:bg-rose-100 text-rose-800">
+      <button data-sync-scope="orphan" class="hidden text-xs px-2.5 py-1 rounded border border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-200">
         Remove orphans <span data-count></span>
       </button>
-      <button data-sync-scope="all" class="ml-auto text-xs px-3 py-1 rounded bg-slate-900 hover:bg-slate-800 text-white font-medium">
+      <button data-sync-scope="all" class="ml-auto text-xs px-3 py-1 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white font-medium">
         Sync everything
       </button>
     </div>
@@ -91,7 +104,7 @@
   <!-- Device list -->
   <section>
     <div class="flex flex-wrap items-center gap-2 mb-2">
-      <h2 class="text-sm font-semibold text-slate-700">Devices</h2>
+      <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-200">Devices</h2>
       <div class="flex flex-wrap gap-1 text-xs ml-auto" id="filter-tabs">
         <button data-filter="all"      class="px-2 py-1 rounded border border-slate-300 bg-white">all <span data-count></span></button>
         <button data-filter="synced"   class="px-2 py-1 rounded border border-slate-300 bg-white">synced <span data-count></span></button>
@@ -102,10 +115,10 @@
     </div>
     <div class="flex flex-wrap items-center gap-2 mb-3">
       <input id="search-input" type="search" placeholder="search id / name / ip / cid"
-             class="flex-1 min-w-[180px] text-sm px-3 py-1.5 rounded border border-slate-300 focus:outline-none focus:ring-2 focus:ring-slate-400">
-      <label class="text-xs text-slate-500">
+             class="flex-1 min-w-[180px] text-sm px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500">
+      <label class="text-xs text-slate-500 dark:text-slate-400">
         sort
-        <select id="sort-select" class="ml-1 text-xs px-2 py-1 rounded border border-slate-300 bg-white">
+        <select id="sort-select" class="ml-1 text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
           <option value="id">id</option>
           <option value="name">name</option>
           <option value="type">type</option>
@@ -115,17 +128,17 @@
       </label>
     </div>
     <div id="device-list" class="space-y-2"></div>
-    <div id="empty-state" class="hidden bg-white rounded-lg border border-dashed border-slate-300 p-6 text-center text-slate-500 text-sm">
+    <div id="empty-state" class="hidden bg-white dark:bg-slate-800 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-6 text-center text-slate-500 dark:text-slate-400 text-sm">
       No devices.
     </div>
   </section>
 
   <!-- Resolved bridge templates (debug aid) -->
   <section>
-    <details class="bg-white rounded-lg border border-slate-200">
-      <summary class="px-4 py-2 text-sm text-slate-600 cursor-pointer hover:bg-slate-50">Bridge templates</summary>
-      <div class="px-4 py-3 border-t border-slate-200 text-xs font-mono text-slate-700 space-y-1" id="templates-block">
-        <div class="text-slate-400">(waiting for bootstrap)</div>
+    <details class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+      <summary class="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50">Bridge templates</summary>
+      <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-700 dark:text-slate-300 space-y-1" id="templates-block">
+        <div class="text-slate-400 dark:text-slate-500">(waiting for bootstrap)</div>
       </div>
     </details>
   </section>
@@ -137,79 +150,73 @@
 
 <!-- Tuya Cloud wizard modal -->
 <div id="wizard-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
-  <div class="bg-white rounded-lg shadow-xl w-full max-w-lg flex flex-col">
-    <div class="px-4 py-3 border-b border-slate-200 flex items-center gap-3">
+  <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg flex flex-col">
+    <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
       <h2 class="text-base font-semibold">Connect to Tuya Cloud</h2>
-      <button id="wizard-close" class="ml-auto text-slate-500 hover:text-slate-900 text-xl leading-none">×</button>
+      <button id="wizard-close" class="ml-auto text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl leading-none">×</button>
     </div>
     <div class="p-4 space-y-3" id="wizard-body">
-      <!-- Idle: user_code input -->
       <div data-wizard-pane="idle" class="space-y-3">
-        <p class="text-sm text-slate-700">
+        <p class="text-sm text-slate-700 dark:text-slate-300">
           Sign in with the Smart Life or Tuya Smart app on your phone. Get your <strong>User Code</strong> from the app:
-          <span class="text-xs text-slate-500">Me → Settings → Account and Security.</span>
+          <span class="text-xs text-slate-500 dark:text-slate-400">Me → Settings → Account and Security.</span>
         </p>
         <label class="block">
-          <span class="text-xs text-slate-500">User code</span>
-          <input id="wizard-user-code" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" placeholder="e.g. XXXXXXXX">
+          <span class="text-xs text-slate-500 dark:text-slate-400">User code</span>
+          <input id="wizard-user-code" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" placeholder="e.g. XXXXXXXX">
         </label>
-        <p class="text-[11px] text-slate-500">
+        <p class="text-[11px] text-slate-500 dark:text-slate-400">
           Credentials are cached in <code>tuyacreds.json</code> on the manager host. Future runs will reuse them automatically.
         </p>
       </div>
 
-      <!-- Requesting QR / loading -->
-      <div data-wizard-pane="requesting_qr" class="hidden text-center text-slate-600 py-6">
+      <div data-wizard-pane="requesting_qr" class="hidden text-center text-slate-600 dark:text-slate-300 py-6">
         <div class="text-sm">Requesting QR code from Tuya…</div>
       </div>
 
-      <!-- QR display while awaiting scan -->
       <div data-wizard-pane="awaiting_scan" class="hidden text-center space-y-3">
-        <img id="wizard-qr-image" src="" alt="QR code" class="mx-auto w-56 h-56 border border-slate-200 rounded bg-white">
-        <div class="text-sm text-slate-700">Open <strong>Smart Life</strong> or <strong>Tuya Smart</strong> and scan this QR.</div>
-        <div class="text-xs text-slate-500"><span class="pulse-dot">●</span> Waiting for scan…</div>
+        <img id="wizard-qr-image" src="" alt="QR code" class="mx-auto w-56 h-56 border border-slate-200 dark:border-slate-600 rounded bg-white">
+        <div class="text-sm text-slate-700 dark:text-slate-300">Open <strong>Smart Life</strong> or <strong>Tuya Smart</strong> and scan this QR.</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400"><span class="pulse-dot">●</span> Waiting for scan…</div>
       </div>
 
-      <!-- Logged in / fetching -->
-      <div data-wizard-pane="working" class="hidden text-center text-slate-700 py-4">
+      <div data-wizard-pane="working" class="hidden text-center text-slate-700 dark:text-slate-300 py-4">
         <div class="text-sm" id="wizard-working-message">Logged in. Fetching devices…</div>
       </div>
 
-      <!-- Done -->
-      <div data-wizard-pane="done" class="hidden text-center text-emerald-700 py-4 space-y-2">
+      <div data-wizard-pane="done" class="hidden text-center text-emerald-700 dark:text-emerald-400 py-4 space-y-2">
         <div class="text-lg">✓</div>
         <div class="text-sm" id="wizard-done-message">Done.</div>
       </div>
 
-      <!-- Error -->
       <div data-wizard-pane="error" class="hidden text-center py-4 space-y-2">
-        <div class="text-lg text-rose-600">✘</div>
-        <div class="text-sm text-rose-700" id="wizard-error-message">Failed.</div>
+        <div class="text-lg text-rose-600 dark:text-rose-400">✘</div>
+        <div class="text-sm text-rose-700 dark:text-rose-300" id="wizard-error-message">Failed.</div>
       </div>
     </div>
-    <div class="px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
-      <button id="wizard-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-100">Cancel</button>
-      <button id="wizard-start" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-white">Start</button>
+    <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+      <button id="wizard-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200">Cancel</button>
+      <button id="wizard-start" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white">Start</button>
     </div>
   </div>
 </div>
 
 <!-- Sync confirm modal -->
 <div id="sync-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
-  <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-    <div class="px-4 py-3 border-b border-slate-200 flex items-center gap-3">
+  <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+    <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
       <h2 class="text-base font-semibold" id="sync-modal-title">Sync changes</h2>
-      <span class="text-xs text-slate-500" id="sync-modal-subtitle"></span>
-      <button id="sync-modal-close" class="ml-auto text-slate-500 hover:text-slate-900 text-xl leading-none">×</button>
+      <span class="text-xs text-slate-500 dark:text-slate-400" id="sync-modal-subtitle"></span>
+      <button id="sync-modal-close" class="ml-auto text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl leading-none">×</button>
     </div>
     <div id="sync-modal-body" class="overflow-y-auto p-4 space-y-4"></div>
-    <div class="px-4 py-3 border-t border-slate-200 flex flex-wrap items-center gap-2">
-      <span id="sync-modal-progress" class="text-xs text-slate-500"></span>
+    <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center gap-2">
+      <span id="sync-modal-progress" class="text-xs text-slate-500 dark:text-slate-400"></span>
       <div class="ml-auto flex gap-2">
-        <button id="sync-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 bg-white hover:bg-slate-100">
+        <button id="sync-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200">
           Cancel
         </button>
-        <button id="sync-modal-apply" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50 disabled:cursor-not-allowed">
+        <button id="sync-modal-apply" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white disabled:opacity-50 disabled:cursor-not-allowed">
           Apply
         </button>
       </div>

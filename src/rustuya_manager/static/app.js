@@ -66,19 +66,16 @@ function wsUrl() {
 }
 
 function setConn(state) {
+  // Short labels keep the badge compact; the longest ("connecting") fits in
+  // ~80 px. The fixed width prevents header reflow on state transitions.
   const styles = {
-    connecting: ["bg-slate-100 text-slate-600 border-slate-300", "● connecting…", true],
-    live:       ["bg-emerald-100 text-emerald-700 border-emerald-300", "● live", false],
-    lost:       ["bg-rose-100 text-rose-700 border-rose-300", "● disconnected — retrying", true],
+    connecting: ["bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600", "connecting", true],
+    live:       ["bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700", "live", false],
+    lost:       ["bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700", "lost", true],
   };
   const [cls, label, pulse] = styles[state];
-  // Fixed width prevents the header from reflowing when the badge text length
-  // changes (live / connecting… / disconnected — retrying) — that reflow
-  // shifts the rest of the page and causes scroll jumps.
-  $conn.className = `text-xs px-2 py-1 rounded-full border ${cls} inline-flex items-center justify-center w-[180px] whitespace-nowrap`;
-  $conn.innerHTML = pulse
-    ? `<span class="pulse-dot">${label.split(" ")[0]}</span>${label.slice(1)}`
-    : label;
+  $conn.className = `text-xs px-2 py-1 rounded-full border ${cls} inline-flex items-center justify-center w-[96px] whitespace-nowrap gap-1`;
+  $conn.innerHTML = `<span class="${pulse ? "pulse-dot " : ""}leading-none">●</span><span>${label}</span>`;
 }
 
 let backoffMs = 500;
@@ -169,8 +166,8 @@ function renderWarnings() {
   $warnings.classList.remove("hidden");
   $warnings.innerHTML = "";
   const styles = {
-    warning: "bg-amber-50 border-amber-300 text-amber-900",
-    error:   "bg-rose-50 border-rose-300 text-rose-900",
+    warning: "bg-amber-50 dark:bg-amber-900/30 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200",
+    error:   "bg-rose-50 dark:bg-rose-900/30 border-rose-300 dark:border-rose-700 text-rose-900 dark:text-rose-200",
   };
   for (const k of keys) {
     const w = ws[k];
@@ -230,26 +227,24 @@ function renderTemplates() {
   ];
   for (const [k, v] of lines) {
     const row = document.createElement("div");
-    row.innerHTML = `<span class="text-slate-400 w-20 inline-block">${k}</span><span>${escapeHtml(v)}</span>`;
+    row.innerHTML = `<span class="text-slate-400 dark:text-slate-500 w-20 inline-block">${k}</span><span>${escapeHtml(v)}</span>`;
     $templates.appendChild(row);
   }
 }
 
 // Filter tab styling. Each tab is colored per sync class so the row
-// communicates state at a glance even without reading the labels. Active tab
-// gets the saturated variant; inactive tabs get a tinted background with a
-// colored border.
+// communicates state at a glance even without reading the labels.
 const FILTER_STYLES = {
-  all:      { active: "bg-slate-700 text-white border-slate-700",
-              idle:   "bg-white text-slate-700 border-slate-300" },
+  all:      { active: "bg-slate-700 text-white border-slate-700 dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200",
+              idle:   "bg-white text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600" },
   synced:   { active: "bg-emerald-600 text-white border-emerald-600",
-              idle:   "bg-emerald-50 text-emerald-700 border-emerald-300" },
+              idle:   "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700" },
   mismatch: { active: "bg-amber-600 text-white border-amber-600",
-              idle:   "bg-amber-50 text-amber-700 border-amber-300" },
+              idle:   "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700" },
   missing:  { active: "bg-sky-600 text-white border-sky-600",
-              idle:   "bg-sky-50 text-sky-700 border-sky-300" },
+              idle:   "bg-sky-50 text-sky-700 border-sky-300 dark:bg-sky-900/30 dark:text-sky-300 dark:border-sky-700" },
   orphan:   { active: "bg-rose-600 text-white border-rose-600",
-              idle:   "bg-rose-50 text-rose-700 border-rose-300" },
+              idle:   "bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-700" },
 };
 const _FILTER_BASE = "px-2 py-1 rounded border text-xs";
 
@@ -440,7 +435,7 @@ function deviceCard(id, cls, isChild) {
   const indent = isChild ? "ml-4 md:ml-8" : "";
 
   const card = document.createElement("div");
-  card.className = `bg-white rounded-lg border border-slate-200 border-l-4 ${edgeColor} p-3 ${indent} cursor-pointer`;
+  card.className = `bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 border-l-4 ${edgeColor} p-3 ${indent} cursor-pointer`;
   card.title = `${cls}${primary.type ? ` · ${primary.type}` : ""}${live?.state ? ` · ${live.state}` : ""}`;
   // Tap anywhere on the card to expand/collapse. Buttons inside stop the
   // event from propagating up so they don't accidentally toggle.
@@ -454,8 +449,8 @@ function deviceCard(id, cls, isChild) {
   headerTop.className = "flex items-center gap-2 min-w-0";
   const nameOrId = primary.name && primary.name !== "N/A" ? primary.name : id;
   headerTop.innerHTML = `
-    ${isChild ? '<span class="text-slate-300 text-sm shrink-0">└</span>' : ""}
-    <span class="font-medium text-sm text-slate-900 truncate min-w-0">${escapeHtml(nameOrId)}</span>
+    ${isChild ? '<span class="text-slate-300 dark:text-slate-600 text-sm shrink-0">└</span>' : ""}
+    <span class="font-medium text-sm text-slate-900 dark:text-slate-100 truncate min-w-0">${escapeHtml(nameOrId)}</span>
   `;
   const rightCluster = document.createElement("span");
   rightCluster.className = "ml-auto flex items-center gap-1.5 shrink-0";
@@ -472,11 +467,11 @@ function deviceCard(id, cls, isChild) {
   const headerBottom = document.createElement("div");
   headerBottom.className = "flex items-center gap-2 mt-0.5";
   headerBottom.innerHTML = showSecondaryId
-    ? `<span class="font-mono text-[11px] text-slate-400 truncate">${escapeHtml(id)}</span>`
+    ? `<span class="font-mono text-[11px] text-slate-400 dark:text-slate-500 truncate">${escapeHtml(id)}</span>`
     : `<span></span>`;
   if (lastSeen) {
     const ls = document.createElement("span");
-    ls.className = "ml-auto text-[10px] text-slate-400 shrink-0";
+    ls.className = "ml-auto text-[10px] text-slate-400 dark:text-slate-500 shrink-0";
     ls.dataset.lastseen = String(lastSeen);
     ls.textContent = formatAgo(lastSeen);
     headerBottom.appendChild(ls);
@@ -490,7 +485,7 @@ function deviceCard(id, cls, isChild) {
   // them — only the CID and parent relationship matter. WiFi devices show
   // IP/KEY/VER + any live error message from the bridge.
   const grid = document.createElement("div");
-  grid.className = "mt-2 grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-0.5 text-xs text-slate-600";
+  grid.className = "mt-2 grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-0.5 text-xs text-slate-600 dark:text-slate-400";
   let fields;
   if (primary.type === "SubDevice") {
     fields = [
@@ -511,7 +506,7 @@ function deviceCard(id, cls, isChild) {
     f.className = "flex gap-1 min-w-0";
     const titleAttr = tooltip || String(v).length > 16
       ? ` title="${escapeHtml(tooltip || String(v))}"` : "";
-    f.innerHTML = `<span class="text-slate-400 shrink-0">${k}</span><span class="font-mono truncate min-w-0"${titleAttr}>${escapeHtml(String(v))}</span>`;
+    f.innerHTML = `<span class="text-slate-400 dark:text-slate-500 shrink-0">${k}</span><span class="font-mono truncate min-w-0"${titleAttr}>${escapeHtml(String(v))}</span>`;
     grid.appendChild(f);
   }
   card.appendChild(grid);
@@ -520,7 +515,7 @@ function deviceCard(id, cls, isChild) {
     const m = snapshot.diff.mismatched.find((m) => m.id === id);
     if (m) {
       const reasons = document.createElement("div");
-      reasons.className = "mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1";
+      reasons.className = "mt-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700 rounded px-2 py-1";
       reasons.innerHTML = m.reasons.map(escapeHtml).join("<br>");
       card.appendChild(reasons);
     }
@@ -534,7 +529,7 @@ function deviceCard(id, cls, isChild) {
     dpsRow.className = "mt-1.5 flex flex-wrap gap-1";
     for (const [k, v] of dpsEntries) {
       const chip = document.createElement("span");
-      chip.className = "text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200";
+      chip.className = "text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200";
       chip.textContent = `dp${k}=${formatDpsValue(v)}`;
       dpsRow.appendChild(chip);
     }
@@ -562,31 +557,36 @@ function computeEdgeColor(cls, live) {
 const _ICON_BASE = "w-5 h-5 inline-flex items-center justify-center";
 
 function liveDot(live) {
-  const span = document.createElement("span");
+  // CSS-drawn dot, not the ● glyph. Font glyphs ride above the baseline,
+  // making them look bottom-anchored next to other h-5 icons; a CSS circle
+  // sits in the exact geometric center of the inline-flex container.
+  const wrap = document.createElement("span");
+  wrap.className = _ICON_BASE;
+  const dot = document.createElement("span");
   if (!live) {
-    span.className = `${_ICON_BASE} text-slate-300 text-xs`;
-    span.textContent = "○";
-    span.title = "no status received";
-    return span;
+    dot.className = "w-2 h-2 rounded-full border-2 border-slate-300 dark:border-slate-600";
+    wrap.title = "no status received";
+    wrap.appendChild(dot);
+    return wrap;
   }
   const map = {
-    online:  ["text-emerald-500", "●", "online"],
-    offline: ["text-slate-400",   "○", "offline"],
-    unknown: ["text-slate-300",   "○", "unknown"],
+    online:  ["bg-emerald-500", "online", false],
+    offline: ["border-2 border-slate-400 dark:border-slate-500", "offline", true],
+    unknown: ["border-2 border-slate-300 dark:border-slate-600", "unknown", true],
   };
-  const [color, glyph, label] = map[live.state] || ["text-rose-500", "✕", String(live.state)];
-  span.className = `${_ICON_BASE} ${color} text-sm leading-none`;
-  span.textContent = glyph;
+  const [cls, label, ring] = map[live.state] || ["bg-rose-500", String(live.state), false];
+  dot.className = `w-2 h-2 rounded-full ${cls}${ring ? " bg-transparent" : ""}`;
   const code = live.code != null ? ` (code ${live.code})` : "";
   const msg = live.message ? `: ${live.message}` : "";
-  span.title = `${label}${code}${msg}`;
-  return span;
+  wrap.title = `${label}${code}${msg}`;
+  wrap.appendChild(dot);
+  return wrap;
 }
 
 function typeBadge(t) {
   const span = document.createElement("span");
   span.className =
-    `${_ICON_BASE} text-[10px] font-mono rounded border border-slate-200 text-slate-500`;
+    `${_ICON_BASE} text-[10px] font-mono rounded border border-slate-200 dark:border-slate-600 text-slate-500 dark:text-slate-400`;
   if (t === "SubDevice") {
     span.textContent = "S";
     span.title = "Sub-device";
@@ -600,7 +600,7 @@ function typeBadge(t) {
 function expandCaret(id, isExpanded) {
   const b = document.createElement("button");
   b.type = "button";
-  b.className = `${_ICON_BASE} text-slate-400 hover:text-slate-700 text-xs`;
+  b.className = `${_ICON_BASE} text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 text-xs`;
   b.textContent = isExpanded ? "▾" : "▸";
   b.title = isExpanded ? "Collapse" : "Expand";
   b.addEventListener("click", (ev) => {
@@ -614,7 +614,7 @@ function iconButton(glyph, onClick, title) {
   const b = document.createElement("button");
   b.type = "button";
   b.className =
-    `${_ICON_BASE} rounded border border-slate-200 bg-white hover:bg-slate-100 text-slate-500 text-xs`;
+    `${_ICON_BASE} rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-300 text-xs`;
   b.textContent = glyph;
   b.title = title;
   b.addEventListener("click", (ev) => { ev.stopPropagation(); onClick(); });
@@ -665,14 +665,14 @@ function resolveIp(bridge, cloud) {
 
 function missingParentCard(parent_id) {
   const card = document.createElement("div");
-  card.className = "bg-white rounded-lg border-2 border-dashed border-sky-300 p-3 md:p-4";
+  card.className = "bg-white dark:bg-slate-800 rounded-lg border-2 border-dashed border-sky-300 dark:border-sky-700 p-3 md:p-4";
   card.innerHTML = `
     <div class="flex flex-wrap items-center gap-2">
-      <span class="font-mono text-sm text-slate-700">${escapeHtml(parent_id)}</span>
+      <span class="font-mono text-sm text-slate-700 dark:text-slate-200">${escapeHtml(parent_id)}</span>
       ${statusPill("missing")}
-      <span class="text-[10px] px-1.5 py-0.5 rounded-full border bg-slate-100 text-slate-600 border-slate-300">missing parent</span>
+      <span class="text-[10px] px-1.5 py-0.5 rounded-full border bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600">missing parent</span>
     </div>
-    <div class="text-xs text-slate-500 mt-1">
+    <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">
       Sub-device(s) reference this parent, but the parent is not in cloud or bridge.
     </div>
   `;
@@ -681,8 +681,8 @@ function missingParentCard(parent_id) {
 
 function button(label, onClick, variant = "default") {
   const styles = {
-    default: "border-slate-300 bg-white hover:bg-slate-100 text-slate-700",
-    danger:  "border-rose-300 bg-white hover:bg-rose-50 text-rose-700",
+    default: "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200",
+    danger:  "border-rose-300 dark:border-rose-700 bg-white dark:bg-slate-700 hover:bg-rose-50 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-300",
   }[variant];
   const b = document.createElement("button");
   b.type = "button";
@@ -697,11 +697,11 @@ function statusPill(cls) {
   // Used only by missingParentCard now; device cards use the left-edge color
   // strip + liveDot/typeBadge for the same information without text labels.
   const map = {
-    synced:    ["bg-emerald-100 text-emerald-700 border-emerald-200", "synced"],
-    mismatch:  ["bg-amber-100 text-amber-700 border-amber-200", "mismatch"],
-    missing:   ["bg-sky-100 text-sky-700 border-sky-200", "missing"],
-    orphan:    ["bg-rose-100 text-rose-700 border-rose-200", "orphan"],
-    ungrouped: ["bg-slate-100 text-slate-600 border-slate-200", "ungrouped"],
+    synced:    ["bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700", "synced"],
+    mismatch:  ["bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700", "mismatch"],
+    missing:   ["bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-700", "missing"],
+    orphan:    ["bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-700", "orphan"],
+    ungrouped: ["bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600", "ungrouped"],
   };
   const [s, label] = map[cls];
   return `<span class="text-[10px] px-1.5 py-0.5 rounded-full border ${s} uppercase tracking-wide">${label}</span>`;
@@ -842,9 +842,9 @@ function renderModal() {
   for (const item of currentPlan) groups[item.scope].push(item);
 
   const titles = {
-    mismatch: ["Update mismatched", "border-amber-200 bg-amber-50 text-amber-800"],
-    missing:  ["Add missing",       "border-sky-200 bg-sky-50 text-sky-800"],
-    orphan:   ["Remove orphans",    "border-rose-200 bg-rose-50 text-rose-800"],
+    mismatch: ["Update mismatched", "border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200"],
+    missing:  ["Add missing",       "border-sky-200 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/30 text-sky-800 dark:text-sky-200"],
+    orphan:   ["Remove orphans",    "border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/30 text-rose-800 dark:text-rose-200"],
   };
 
   for (const scope of ["mismatch", "missing", "orphan"]) {
@@ -865,7 +865,7 @@ function renderModal() {
       </div>
     `;
     const list = document.createElement("ul");
-    list.className = "divide-y divide-current/10 bg-white/60";
+    list.className = "divide-y divide-current/10 bg-white/60 dark:bg-slate-800/40";
     for (const item of items) {
       const idx = currentPlan.indexOf(item);
       list.appendChild(renderPlanRow(item, idx));
@@ -885,10 +885,10 @@ function renderPlanRow(item, index) {
     <div class="flex-1 min-w-0">
       <div class="flex flex-wrap items-center gap-2">
         <span class="font-mono text-xs">${escapeHtml(item.id)}</span>
-        <span class="text-xs text-slate-500">${escapeHtml(item.dev.name || "—")}</span>
-        <span class="text-[10px] uppercase tracking-wide text-slate-500">${item.action}</span>
+        <span class="text-xs text-slate-500 dark:text-slate-400">${escapeHtml(item.dev.name || "—")}</span>
+        <span class="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">${item.action}</span>
       </div>
-      ${item.reasons.length ? `<div class="text-[11px] text-slate-600 mt-1">${item.reasons.map(escapeHtml).join("<br>")}</div>` : ""}
+      ${item.reasons.length ? `<div class="text-[11px] text-slate-600 dark:text-slate-300 mt-1">${item.reasons.map(escapeHtml).join("<br>")}</div>` : ""}
     </div>
     <span data-status-idx="${index}" class="text-xs shrink-0">${statusLabel(item)}</span>
   `;
@@ -897,10 +897,10 @@ function renderPlanRow(item, index) {
 
 function statusLabel(item) {
   switch (item.status) {
-    case "pending":     return '<span class="text-slate-400">pending</span>';
-    case "in_progress": return '<span class="text-slate-700">…</span>';
-    case "ok":          return '<span class="text-emerald-600">✓</span>';
-    case "error":       return `<span class="text-rose-600" title="${escapeHtml(item.error || "")}">✘</span>`;
+    case "pending":     return '<span class="text-slate-400 dark:text-slate-500">pending</span>';
+    case "in_progress": return '<span class="text-slate-700 dark:text-slate-200">…</span>';
+    case "ok":          return '<span class="text-emerald-600 dark:text-emerald-400">✓</span>';
+    case "error":       return `<span class="text-rose-600 dark:text-rose-400" title="${escapeHtml(item.error || "")}">✘</span>`;
     default:            return "";
   }
 }
@@ -1150,8 +1150,8 @@ $wizardUserCode?.addEventListener("keydown", (e) => {
 // ── Toasts ─────────────────────────────────────────────────────────────────
 function toast(msg, kind = "ok") {
   const styles = {
-    ok:    "bg-slate-900 text-white",
-    error: "bg-rose-600 text-white",
+    ok:    "bg-slate-900 dark:bg-slate-200 text-white dark:text-slate-900",
+    error: "bg-rose-600 dark:bg-rose-500 text-white",
   }[kind];
   const t = document.createElement("div");
   t.className = `pointer-events-auto text-xs px-3 py-2 rounded shadow ${styles}`;
@@ -1251,6 +1251,15 @@ $refreshBtn.addEventListener("click", async () => {
   } finally {
     $refreshBtn.disabled = false;
   }
+});
+
+// Theme toggle — flips the `dark` class on <html> and persists the choice.
+// The initial application happens inline in the <head> to avoid FOUC; this
+// handler only deals with user-initiated toggling.
+const $themeBtn = document.getElementById("theme-btn");
+$themeBtn?.addEventListener("click", () => {
+  const dark = document.documentElement.classList.toggle("dark");
+  localStorage.setItem("theme", dark ? "dark" : "light");
 });
 
 connect();

@@ -94,7 +94,7 @@ def build_app(
     *,
     creds_path: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version="0.3.5")
+    app = FastAPI(title="rustuya-manager", version="0.3.6")
     # Hold client/state on app so dependency-injection or middleware can reach them
     app.state.bridge_state = state
     app.state.bridge_client = client

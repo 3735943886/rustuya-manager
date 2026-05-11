@@ -478,11 +478,12 @@ function resolveIp(bridge, cloud) {
       }
       return { value: bridge.ip, tooltip: "" };
     }
-    // bridge.ip === "Auto" → bridge is auto-discovering via LAN UDP scan.
-    // The resolved address isn't surfaced back via status, so be honest.
+    // bridge.ip === "Auto" → no fixed IP; the bridge follows DHCP / dynamic
+    // assignment. Report that literally; substituting the cloud value would
+    // be misleading because it's usually the external NAT'd address, not LAN.
     const tip =
-      "Bridge is auto-discovering via LAN scan; actual IP isn't reported back" +
-      (cloudIp && cloudIp !== "Auto" ? `\n(cloud reports: ${cloudIp})` : "");
+      "IP is dynamic (DHCP/auto)." +
+      (cloudIp && cloudIp !== "Auto" ? `\nCloud reports: ${cloudIp} (typically external/NAT, not LAN)` : "");
     return { value: "Auto", tooltip: tip };
   }
   // Device not in bridge — cloud is all we have.

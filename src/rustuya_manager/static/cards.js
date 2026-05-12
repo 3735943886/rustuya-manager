@@ -100,11 +100,13 @@ async function removeWithConfirm(id, name) {
 function appendInlineActions(container, id, cls, cloud, bridge, primary) {
   if (cls === "missing") {
     container.appendChild(button("Add", () => sync("add", primary)));
-  } else if (cls === "orphan") {
-    container.appendChild(button("Remove", () => sync("remove", primary), "danger"));
   } else if (cls === "mismatch") {
     container.appendChild(button("Update", () => sync("add", cloud)));
   }
+  // Orphan no longer gets a dedicated "Remove" text button — the 🗑 icon
+  // below covers it (with a confirm) and avoids two ways to do the same
+  // thing right next to each other.
+  //
   // Edit/remove icons only make sense for devices the bridge knows about,
   // which excludes the "missing" class (cloud-only). Top-bar "+" handles
   // the add-from-scratch flow for those.
@@ -113,7 +115,7 @@ function appendInlineActions(container, id, cls, cloud, bridge, primary) {
       iconButton("✎", () => openEditModal(id), "Edit device"),
     );
     container.appendChild(
-      iconButton("🗑", () => removeWithConfirm(id, primary.name), "Remove device"),
+      iconButton("🗑", () => removeWithConfirm(id, primary.name), "Remove device", "danger"),
     );
     container.appendChild(
       iconButton("↻", () => publishCommand({ action: "get", id }), "Query status from bridge"),

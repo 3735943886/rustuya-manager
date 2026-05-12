@@ -64,11 +64,16 @@ export function liveDot(live) {
   return wrap;
 }
 
-export function iconButton(glyph, onClick, title) {
+export function iconButton(glyph, onClick, title, variant = "default") {
+  // `danger` tints the icon rose so destructive actions read as risky at a
+  // glance; the confirm dialog is still the actual guard.
+  const styles = {
+    default: "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-300",
+    danger:  "border-rose-200 dark:border-rose-800 bg-white dark:bg-slate-700 hover:bg-rose-50 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400",
+  }[variant];
   const b = document.createElement("button");
   b.type = "button";
-  b.className =
-    `${ICON_BASE} rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-300 text-xs`;
+  b.className = `${ICON_BASE} rounded border text-xs ${styles}`;
   b.textContent = glyph;
   b.title = title;
   b.addEventListener("click", (ev) => { ev.stopPropagation(); onClick(); });

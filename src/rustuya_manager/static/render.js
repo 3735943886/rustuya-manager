@@ -207,6 +207,11 @@ function matchesFilter(cls) {
 // Unknown/no-status sinks to the bottom so the noise stays out of the way.
 const LIVE_RANK = { online: 0, offline: 1, unknown: 2 };
 
+// Sync-category rank for the "category" sort. Actionable classes come first
+// so attention-needing devices cluster at the top; synced trails because
+// nothing's wrong; ungrouped (no cloud loaded) lands last as context-only.
+const CATEGORY_RANK = { mismatch: 0, missing: 1, orphan: 2, synced: 3, ungrouped: 4 };
+
 function sortValue(id) {
   const dev = primaryDevice(id);
   if (!dev) return "";
@@ -216,6 +221,7 @@ function sortValue(id) {
       const live = state.snapshot.live_status?.[id];
       return live ? (LIVE_RANK[live.state] ?? 9) : 9;
     }
+    case "category": return CATEGORY_RANK[classifyDevice(id)] ?? 9;
     default:       return id;
   }
 }

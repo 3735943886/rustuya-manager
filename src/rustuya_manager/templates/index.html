@@ -43,14 +43,17 @@
       <span class="pulse-dot leading-none">●</span><span>connecting</span>
     </div>
     <div class="ml-auto flex items-center gap-2">
-      <button id="wizard-header-btn" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300" title="Refresh devices from Tuya Cloud (tuyawizard)">
-        ☁ tuya
+      <button id="device-add-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Add device">
+        +
       </button>
-      <button id="theme-btn" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300" title="Toggle dark mode">
+      <button id="wizard-header-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Refresh devices from Tuya Cloud (tuyawizard)">
+        ☁
+      </button>
+      <button id="theme-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Toggle dark mode">
         <span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span>
       </button>
-      <button id="refresh-btn" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300">
-        ↻ refresh
+      <button id="refresh-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Refresh page state">
+        ⟳
       </button>
     </div>
   </div>
@@ -221,6 +224,80 @@
           Apply
         </button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add / Edit device modal — shared form, mode is set by JS -->
+<div id="device-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
+  <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md flex flex-col">
+    <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
+      <h2 class="text-base font-semibold" id="device-modal-title">Add device</h2>
+      <button id="device-modal-close" class="ml-auto text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl leading-none">×</button>
+    </div>
+    <div class="p-4 space-y-3 text-sm">
+      <label class="block">
+        <span class="text-xs text-slate-500 dark:text-slate-400">Device ID <span class="text-[10px]">(blank → auto from IP/CID + name)</span></span>
+        <input id="device-form-id" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+      </label>
+      <label class="block">
+        <span class="text-xs text-slate-500 dark:text-slate-400">Name</span>
+        <input id="device-form-name" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
+      </label>
+      <div class="flex items-center gap-4 text-sm">
+        <span class="text-xs text-slate-500 dark:text-slate-400">Type</span>
+        <label class="inline-flex items-center gap-1 cursor-pointer">
+          <input id="device-form-type-wifi" type="radio" name="device-form-type" value="WiFi" checked>
+          <span>WiFi</span>
+        </label>
+        <label class="inline-flex items-center gap-1 cursor-pointer">
+          <input id="device-form-type-sub" type="radio" name="device-form-type" value="SubDevice">
+          <span>Sub-device</span>
+        </label>
+      </div>
+      <div id="device-form-block-wifi" class="space-y-2">
+        <label class="block">
+          <span class="text-xs text-slate-500 dark:text-slate-400">IP</span>
+          <input id="device-form-ip" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" placeholder="leave blank for Auto (DHCP)">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500 dark:text-slate-400">Key</span>
+          <input id="device-form-key" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500 dark:text-slate-400">Version</span>
+          <input id="device-form-version" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" placeholder="e.g. 3.3 — leave blank for Auto">
+        </label>
+      </div>
+      <div id="device-form-block-sub" class="hidden space-y-2">
+        <label class="block">
+          <span class="text-xs text-slate-500 dark:text-slate-400">CID (sub-device node id)</span>
+          <input id="device-form-cid" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-500 dark:text-slate-400">Parent device id</span>
+          <input id="device-form-parent" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
+        </label>
+      </div>
+    </div>
+    <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+      <button id="device-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200">Cancel</button>
+      <button id="device-modal-submit" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Generic confirm modal (used by destructive actions) -->
+<div id="confirm-modal" class="hidden fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-3">
+  <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-sm flex flex-col">
+    <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
+      <h2 class="text-base font-semibold" id="confirm-modal-title">Confirm</h2>
+      <button id="confirm-modal-close" class="ml-auto text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl leading-none">×</button>
+    </div>
+    <div class="p-4 text-sm text-slate-700 dark:text-slate-200" id="confirm-modal-body"></div>
+    <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+      <button id="confirm-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200">Cancel</button>
+      <button id="confirm-modal-ok" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white">OK</button>
     </div>
   </div>
 </div>

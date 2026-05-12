@@ -21,6 +21,8 @@ import { connect } from "./ws.js";
 import { render, renderDevices, renderFilterCounts } from "./render.js";
 import { initSyncModal } from "./modal-sync.js";
 import { initWizardModal } from "./modal-wizard.js";
+import { initDeviceModal, openAddModal } from "./modal-device.js";
+import { initConfirmModal } from "./modal-confirm.js";
 
 // ── Cloud upload (drop zone + file picker) ─────────────────────────────────
 const $dropzone = document.getElementById("cloud-dropzone");
@@ -128,7 +130,18 @@ setInterval(() => {
   }
 }, 5000);
 
+// ── Top-bar [+] → open add-device modal ────────────────────────────────────
+document.getElementById("device-add-btn")?.addEventListener("click", () => {
+  if (!state.snapshot) {
+    toast("waiting for bridge state…", "error");
+    return;
+  }
+  openAddModal();
+});
+
 // ── Init modals + open the socket ──────────────────────────────────────────
 initSyncModal();
 initWizardModal();
+initDeviceModal();
+initConfirmModal();
 connect();

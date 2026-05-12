@@ -7,6 +7,8 @@ import {
   liveDot, iconButton, button, statusPill,
 } from "./dom.js";
 import { sync, publishCommand } from "./api.js";
+import { openEditModal } from "./modal-device.js";
+import { confirm } from "./modal-confirm.js";
 // Cycle: render.js imports deviceCard from this module. The import is fine
 // because ES module bindings are live — by the time toggleExpand fires from
 // a click handler, both modules are fully evaluated.
@@ -84,6 +86,17 @@ function expandCaret(id, isExpanded) {
   return b;
 }
 
+async function removeWithConfirm(id, name) {
+  const display = name && name !== "N/A" ? `${name} (${id})` : id;
+  const ok = await confirm({
+    title: "Remove device?",
+    message: `Remove ${display} from the bridge?\nThis publishes a 'remove' command and cannot be undone by the manager.`,
+    okLabel: "Remove",
+    danger: true,
+  });
+  if (ok) await publishCommand({ action: "remove", id });
+}
+
 function appendInlineActions(container, id, cls, cloud, bridge, primary) {
   if (cls === "missing") {
     container.appendChild(button("Add", () => sync("add", primary)));
@@ -92,7 +105,16 @@ function appendInlineActions(container, id, cls, cloud, bridge, primary) {
   } else if (cls === "mismatch") {
     container.appendChild(button("Update", () => sync("add", cloud)));
   }
+  // Edit/remove icons only make sense for devices the bridge knows about,
+  // which excludes the "missing" class (cloud-only). Top-bar "+" handles
+  // the add-from-scratch flow for those.
   if (cls !== "missing") {
+    container.appendChild(
+      iconButton("✎", () => openEditModal(id), "Edit device"),
+    );
+    container.appendChild(
+      iconButton("🗑", () => removeWithConfirm(id, primary.name), "Remove device"),
+    );
     container.appendChild(
       iconButton("↻", () => publishCommand({ action: "get", id }), "Query status from bridge"),
     );

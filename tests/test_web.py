@@ -63,14 +63,16 @@ class TestHTTP:
         # Catches missing files and bad package-data globs in pyproject.
         state, client = _fixture_state()
         modules = {
-            "state.js":        "expandedIds",
-            "dom.js":          "escapeHtml",
-            "api.js":          "publishCommand",
-            "ws.js":           "WebSocket",
-            "cards.js":        "deviceCard",
-            "render.js":       "renderDevices",
-            "modal-sync.js":   "openSyncModal",
-            "modal-wizard.js": "applyWizardSession",
+            "state.js":         "expandedIds",
+            "dom.js":           "escapeHtml",
+            "api.js":           "publishCommand",
+            "ws.js":            "WebSocket",
+            "cards.js":         "deviceCard",
+            "render.js":        "renderDevices",
+            "modal-sync.js":    "openSyncModal",
+            "modal-wizard.js":  "applyWizardSession",
+            "modal-device.js":  "openAddModal",
+            "modal-confirm.js": "initConfirmModal",
         }
         with TestClient(build_app(state, client)) as tc:
             for name, marker in modules.items():

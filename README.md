@@ -7,74 +7,40 @@ A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bri
 
 ## Key Features
 
-- **Status dashboard** — categorizes devices as Synced / Mismatched / Missing / Orphaned by diffing your cloud JSON against the bridge's live state.
-- **Identical MQTT semantics** — topic and payload templating is delegated to [`pyrustuyabridge`](https://pypi.org/project/pyrustuyabridge/), the official Python binding to the bridge's own Rust functions. The manager interprets any custom topic/payload templates byte-identically to the bridge.
-- **Self-configuring** — reads the bridge's retained `{root}/bridge/config` snapshot at startup, so no separate `config.json` is required.
-- **Live updates over MQTT** — subscribes to event/message wildcards, streams DPS values to the UI in real time.
-- **Resilient transport** — re-subscribes runtime topics after broker reconnects, bounded auto-reconnect backoff, CONNACK and subscribe failures logged.
-- **Web UI** — single-page, no build pipeline (Tailwind via CDN + vanilla JS). Drag-and-drop cloud-JSON upload, search, sort, sub-device tree, live event stream, per-device actions.
-- **CLI mode** — bootstrap + diff + event stream printed to stdout for SSH / log-shipping workflows.
+- **Status dashboard** — Synced / Mismatched / Missing / Orphaned categories by diffing your cloud JSON against the bridge's live state.
+- **No separate config** — picks up the bridge's topic and payload templates from its retained `bridge/config`.
+- **Live updates over MQTT** — DPS values stream into the UI in real time.
+- **Web UI + CLI** — single-page UI with drag-and-drop cloud-JSON upload, search, sort, sub-device tree, per-device add/edit/remove. CLI prints diff + event stream for SSH-style workflows.
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.9 or later
-- A running [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) and reachable MQTT broker
-
-### Install
+Requires Python 3.10+ and a running [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) reachable via MQTT.
 
 ```bash
-git clone https://github.com/3735943886/rustuya-manager
-cd rustuya-manager
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e .
+pip install git+https://github.com/3735943886/rustuya-manager
 ```
 
-The package pulls `pyrustuyabridge` from PyPI automatically; no Rust toolchain or maturin step required for users.
-
-### Run
-
-CLI mode (event stream + diff to stdout):
+Run (CLI):
 ```bash
-python3 rustuya-manager.py --broker mqtt://localhost:1883 --root rustuya
+rustuya-manager --broker mqtt://localhost:1883 --root rustuya
 ```
 
-Web UI mode (open `http://localhost:8080`):
+Run (web UI on http://localhost:8080):
 ```bash
-python3 rustuya-manager.py --broker mqtt://localhost:1883 --root rustuya --web --port 8080
+rustuya-manager --broker mqtt://localhost:1883 --root rustuya --web --port 8080
 ```
 
 Common flags:
-- `--cloud PATH` — Tuya devices JSON (default `tuyadevices.json`). If the file is missing the UI shows a drop-zone for upload; uploads are persisted to this path.
-- `--broker URL` — `mqtt://[user:pass@]host:port` (default `mqtt://localhost:1883`).
-- `--root TOPIC` — must match the running bridge's `--mqtt-root-topic` (default `rustuya`).
-- `--web --host HOST --port PORT` — start the FastAPI web server.
-
-## How the manager stays in sync with the bridge
-
-The manager imports the bridge's own templating helpers via the `pyrustuyabridge` Python binding, so it never re-implements topic/payload parsing in Python:
-
-- `tpl_to_wildcard(template, root)` — converts a topic template to its MQTT subscription wildcard.
-- `match_topic(topic, template)` — reverse-parses an incoming topic into a `{var: value}` map.
-- `parse_payload(payload, vars)` — applies the bridge's payload-template parsing identically to how the bridge would handle it.
-- `render_template(template, vars)` — forward substitution for building concrete command topics.
-
-This is why any topic or payload template the bridge supports works in the manager without per-format glue code.
+- `--cloud PATH` — Tuya devices JSON (default `tuyadevices.json`). If missing, the UI shows a drop-zone for upload.
+- `--broker URL` — `mqtt://[user:pass@]host:port`.
+- `--root TOPIC` — must match the bridge's `--mqtt-root-topic`.
+- `--web --host HOST --port PORT` — start the web server.
 
 ## Development
 
-For working on the binding alongside the manager (uncommon — most users should just `pip install` the published wheel):
-
 ```bash
-git clone https://github.com/3735943886/rustuya-bridge ../rustuya-bridge
-. .venv/bin/activate
-pip install maturin
-cd ../rustuya-bridge/python && maturin develop && cd -
-```
-
-Run the test suite:
-```bash
-pytest tests/
+pip install -e ".[dev]"
+pytest -q
 ```
 
 ## License

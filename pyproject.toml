@@ -15,20 +15,15 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "pyrustuyabridge>=0.1.0,<0.2",
     "tuyawizard>=0.1.5",
-    # tuya-sharing-sdk (transitively pulled by tuyawizard) imports cryptography
-    # at runtime but doesn't list it in its own deps — declare it ourselves so
-    # `pip install rustuya-manager` never fails with a hidden ImportError.
-    "cryptography>=41",
-    # tuyawizard's --postprocess scan stage enriches devices with IP/version
-    # via UDP discovery; it's optional upstream but we want it by default.
-    "rustuya>=0.2",
+    "cryptography>=41",  # missing dep of tuya-sharing-sdk
+    "rustuya>=0.2",      # UDP scan for IP/version
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
-    "httpx>=0.27",  # FastAPI TestClient transitive
+    "httpx>=0.27",
     "ruff>=0.6",
 ]
 
@@ -51,25 +46,14 @@ target-version = "py310"
 extend-exclude = ["build", "dist"]
 
 [tool.ruff.lint]
-# E/W = pycodestyle, F = pyflakes, I = isort, B = bugbear, UP = pyupgrade.
-# Intentionally not enabling D (pydocstyle) or strict naming rules — the
-# codebase favors concise prose over rigid docstring shapes, and the
-# review-line cost of fighting those would outweigh the gain.
 select = ["E", "F", "I", "W", "B", "UP"]
 ignore = [
-    "E501",  # line length is already capped via formatter; ignoring the
-             # lint complement avoids noise on long string literals where
-             # wrapping would hurt readability (commit messages, MQTT
-             # topic templates with embedded {placeholders}, etc.).
-    "B008",  # FastAPI relies on Depends()/Body() as default values — the
-             # rule's "no function call in default" is a known false
-             # positive for that pattern.
+    "E501",  # formatter handles line length
+    "B008",  # FastAPI Depends/Body in defaults
 ]
 
 [tool.ruff.lint.isort]
 known-first-party = ["rustuya_manager"]
 
 [tool.ruff.format]
-# Match the existing style of the codebase — double quotes are already
-# dominant, no need to flip everything for the sake of one tool's defaults.
 quote-style = "double"

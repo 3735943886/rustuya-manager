@@ -72,7 +72,7 @@ export function openSyncModal(scope) {
   }
   const titles = {
     all: "Apply all changes",
-    mismatch: "Apply mismatches",
+    mismatch: "Update mismatches",
     missing: "Add missing devices",
     orphan: "Remove orphans",
   };

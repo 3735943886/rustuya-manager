@@ -71,7 +71,7 @@ export function openSyncModal(scope) {
     return;
   }
   const titles = {
-    all: "Sync everything",
+    all: "Apply all changes",
     mismatch: "Apply mismatches",
     missing: "Add missing devices",
     orphan: "Remove orphans",

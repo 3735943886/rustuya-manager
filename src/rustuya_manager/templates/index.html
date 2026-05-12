@@ -59,7 +59,7 @@
   </div>
 </header>
 
-<main class="max-w-6xl mx-auto px-4 py-6 space-y-6">
+<main class="max-w-6xl mx-auto px-4 py-3 space-y-4">
 
   <!-- Summary lives inside the filter tabs (data-count on each) — see app.js -->
   <section id="summary" class="hidden"></section>
@@ -87,21 +87,23 @@
     </div>
   </section>
 
-  <!-- Sync actions bar -->
+  <!-- Sync actions bar. No 'Pending changes:' prefix — the colored buttons
+       and the section's existence already say what it is. Plural-trimmed
+       labels + tighter padding give the four buttons a better shot at
+       fitting on one line on narrow mobile widths. -->
   <section id="sync-bar" class="hidden">
-    <div class="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2">
-      <span class="text-xs text-slate-500 dark:text-slate-400">Pending changes:</span>
-      <button data-sync-scope="mismatch" class="hidden text-xs px-2.5 py-1 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200">
-        Apply mismatches <span data-count></span>
+    <div class="flex flex-wrap items-center gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5">
+      <button data-sync-scope="mismatch" class="hidden text-xs px-2 py-1 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 whitespace-nowrap">
+        Apply mismatch <span data-count></span>
       </button>
-      <button data-sync-scope="missing" class="hidden text-xs px-2.5 py-1 rounded border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/40 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-200">
+      <button data-sync-scope="missing" class="hidden text-xs px-2 py-1 rounded border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/40 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-200 whitespace-nowrap">
         Add missing <span data-count></span>
       </button>
-      <button data-sync-scope="orphan" class="hidden text-xs px-2.5 py-1 rounded border border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-200">
-        Remove orphans <span data-count></span>
+      <button data-sync-scope="orphan" class="hidden text-xs px-2 py-1 rounded border border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-200 whitespace-nowrap">
+        Remove orphan <span data-count></span>
       </button>
-      <button data-sync-scope="all" class="ml-auto text-xs px-3 py-1 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white font-medium">
-        Sync everything
+      <button data-sync-scope="all" class="ml-auto text-xs px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white font-medium whitespace-nowrap">
+        Apply all
       </button>
     </div>
   </section>

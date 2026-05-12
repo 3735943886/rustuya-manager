@@ -71,13 +71,15 @@ export function renderSyncBar() {
   }
   $syncBar.classList.remove("hidden");
 
+  // Counts intentionally don't render inside these buttons — the filter
+  // tabs right below already show the same numbers, so re-displaying them
+  // here is duplication. We still use the per-scope counts to hide buttons
+  // whose category is empty.
   for (const btn of $syncBar.querySelectorAll("[data-sync-scope]")) {
     const scope = btn.dataset.syncScope;
     if (scope === "all") continue; // always visible when total > 0
     const n = counts[scope] || 0;
     btn.classList.toggle("hidden", n === 0);
-    const countSpan = btn.querySelector("[data-count]");
-    if (countSpan) countSpan.textContent = `(${n})`;
   }
 }
 

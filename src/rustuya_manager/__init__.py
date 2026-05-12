@@ -6,4 +6,4 @@ Topic and payload templating is delegated to `pyrustuyabridge` so the
 manager's interpretation is byte-identical to the bridge's behavior.
 """
 
-__version__ = "0.4.11"
+__version__ = "0.4.12"

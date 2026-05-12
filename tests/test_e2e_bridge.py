@@ -303,3 +303,88 @@ async def test_reconnect_preserves_subscriptions(bridge: str):
         )
 
     await _run_client_briefly(client, check)
+
+
+async def test_remove_clears_per_device_state(bridge: str):
+    """A successful `remove` ack from the bridge should drop the device id
+    from every per-device bucket in the manager (bridge / dps / live /
+    last_seen / last_response). Otherwise a device that transitions to
+    "missing" (cloud-only) would still display its prior runtime data."""
+    state = State()
+    client = BridgeClient(broker="mqtt://localhost:1883", root=bridge, state=state)
+
+    async def check():
+        # Add a device with a name, populate runtime state via a DPS event,
+        # confirm the manager has full per-device state for it.
+        subprocess.run(
+            ["mosquitto_pub", "-h", "localhost",
+             "-t", f"{bridge}/cmd/bf-rm-dev/add",
+             "-m", '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"removable"}'],
+            check=True,
+        )
+        await client.publish_command("status", target_id="bridge")
+        for _ in range(40):
+            await asyncio.sleep(0.1)
+            if "bf-rm-dev" in state.bridge:
+                break
+        assert "bf-rm-dev" in state.bridge
+
+        subprocess.run(
+            ["mosquitto_pub", "-h", "localhost",
+             "-t", f"{bridge}/dev/removable/dp/1/state",
+             "-m", "true"],
+            check=True,
+        )
+        for _ in range(30):
+            await asyncio.sleep(0.1)
+            if state.dps.get("bf-rm-dev"):
+                break
+        assert state.dps.get("bf-rm-dev") == {"1": True}
+
+        # Now publish a remove. The bridge replies with action=remove,
+        # status=ok on its message topic, which the manager routes into
+        # state.remove_device.
+        await client.publish_command("remove", target_id="bf-rm-dev")
+        for _ in range(40):
+            await asyncio.sleep(0.1)
+            if "bf-rm-dev" not in state.bridge:
+                break
+
+        # Every per-device bucket should be empty for the removed id.
+        assert "bf-rm-dev" not in state.bridge, f"bridge: {list(state.bridge.keys())}"
+        assert "bf-rm-dev" not in state.dps, f"dps: {state.dps}"
+        assert "bf-rm-dev" not in state.live_status, f"live: {state.live_status}"
+        assert "bf-rm-dev" not in state.last_seen, f"last_seen: {state.last_seen}"
+        assert "bf-rm-dev" not in state.last_response, f"last_response: {state.last_response}"
+
+    await _run_client_briefly(client, check)
+
+
+async def test_add_response_triggers_status_refresh(bridge: str):
+    """A successful `add` response should make the manager re-fetch status
+    so state.bridge picks up the new device without waiting for a manual
+    refresh. The bridge's add ack carries only {action, id, status} — not
+    the device's stored fields — so we need a status round-trip."""
+    state = State()
+    client = BridgeClient(broker="mqtt://localhost:1883", root=bridge, state=state)
+
+    async def check():
+        # Use the manager's own publish_command so the add response routes
+        # through the same path the UI would take.
+        await client.publish_command(
+            "add",
+            target_id="bf-auto-add",
+            extra={"key": "k1234567890abcdef", "ip": "10.0.0.42", "name": "auto"},
+        )
+        # We do NOT explicitly issue status — the test pins that the response
+        # handler in _route does it for us.
+        for _ in range(40):
+            await asyncio.sleep(0.1)
+            if "bf-auto-add" in state.bridge:
+                break
+        assert "bf-auto-add" in state.bridge, (
+            f"manager didn't refresh state.bridge after add: {list(state.bridge.keys())}"
+        )
+        assert state.bridge["bf-auto-add"].ip == "10.0.0.42"
+
+    await _run_client_briefly(client, check)

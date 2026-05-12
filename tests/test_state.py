@@ -70,3 +70,36 @@ class TestWaitForPredicate:
         # satisfied the predicate.
         assert state.bridge == {"x": Device(id="x")}
         assert "retained-dev" in state.dps  # noise was actually applied too
+
+
+class TestRemoveDevice:
+    async def test_clears_every_per_device_bucket(self):
+        state = State()
+        await state.set_bridge({"x": Device(id="x"), "keep": Device(id="keep")})
+        await state.merge_dps("x", {"1": True})
+        await state.set_live_status("x", "online", code=0, message="")
+        await state.record_response("x", {"action": "get", "status": "ok"})
+        # Sanity: every bucket is populated for x
+        assert "x" in state.bridge
+        assert "x" in state.dps
+        assert "x" in state.live_status
+        assert "x" in state.last_seen
+        assert "x" in state.last_response
+
+        v0 = state.version
+        await state.remove_device("x")
+
+        for bucket in (state.bridge, state.dps, state.live_status, state.last_seen, state.last_response):
+            assert "x" not in bucket
+        # Unrelated entries untouched
+        assert "keep" in state.bridge
+        # Version bumped exactly once for the whole atomic clear
+        assert state.version == v0 + 1
+
+    async def test_unknown_id_is_noop(self):
+        state = State()
+        await state.set_bridge({"keep": Device(id="keep")})
+        v0 = state.version
+        await state.remove_device("never-existed")
+        assert state.version == v0  # no bump
+        assert "keep" in state.bridge

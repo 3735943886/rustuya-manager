@@ -96,6 +96,24 @@ class State:
             self.last_seen[target_id] = at if at is not None else _now()
             self._bump()
 
+    async def remove_device(self, device_id: str) -> None:
+        """Drop a device id from every per-device bucket atomically.
+
+        Called when the bridge confirms a `remove` action. The retained MQTT
+        data for that device is cleared on the broker side too, so the
+        manager must not show stale DPS / live status / last-seen entries
+        after the device disappears — otherwise a device that transitions
+        to "missing" (cloud-only) would still display its prior runtime
+        information.
+        """
+        async with self._changed:
+            buckets = (self.bridge, self.dps, self.live_status, self.last_seen, self.last_response)
+            if not any(device_id in b for b in buckets):
+                return
+            for b in buckets:
+                b.pop(device_id, None)
+            self._bump()
+
     async def set_cloud_path(self, path: str) -> None:
         async with self._changed:
             self.cloud_path = path

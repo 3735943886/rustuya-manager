@@ -313,7 +313,30 @@ class BridgeClient:
                         code=code,
                         message=msg,
                     )
-                await self.state.record_response(target, parsed)
+                # Reactive state updates after action-result responses. The
+                # bridge republishes its retained `bridge/config` when devices
+                # change, but that handler is idempotent on templates and
+                # doesn't refresh device lists — we have to act on the action
+                # response ourselves.
+                action = parsed.get("action")
+                status_val = parsed.get("status")
+                if action == "remove" and status_val == "ok":
+                    # Drop the device from every per-device bucket. The bridge
+                    # has already cleared the retained MQTT data on its side,
+                    # so anything we kept (DPS / live / last-seen) is stale.
+                    rid = parsed.get("id") or target
+                    if rid and rid != "bridge":
+                        await self.state.remove_device(rid)
+                    else:
+                        await self.state.record_response(target, parsed)
+                elif action == "add" and status_val == "ok":
+                    # The add ack doesn't carry the device fields the bridge
+                    # ended up storing; ask for a status refresh so state.bridge
+                    # picks up the new/updated entry authoritatively.
+                    await self.state.record_response(target, parsed)
+                    asyncio.create_task(self.publish_command("status", target_id="bridge"))
+                else:
+                    await self.state.record_response(target, parsed)
         elif matched_as == "event":
             if isinstance(parsed, dict):
                 key = self._resolve_device_key(vars_, parsed)

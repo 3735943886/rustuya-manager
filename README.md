@@ -16,25 +16,59 @@ A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bri
 
 Requires Python 3.10+ and a running [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) reachable via MQTT.
 
+### Install (pipx)
+
 ```bash
-pip install git+https://github.com/3735943886/rustuya-manager
+sudo apt install -y pipx                          # if not already
+pipx ensurepath
+pipx install rustuya-manager
 ```
 
-Run (CLI):
+This installs into an isolated venv at `~/.local/pipx/venvs/rustuya-manager/` and drops a `rustuya-manager` shim into `~/.local/bin/`.
+
+### Run
+
+CLI mode (diff + event stream to stdout):
 ```bash
 rustuya-manager --broker mqtt://localhost:1883 --root rustuya
 ```
 
-Run (web UI on http://localhost:8080):
+Web UI mode:
 ```bash
-rustuya-manager --broker mqtt://localhost:1883 --root rustuya --web --port 8080
+rustuya-manager --broker mqtt://localhost:1883 --root rustuya \
+                --web --port 8080 --auth admin:CHANGE_ME
 ```
+Then open the URL printed at startup. The default bind is `127.0.0.1` so the UI is reachable only from the same machine. To open it to the LAN add `--host 0.0.0.0` — pair with a real `--auth user:pass`.
 
 Common flags:
-- `--cloud PATH` — Tuya devices JSON (default `tuyadevices.json`). If missing, the UI shows a drop-zone for upload.
+- `--cloud PATH` — Tuya devices JSON. If missing, the UI shows a drop-zone for upload.
 - `--broker URL` — `mqtt://[user:pass@]host:port`.
 - `--root TOPIC` — must match the bridge's `--mqtt-root-topic`.
-- `--web --host HOST --port PORT` — start the web server.
+- `--host`, `--port` — web server bind (default `127.0.0.1:8080`).
+- `--auth USER:PASS` — HTTP Basic auth for the web UI.
+
+### Run as a service (systemd, user-level, no sudo)
+
+```bash
+mkdir -p ~/.config/systemd/user ~/.local/share/rustuya-manager
+cp examples/rustuya-manager.service ~/.config/systemd/user/
+# edit the file — change --auth, --broker, --root to match your setup
+systemctl --user daemon-reload
+systemctl --user enable --now rustuya-manager
+journalctl --user -u rustuya-manager -f         # follow logs
+```
+
+To keep the service running after logout (one-time, the only sudo step):
+```bash
+sudo loginctl enable-linger $USER
+```
+
+### Update
+
+```bash
+pipx upgrade rustuya-manager
+systemctl --user restart rustuya-manager
+```
 
 ## Development
 

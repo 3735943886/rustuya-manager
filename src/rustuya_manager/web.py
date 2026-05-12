@@ -13,6 +13,7 @@ never disagree.
 
 from __future__ import annotations
 
+import base64
 import logging
 from pathlib import Path
 from typing import Any
@@ -95,13 +96,62 @@ def serialize_state(state: State) -> dict[str, Any]:
     }
 
 
+class _BasicAuthMiddleware:
+    """ASGI middleware that gates HTTP + WebSocket on a single Basic credential.
+
+    Lives at the ASGI level rather than as a FastAPI dependency because the
+    WebSocket upgrade handshake doesn't pass through dependency-injection —
+    the WS scope still carries the `authorization` header from the browser,
+    so a shared middleware can authenticate both surfaces uniformly.
+
+    Browser flow: hitting any page with no creds returns 401 +
+    WWW-Authenticate, the browser prompts and caches the credentials for the
+    origin, and every subsequent request (including the /ws upgrade) carries
+    them automatically. No cookie or session storage needed.
+    """
+
+    def __init__(self, app, expected_header: bytes) -> None:
+        self.app = app
+        self.expected_header = expected_header
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            headers = dict(scope.get("headers") or [])
+            if headers.get(b"authorization") != self.expected_header:
+                if scope["type"] == "http":
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": 401,
+                            "headers": [
+                                (b"www-authenticate", b'Basic realm="rustuya-manager"'),
+                                (b"content-type", b"text/plain"),
+                            ],
+                        }
+                    )
+                    await send({"type": "http.response.body", "body": b"Unauthorized\n"})
+                else:
+                    # 1008 = policy violation, the closest WS code to "auth failure".
+                    await send({"type": "websocket.close", "code": 1008})
+                return
+        await self.app(scope, receive, send)
+
+
 def build_app(
     state: State,
     client: BridgeClient,
     *,
     creds_path: str | None = None,
+    auth: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version="0.4.13")
+    app = FastAPI(title="rustuya-manager", version="0.1.0")
+    if auth:
+        if ":" not in auth:
+            raise ValueError("--auth must be in 'user:password' form")
+        expected = b"Basic " + base64.b64encode(auth.encode("utf-8"))
+        # add_middleware wraps via ASGI dispatch, which is what we want here
+        # (FastAPI's HTTPBasic dependency wouldn't cover WebSocket upgrades).
+        app.add_middleware(_BasicAuthMiddleware, expected_header=expected)
     # Hold client/state on app so dependency-injection or middleware can reach them
     app.state.bridge_state = state
     app.state.bridge_client = client

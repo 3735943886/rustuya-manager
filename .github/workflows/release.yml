@@ -1,0 +1,62 @@
+name: Release
+
+# Publishes the package to PyPI when a `v*` tag is pushed. Uses GitHub's
+# OIDC trusted-publishing flow — no API token stored in repo secrets.
+#
+# One-time setup on PyPI (https://pypi.org/manage/account/publishing/):
+#   - Project name: rustuya-manager
+#   - Owner:        3735943886
+#   - Repository:   rustuya-manager
+#   - Workflow:     release.yml
+# After that, `git tag v0.X.Y && git push origin v0.X.Y` triggers a publish.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# OIDC needs id-token write; no other write permissions required.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Build + publish to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi   # optional, harmless — useful if you later add
+                       # approval gates on the GitHub environment.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Sanity-check that the tag matches the package version
+        # `vX.Y.Z` tag must agree with pyproject's [project].version. Catches
+        # the easy mistake of bumping one but not the other before tagging.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG_VER=$(python -c "import tomllib; print(tomllib.loads(open('pyproject.toml','rb').read().decode())['project']['version'])")
+          if [ "$TAG" != "$PKG_VER" ]; then
+            echo "Tag v$TAG does not match pyproject version $PKG_VER" >&2
+            exit 1
+          fi
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip build
+
+      - name: Build sdist + wheel
+        run: |
+          python -m build --sdist --wheel
+
+      - name: Publish to PyPI
+        # OIDC: the action exchanges GitHub's id-token for a short-lived PyPI
+        # API token at publish time. PyPI must already have a "trusted
+        # publisher" entry for this (repo, workflow) pair.
+        uses: pypa/gh-action-pypi-publish@release/v1

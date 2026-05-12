@@ -96,6 +96,38 @@ async def _serve_web(host: str, port: int, app: Any) -> None:
     await server.serve()
 
 
+def _web_urls(host: str, port: int) -> list[str]:
+    """URLs to print at startup so the user can click straight from the terminal.
+
+    Most modern terminals auto-detect bare http:// URLs as clickable. We bias
+    toward the URLs that will actually work: when bound to 0.0.0.0, the
+    host's LAN IPs are reachable from other machines; when bound to a
+    specific address, only that one is shown.
+    """
+    import socket
+
+    port_s = str(port)
+    if host == "0.0.0.0":
+        urls = [f"http://localhost:{port_s}/"]
+        # Best-effort LAN discovery via the kernel's chosen outbound interface.
+        # Failures are fine — we still printed localhost.
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                probe.connect(("8.8.8.8", 80))
+                lan_ip = probe.getsockname()[0]
+            if lan_ip and not lan_ip.startswith("127."):
+                urls.append(f"http://{lan_ip}:{port_s}/")
+        except OSError:
+            pass
+        hostname = socket.gethostname()
+        if hostname and hostname not in ("localhost", "127.0.0.1"):
+            urls.append(f"http://{hostname}:{port_s}/")
+        return urls
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return [f"http://localhost:{port_s}/"]
+    return [f"http://{host}:{port_s}/"]
+
+
 async def run(args: argparse.Namespace) -> int:
     # When stdout is redirected to a pipe/file, Python block-buffers it; logger
     # flushes per record but `print()` doesn't. Make stdout line-buffered so the
@@ -171,8 +203,11 @@ async def run(args: argparse.Namespace) -> int:
         from .web import build_app
 
         creds_path = args.creds or str(cloud_path.parent / "tuyacreds.json")
-        app = build_app(state, client, creds_path=creds_path)
-        print(f"Serving web UI on http://{args.host}:{args.port}")
+        app = build_app(state, client, creds_path=creds_path, auth=args.auth)
+        for url in _web_urls(args.host, args.port):
+            print(f"Serving web UI on {url}")
+        if args.auth:
+            print(f"  (HTTP Basic auth enabled — user '{args.auth.split(':', 1)[0]}')")
         web_task = asyncio.create_task(_serve_web(args.host, args.port, app))
         # When the user hits Ctrl+C, stop both web and MQTT tasks.
         await stop_event.wait()
@@ -217,8 +252,26 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Start the FastAPI web server alongside the MQTT loop",
     )
-    parser.add_argument("--host", default="0.0.0.0", help="Web server host (--web only)")
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help=(
+            "Web server bind address (--web only). Defaults to 127.0.0.1 so the "
+            "UI is not exposed beyond localhost unless explicitly opened. Use "
+            "0.0.0.0 to bind on every interface (pair with --auth)."
+        ),
+    )
     parser.add_argument("--port", type=int, default=8080, help="Web server port (--web only)")
+    parser.add_argument(
+        "--auth",
+        default=None,
+        metavar="USER:PASS",
+        help=(
+            "Enable HTTP Basic auth for the web UI. Format: 'user:password' "
+            "(plain text — credentials never leave the manager process). "
+            "Strongly recommended whenever --host is not 127.0.0.1."
+        ),
+    )
     parser.add_argument(
         "--creds",
         default=None,

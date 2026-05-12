@@ -1,0 +1,35 @@
+# Drop this file at ~/.config/systemd/user/rustuya-manager.service
+# (after installing via `pipx install rustuya-manager`), then:
+#
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now rustuya-manager
+#
+# Optional, only needed once per machine if you want the manager to keep
+# running after you log out:
+#   sudo loginctl enable-linger $USER
+#
+# Edit the --broker/--root/--auth/--port flags below to match your setup.
+# The default --host is 127.0.0.1 (loopback only). To expose to the LAN add
+# `--host 0.0.0.0` and pair it with a real --auth.
+
+[Unit]
+Description=rustuya-manager web UI
+After=network.target
+
+[Service]
+Type=simple
+# %h expands to $HOME for the user running the service.
+ExecStart=%h/.local/bin/rustuya-manager \
+  --broker mqtt://localhost:1883 \
+  --root rustuya \
+  --web \
+  --port 8080 \
+  --auth admin:CHANGE_ME \
+  --cloud %h/.local/share/rustuya-manager/tuyadevices.json \
+  --creds %h/.local/share/rustuya-manager/tuyacreds.json
+WorkingDirectory=%h/.local/share/rustuya-manager
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

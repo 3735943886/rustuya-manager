@@ -118,3 +118,64 @@ class TestWebSocket:
                 msg = ws.receive_json()
                 assert msg["version"] == state.version
                 assert msg["templates"]["command"] == "rustuya/command"
+
+
+class TestBasicAuth:
+    """The auth middleware lives at the ASGI level so a single credential
+    pair gates both the HTTP surface AND the WebSocket handshake. Tests
+    confirm both, plus that omitting --auth keeps the app fully open."""
+
+    @staticmethod
+    def _make_app(auth: str | None):
+        state, client = _fixture_state()
+        return build_app(state, client, auth=auth)
+
+    def test_no_auth_means_no_gate(self):
+        with TestClient(self._make_app(None)) as tc:
+            assert tc.get("/api/state").status_code == 200
+
+    def test_missing_credentials_returns_401(self):
+        with TestClient(self._make_app("admin:secret")) as tc:
+            r = tc.get("/api/state")
+            assert r.status_code == 401
+            # WWW-Authenticate must be present so browsers prompt for creds.
+            assert r.headers.get("www-authenticate", "").lower().startswith("basic")
+
+    def test_correct_credentials_pass_through(self):
+        with TestClient(self._make_app("admin:secret")) as tc:
+            r = tc.get("/api/state", auth=("admin", "secret"))
+            assert r.status_code == 200
+
+    def test_wrong_credentials_return_401(self):
+        with TestClient(self._make_app("admin:secret")) as tc:
+            r = tc.get("/api/state", auth=("admin", "wrong"))
+            assert r.status_code == 401
+
+    def test_websocket_rejects_without_credentials(self):
+        # TestClient surfaces a closed-before-accept upgrade as an exception
+        # of varying concrete type depending on starlette/httpx versions; we
+        # only care that the WS handshake did NOT complete.
+        import pytest
+
+        with TestClient(self._make_app("admin:secret")) as tc:
+            with pytest.raises(Exception):  # noqa: B017 - upgrade-rejection shape varies
+                with tc.websocket_connect("/ws"):
+                    pass
+
+    def test_websocket_accepts_with_credentials(self):
+        # Basic auth on WS via httpx TestClient is set on the underlying
+        # transport — we encode the credential header explicitly because
+        # websocket_connect doesn't take an auth kwarg.
+        import base64
+
+        token = base64.b64encode(b"admin:secret").decode()
+        with TestClient(self._make_app("admin:secret")) as tc:
+            with tc.websocket_connect("/ws", headers={"Authorization": f"Basic {token}"}) as ws:
+                msg = ws.receive_json()
+                assert "version" in msg
+
+    def test_malformed_auth_arg_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="user:password"):
+            self._make_app("missing-colon")

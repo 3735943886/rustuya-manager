@@ -24,6 +24,14 @@ dependencies = [
     "rustuya>=0.2",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",  # FastAPI TestClient transitive
+    "ruff>=0.6",
+]
+
 [project.scripts]
 rustuya-manager = "rustuya_manager.cli:main"
 
@@ -36,3 +44,32 @@ rustuya_manager = ["templates/*.html", "static/*.js", "static/*.css"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["build", "dist"]
+
+[tool.ruff.lint]
+# E/W = pycodestyle, F = pyflakes, I = isort, B = bugbear, UP = pyupgrade.
+# Intentionally not enabling D (pydocstyle) or strict naming rules — the
+# codebase favors concise prose over rigid docstring shapes, and the
+# review-line cost of fighting those would outweigh the gain.
+select = ["E", "F", "I", "W", "B", "UP"]
+ignore = [
+    "E501",  # line length is already capped via formatter; ignoring the
+             # lint complement avoids noise on long string literals where
+             # wrapping would hurt readability (commit messages, MQTT
+             # topic templates with embedded {placeholders}, etc.).
+    "B008",  # FastAPI relies on Depends()/Body() as default values — the
+             # rule's "no function call in default" is a known false
+             # positive for that pattern.
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["rustuya_manager"]
+
+[tool.ruff.format]
+# Match the existing style of the codebase — double quotes are already
+# dominant, no need to flip everything for the sake of one tool's defaults.
+quote-style = "double"

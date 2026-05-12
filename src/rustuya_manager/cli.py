@@ -120,7 +120,7 @@ async def run(args: argparse.Namespace) -> int:
         print(f"Loaded {len(cloud)} cloud devices from {cloud_path}")
     else:
         print(f"NOTE: cloud file {cloud_path} not found — bridge devices will show as 'ungrouped'.")
-        print(f"      Upload tuyadevices.json via the web UI to enable diff/sync.")
+        print("      Upload tuyadevices.json via the web UI to enable diff/sync.")
 
     # Quiet-mode for the event callback when running with --web: stdout becomes
     # uvicorn's territory, so don't interleave per-event prints there.
@@ -181,7 +181,9 @@ async def run(args: argparse.Namespace) -> int:
         await client.stop()
         await asyncio.gather(web_task, run_task, return_exceptions=True)
     else:
-        print(f"Watching for events. Press Ctrl+C to exit. (bridge has {len(state.bridge)} devices)")
+        print(
+            f"Watching for events. Press Ctrl+C to exit. (bridge has {len(state.bridge)} devices)"
+        )
         await stop_event.wait()
         print("\nShutting down ...")
         await client.stop()
@@ -191,9 +193,7 @@ async def run(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="rustuya-manager")
-    parser.add_argument(
-        "-l", "--cloud", default="tuyadevices.json", help="Path to Tuya Cloud JSON"
-    )
+    parser.add_argument("-l", "--cloud", default="tuyadevices.json", help="Path to Tuya Cloud JSON")
     parser.add_argument(
         "-b",
         "--broker",
@@ -217,17 +217,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Start the FastAPI web server alongside the MQTT loop",
     )
-    parser.add_argument(
-        "--host", default="0.0.0.0", help="Web server host (--web only)"
-    )
-    parser.add_argument(
-        "--port", type=int, default=8080, help="Web server port (--web only)"
-    )
+    parser.add_argument("--host", default="0.0.0.0", help="Web server host (--web only)")
+    parser.add_argument("--port", type=int, default=8080, help="Web server port (--web only)")
     parser.add_argument(
         "--creds",
         default=None,
         help="Path to tuyacreds.json (tuyawizard's session cache). "
-             "Default: tuyacreds.json next to the cloud file.",
+        "Default: tuyacreds.json next to the cloud file.",
     )
     args = parser.parse_args(argv)
     try:

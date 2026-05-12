@@ -26,7 +26,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import paho.mqtt.client as mqtt
 import pyrustuyabridge as pb
@@ -70,7 +71,8 @@ class BridgeClient:
         state: State,
         *,
         client_id: str = "rustuya-manager",
-        on_event: Callable[[str, dict[str, str], Any, dict[str, Any] | None], Awaitable[None]] | None = None,
+        on_event: Callable[[str, dict[str, str], Any, dict[str, Any] | None], Awaitable[None]]
+        | None = None,
     ) -> None:
         host, port = _parse_broker_url(broker)
         self.host = host
@@ -254,9 +256,7 @@ class BridgeClient:
 
         await self._route(matched_as, vars_, parsed, payload, retain=retain)
 
-    def _resolve_device_key(
-        self, vars_: dict[str, str], parsed: dict[str, Any]
-    ) -> str | None:
+    def _resolve_device_key(self, vars_: dict[str, str], parsed: dict[str, Any]) -> str | None:
         """Find the device's bridge ID.
 
         Order: topic-extracted `id` → payload-merged `id` → reverse-lookup by
@@ -274,7 +274,9 @@ class BridgeClient:
                 return dev.id
         logger.debug(
             "Cannot resolve device id for event (vars=%s, parsed has id=%s, name=%s); skipping",
-            vars_, parsed.get("id"), name,
+            vars_,
+            parsed.get("id"),
+            name,
         )
         return None
 
@@ -296,9 +298,7 @@ class BridgeClient:
                 target = vars_.get("id", "bridge")
                 level = vars_.get("level", "")
                 if parsed.get("action") == "status" and isinstance(parsed.get("devices"), dict):
-                    bridge_devs = {
-                        did: Device.from_dict(d) for did, d in parsed["devices"].items()
-                    }
+                    bridge_devs = {did: Device.from_dict(d) for did, d in parsed["devices"].items()}
                     await self.state.set_bridge(bridge_devs)
                 # The bridge publishes per-device connection state under the
                 # `error` level: errorCode=0 means "Connection Successful",

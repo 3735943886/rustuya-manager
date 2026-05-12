@@ -47,7 +47,7 @@ class TestHTTP:
             assert "<title>rustuya-manager</title>" in r.text
             # Tailwind is pulled from CDN — no build step is the explicit goal
             assert "cdn.tailwindcss.com" in r.text
-            assert '/static/app.js' in r.text
+            assert "/static/app.js" in r.text
 
     def test_static_app_js_served(self):
         state, client = _fixture_state()
@@ -63,15 +63,15 @@ class TestHTTP:
         # Catches missing files and bad package-data globs in pyproject.
         state, client = _fixture_state()
         modules = {
-            "state.js":         "expandedIds",
-            "dom.js":           "escapeHtml",
-            "api.js":           "publishCommand",
-            "ws.js":            "WebSocket",
-            "cards.js":         "deviceCard",
-            "render.js":        "renderDevices",
-            "modal-sync.js":    "openSyncModal",
-            "modal-wizard.js":  "applyWizardSession",
-            "modal-device.js":  "openAddModal",
+            "state.js": "expandedIds",
+            "dom.js": "escapeHtml",
+            "api.js": "publishCommand",
+            "ws.js": "WebSocket",
+            "cards.js": "deviceCard",
+            "render.js": "renderDevices",
+            "modal-sync.js": "openSyncModal",
+            "modal-wizard.js": "applyWizardSession",
+            "modal-device.js": "openAddModal",
             "modal-confirm.js": "initConfirmModal",
         }
         with TestClient(build_app(state, client)) as tc:

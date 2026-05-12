@@ -10,11 +10,15 @@ import paho.mqtt.client as mqtt
 import pytest
 from fastapi.testclient import TestClient
 
-from rustuya_manager.cloud import CloudFormatError, load_cloud_file, parse_cloud_json, save_cloud_json
+from rustuya_manager.cloud import (
+    CloudFormatError,
+    load_cloud_file,
+    parse_cloud_json,
+    save_cloud_json,
+)
 from rustuya_manager.mqtt import BridgeClient
 from rustuya_manager.state import BridgeTemplates, State
 from rustuya_manager.web import build_app
-
 
 SAMPLE_LIST = [
     {"id": "bf-aaaa", "name": "lamp", "local_key": "k1", "ip": "192.168.1.10"},
@@ -71,6 +75,7 @@ class TestSaveLoad:
 # ─────────────────────────────────────────────────────────────────────────────
 # HTTP endpoint
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _fixture(tmp_path: Path | None = None) -> tuple[State, BridgeClient]:
     state = State()

@@ -18,13 +18,11 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import paho.mqtt.client as mqtt
 import pytest
 
 from rustuya_manager.mqtt import BRIDGE_CONFIG_TOPIC_TPL, BridgeClient
 from rustuya_manager.state import BridgeTemplates, State
-
-import paho.mqtt.client as mqtt
-
 
 # Sample bridge/config that mirrors the custom topology used in our e2e:
 # - root has a slash (myhome/tuya)
@@ -54,13 +52,17 @@ def _make_client(state: State | None = None) -> tuple[BridgeClient, MagicMock]:
     mock_paho.subscribe.return_value = (mqtt.MQTT_ERR_SUCCESS, 1)
     mock_paho.publish.return_value = MagicMock(rc=mqtt.MQTT_ERR_SUCCESS)
     client._client = mock_paho
-    client._loop = asyncio.get_event_loop()
+    # new_event_loop() rather than get_event_loop(): the latter raises in 3.12
+    # if no loop is set in MainThread, which happens when an earlier test
+    # (e.g. anything using asyncio.run) has already torn its loop down.
+    client._loop = asyncio.new_event_loop()
     return client, mock_paho
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # on_connect / re-subscribe
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestOnConnect:
     def test_first_connect_subscribes_bridge_config_only(self):
@@ -101,6 +103,7 @@ class TestOnConnect:
 # dispatch routing (custom templates)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestDispatch:
     @pytest.mark.asyncio
     async def test_bridge_config_redelivery_does_not_resubscribe(self):
@@ -115,14 +118,16 @@ class TestDispatch:
         state = State()
         client, paho = _make_client(state)
         cfg_topic = BRIDGE_CONFIG_TOPIC_TPL.replace("{root}", "myhome/tuya")
-        cfg_payload = json.dumps({
-            "mqtt_root_topic": "myhome/tuya",
-            "mqtt_command_topic": "{root}/command",
-            "mqtt_event_topic": "{root}/event/{type}/{id}",
-            "mqtt_message_topic": "{root}/{level}/{id}",
-            "mqtt_scanner_topic": "{root}/scanner",
-            "mqtt_payload_template": "{value}",
-        })
+        cfg_payload = json.dumps(
+            {
+                "mqtt_root_topic": "myhome/tuya",
+                "mqtt_command_topic": "{root}/command",
+                "mqtt_event_topic": "{root}/event/{type}/{id}",
+                "mqtt_message_topic": "{root}/{level}/{id}",
+                "mqtt_scanner_topic": "{root}/scanner",
+                "mqtt_payload_template": "{value}",
+            }
+        )
         await client._dispatch(cfg_topic, cfg_payload)
         first_subscribe_count = paho.subscribe.call_count
         first_publish_count = paho.publish.call_count
@@ -157,21 +162,26 @@ class TestDispatch:
     @pytest.mark.asyncio
     async def test_event_topic_updates_dps(self):
         state = State()
-        await state.set_templates(BridgeTemplates(
-            root="myhome/tuya",
-            command="myhome/tuya/cmd/{id}/{action}",
-            event="myhome/tuya/dev/{name}/dp/{dp}/state",
-            message="tuyalog/{level}/{id}",
-            scanner="myhome/tuya/scanner",
-            payload="{value}",
-        ))
+        await state.set_templates(
+            BridgeTemplates(
+                root="myhome/tuya",
+                command="myhome/tuya/cmd/{id}/{action}",
+                event="myhome/tuya/dev/{name}/dp/{dp}/state",
+                message="tuyalog/{level}/{id}",
+                scanner="myhome/tuya/scanner",
+                payload="{value}",
+            )
+        )
         # The event topic carries {name} but not {id}; the manager must
         # reverse-lookup the bridge's device by name to find the canonical
         # id. Pre-seed bridge state so the lookup resolves.
         from rustuya_manager.models import Device
-        await state.set_bridge({
-            "bf-kitchen-id": Device(id="bf-kitchen-id", name="kitchen", ip="1.2.3.4"),
-        })
+
+        await state.set_bridge(
+            {
+                "bf-kitchen-id": Device(id="bf-kitchen-id", name="kitchen", ip="1.2.3.4"),
+            }
+        )
         client, _ = _make_client(state)
         await client._dispatch("myhome/tuya/dev/kitchen/dp/1/state", "true")
         # DPS is keyed by the bridge's id (not the topic's name).
@@ -184,14 +194,16 @@ class TestDispatch:
         name yet, we used to create a phantom dps entry keyed by name. Now
         we skip cleanly — no merge, no fake key."""
         state = State()
-        await state.set_templates(BridgeTemplates(
-            root="myhome/tuya",
-            command="myhome/tuya/cmd/{id}/{action}",
-            event="myhome/tuya/dev/{name}/dp/{dp}/state",
-            message="tuyalog/{level}/{id}",
-            scanner="myhome/tuya/scanner",
-            payload="{value}",
-        ))
+        await state.set_templates(
+            BridgeTemplates(
+                root="myhome/tuya",
+                command="myhome/tuya/cmd/{id}/{action}",
+                event="myhome/tuya/dev/{name}/dp/{dp}/state",
+                message="tuyalog/{level}/{id}",
+                scanner="myhome/tuya/scanner",
+                payload="{value}",
+            )
+        )
         client, _ = _make_client(state)
         await client._dispatch("myhome/tuya/dev/unknown/dp/1/state", "true")
         assert state.dps == {}
@@ -199,25 +211,34 @@ class TestDispatch:
     @pytest.mark.asyncio
     async def test_message_topic_status_response_sets_bridge_devices(self):
         state = State()
-        await state.set_templates(BridgeTemplates(
-            root="myhome/tuya",
-            command="myhome/tuya/cmd/{id}/{action}",
-            event="myhome/tuya/dev/{name}/dp/{dp}/state",
-            message="tuyalog/{level}/{id}",
-            scanner="myhome/tuya/scanner",
-            payload="{value}",
-        ))
+        await state.set_templates(
+            BridgeTemplates(
+                root="myhome/tuya",
+                command="myhome/tuya/cmd/{id}/{action}",
+                event="myhome/tuya/dev/{name}/dp/{dp}/state",
+                message="tuyalog/{level}/{id}",
+                scanner="myhome/tuya/scanner",
+                payload="{value}",
+            )
+        )
         client, _ = _make_client(state)
         await client._dispatch(
             "tuyalog/response/bridge",
-            json.dumps({
-                "action": "status",
-                "devices": {
-                    "bf-aaaa": {"id": "bf-aaaa", "ip": "192.168.1.10", "key": "k1", "status": "online"},
-                },
-                "id": "bridge",
-                "status": "ok",
-            }),
+            json.dumps(
+                {
+                    "action": "status",
+                    "devices": {
+                        "bf-aaaa": {
+                            "id": "bf-aaaa",
+                            "ip": "192.168.1.10",
+                            "key": "k1",
+                            "status": "online",
+                        },
+                    },
+                    "id": "bridge",
+                    "status": "ok",
+                }
+            ),
         )
         assert "bf-aaaa" in state.bridge
         assert state.bridge["bf-aaaa"].ip == "192.168.1.10"
@@ -230,14 +251,16 @@ class TestDispatch:
         errorCode=0 means "Connection Successful" (online); any other code
         means the device is unreachable."""
         state = State()
-        await state.set_templates(BridgeTemplates(
-            root="rustuya",
-            command="rustuya/command",
-            event="rustuya/event/{type}/{id}",
-            message="rustuya/{level}/{id}",
-            scanner="rustuya/scanner",
-            payload="{value}",
-        ))
+        await state.set_templates(
+            BridgeTemplates(
+                root="rustuya",
+                command="rustuya/command",
+                event="rustuya/event/{type}/{id}",
+                message="rustuya/{level}/{id}",
+                scanner="rustuya/scanner",
+                payload="{value}",
+            )
+        )
         # Override the client root to match the templates above
         client, _ = _make_client(state)
         client.root = "rustuya"
@@ -253,12 +276,14 @@ class TestDispatch:
         # 2) Offline: errorCode 905
         await client._dispatch(
             "rustuya/error/devB",
-            json.dumps({
-                "errorCode": 905,
-                "errorMsg": "Network Error: Device Unreachable",
-                "id": "devB",
-                "payloadStr": "Device offline",
-            }),
+            json.dumps(
+                {
+                    "errorCode": 905,
+                    "errorMsg": "Network Error: Device Unreachable",
+                    "id": "devB",
+                    "payloadStr": "Device offline",
+                }
+            ),
         )
         assert state.live_status["devB"]["state"] == "offline"
         assert state.live_status["devB"]["code"] == 905
@@ -280,14 +305,16 @@ class TestDispatch:
         value's JSON key and reconstruct dps[dp]. Without this, live DPS
         chips never showed up on the test server."""
         state = State()
-        await state.set_templates(BridgeTemplates(
-            root="rustuya",
-            command="rustuya/command",
-            event="rustuya/event/{id}/{dp}",
-            message="rustuya/{level}/{id}",
-            scanner="rustuya/scanner",
-            payload='{"type": "{type}", "value": {value}}',
-        ))
+        await state.set_templates(
+            BridgeTemplates(
+                root="rustuya",
+                command="rustuya/command",
+                event="rustuya/event/{id}/{dp}",
+                message="rustuya/{level}/{id}",
+                scanner="rustuya/scanner",
+                payload='{"type": "{type}", "value": {value}}',
+            )
+        )
         client, _ = _make_client(state)
         client.root = "rustuya"
 
@@ -302,14 +329,16 @@ class TestDispatch:
     async def test_event_marks_device_online(self):
         """DPS events imply the device is alive — set live_status to online."""
         state = State()
-        await state.set_templates(BridgeTemplates(
-            root="rustuya",
-            command="rustuya/command",
-            event="rustuya/event/{type}/{id}",
-            message="rustuya/{level}/{id}",
-            scanner="rustuya/scanner",
-            payload="{value}",
-        ))
+        await state.set_templates(
+            BridgeTemplates(
+                root="rustuya",
+                command="rustuya/command",
+                event="rustuya/event/{type}/{id}",
+                message="rustuya/{level}/{id}",
+                scanner="rustuya/scanner",
+                payload="{value}",
+            )
+        )
         client, _ = _make_client(state)
         client.root = "rustuya"
         await client._dispatch("rustuya/event/active/devX", json.dumps({"dps": {"1": True}}))
@@ -319,14 +348,16 @@ class TestDispatch:
     async def test_empty_payload_skipped(self):
         """Retain-clearing publishes empty payload — must not crash or pollute state."""
         state = State()
-        await state.set_templates(BridgeTemplates(
-            root="myhome/tuya",
-            command="myhome/tuya/cmd/{id}/{action}",
-            event="myhome/tuya/dev/{name}/dp/{dp}/state",
-            message="tuyalog/{level}/{id}",
-            scanner="myhome/tuya/scanner",
-            payload="{value}",
-        ))
+        await state.set_templates(
+            BridgeTemplates(
+                root="myhome/tuya",
+                command="myhome/tuya/cmd/{id}/{action}",
+                event="myhome/tuya/dev/{name}/dp/{dp}/state",
+                message="tuyalog/{level}/{id}",
+                scanner="myhome/tuya/scanner",
+                payload="{value}",
+            )
+        )
         client, _ = _make_client(state)
         v_before = state.version
         await client._dispatch("myhome/tuya/dev/kitchen/dp/1/state", "")
@@ -349,18 +380,21 @@ class TestDispatch:
 # publish_command
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestPublishCommand:
     @pytest.mark.asyncio
     async def test_renders_topic_with_id_and_action(self):
         state = State()
-        await state.set_templates(BridgeTemplates(
-            root="myhome/tuya",
-            command="myhome/tuya/cmd/{id}/{action}",
-            event="myhome/tuya/dev/{name}/dp/{dp}/state",
-            message="tuyalog/{level}/{id}",
-            scanner="myhome/tuya/scanner",
-            payload="{value}",
-        ))
+        await state.set_templates(
+            BridgeTemplates(
+                root="myhome/tuya",
+                command="myhome/tuya/cmd/{id}/{action}",
+                event="myhome/tuya/dev/{name}/dp/{dp}/state",
+                message="tuyalog/{level}/{id}",
+                scanner="myhome/tuya/scanner",
+                payload="{value}",
+            )
+        )
         client, paho = _make_client(state)
         await client.publish_command("status", target_id="bridge")
         paho.publish.assert_called_once()
@@ -373,14 +407,16 @@ class TestPublishCommand:
     async def test_command_without_vars_in_topic(self):
         """Default command_topic is `{root}/command` with no vars — vars go in payload."""
         state = State()
-        await state.set_templates(BridgeTemplates(
-            root="rustuya",
-            command="rustuya/command",
-            event="rustuya/event/{type}/{id}",
-            message="rustuya/{level}/{id}",
-            scanner="rustuya/scanner",
-            payload="{value}",
-        ))
+        await state.set_templates(
+            BridgeTemplates(
+                root="rustuya",
+                command="rustuya/command",
+                event="rustuya/event/{type}/{id}",
+                message="rustuya/{level}/{id}",
+                scanner="rustuya/scanner",
+                payload="{value}",
+            )
+        )
         client, paho = _make_client(state)
         await client.publish_command("add", target_id="bf123", extra={"key": "k", "ip": "1.2.3.4"})
         topic, body = paho.publish.call_args.args[:2]

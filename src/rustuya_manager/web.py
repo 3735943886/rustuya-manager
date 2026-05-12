@@ -13,7 +13,6 @@ never disagree.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -23,8 +22,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
-from .mqtt import BridgeClient
 from .models import Device
+from .mqtt import BridgeClient
 from .state import State
 from .wizard import WizardManager
 
@@ -62,9 +61,7 @@ def serialize_state(state: State) -> dict[str, Any]:
         diff = state.diff()
         diff_payload = {
             "synced": [d.id for d in diff.synced],
-            "mismatched": [
-                {"id": d.id, "reasons": reasons} for d, reasons in diff.mismatched
-            ],
+            "mismatched": [{"id": d.id, "reasons": reasons} for d, reasons in diff.mismatched],
             "missing": [d.id for d in diff.missing],
             "orphaned": [d.id for d in diff.orphaned],
         }
@@ -114,6 +111,7 @@ def build_app(
     # upload, and persist to disk if a cloud_path is known.
     async def _on_wizard_devices(devices: list[dict[str, Any]]) -> None:
         import json as _json
+
         raw = _json.dumps(devices, ensure_ascii=False)
         try:
             parsed = parse_cloud_json(raw)
@@ -199,11 +197,7 @@ def build_app(
             raise HTTPException(400, "missing 'action'")
         target_id = body.get("id")
         target_name = body.get("name")
-        extra = {
-            k: v
-            for k, v in body.items()
-            if k not in ("action", "id", "name")
-        }
+        extra = {k: v for k, v in body.items() if k not in ("action", "id", "name")}
         try:
             await client.publish_command(
                 action,

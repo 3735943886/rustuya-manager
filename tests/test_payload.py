@@ -7,8 +7,6 @@ parser regresses, the failing test names the exact case.
 
 from __future__ import annotations
 
-import pytest
-
 from rustuya_manager.payload import (
     parse_payload_with_template,
     validate_payload_template,
@@ -33,9 +31,7 @@ class TestParse:
     def test_users_actual_template(self):
         # The exact template the test-server bridge has
         tpl = '{"type": "{type}", "value": {value}}'
-        captures = parse_payload_with_template(
-            '{"type": "active", "value": 13986}', tpl
-        )
+        captures = parse_payload_with_template('{"type": "active", "value": 13986}', tpl)
         assert captures == {"type": "active", "value": 13986}
 
     def test_value_is_array(self):
@@ -47,15 +43,11 @@ class TestParse:
         assert captures == {"type": "passive", "value": ["abc", "def"]}
 
     def test_value_is_nested_object(self):
-        captures = parse_payload_with_template(
-            '{"v":{"a":{"b":1}}}', '{"v":{value}}'
-        )
+        captures = parse_payload_with_template('{"v":{"a":{"b":1}}}', '{"v":{value}}')
         assert captures == {"value": {"a": {"b": 1}}}
 
     def test_bare_dps(self):
-        captures = parse_payload_with_template(
-            '{"1":true,"2":42}', "{dps}"
-        )
+        captures = parse_payload_with_template('{"1":true,"2":42}', "{dps}")
         assert captures == {"dps": {"1": True, "2": 42}}
 
     def test_object_wrapped_dps(self):
@@ -84,21 +76,18 @@ class TestParse:
 
     def test_structure_mismatch_returns_none(self):
         # Template has 2 keys, payload has different keys
-        assert parse_payload_with_template(
-            '{"foo":1}', '{"v":{value}}'
-        ) is None
+        assert parse_payload_with_template('{"foo":1}', '{"v":{value}}') is None
 
     def test_literal_mismatch_returns_none(self):
         # Template has a fixed string at a position; payload differs
-        assert parse_payload_with_template(
-            '{"type":"OTHER","v":1}', '{"type":"FIXED","v":{value}}'
-        ) is None
+        assert (
+            parse_payload_with_template('{"type":"OTHER","v":1}', '{"type":"FIXED","v":{value}}')
+            is None
+        )
 
     def test_no_placeholders_returns_none(self):
         # A template without recognized placeholders has nothing to capture
-        assert parse_payload_with_template(
-            '{"v":1}', '{"v":1}'
-        ) is None
+        assert parse_payload_with_template('{"v":1}', '{"v":1}') is None
 
     def test_invalid_payload_returns_none(self):
         assert parse_payload_with_template("not-json", "{value}") is None
@@ -106,9 +95,7 @@ class TestParse:
     def test_non_json_template_returns_none(self):
         # Template that isn't valid JSON even with sentinel substitution
         # (e.g. text-style `key={value};other={timestamp}`)
-        assert parse_payload_with_template(
-            "v=1;t=2", "v={value};t={timestamp}"
-        ) is None
+        assert parse_payload_with_template("v=1;t=2", "v={value};t={timestamp}") is None
 
 
 class TestValidate:

@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from rustuya_manager.models import Device
 from rustuya_manager.state import State
 
@@ -89,7 +87,13 @@ class TestRemoveDevice:
         v0 = state.version
         await state.remove_device("x")
 
-        for bucket in (state.bridge, state.dps, state.live_status, state.last_seen, state.last_response):
+        for bucket in (
+            state.bridge,
+            state.dps,
+            state.live_status,
+            state.last_seen,
+            state.last_response,
+        ):
             assert "x" not in bucket
         # Unrelated entries untouched
         assert "keep" in state.bridge

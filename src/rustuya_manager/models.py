@@ -77,9 +77,7 @@ class Device:
         mismatches: list[str] = []
         if self.type == "WiFi":
             if self.key and other.key and self.key != other.key:
-                mismatches.append(
-                    f"KEY: {self.shorten(other.key)} -> {self.shorten(self.key)}"
-                )
+                mismatches.append(f"KEY: {self.shorten(other.key)} -> {self.shorten(self.key)}")
             if other.ip != "Auto" and self.ip != other.ip:
                 mismatches.append(f"IP: {other.ip} -> {self.ip}")
             if other.version != "Auto" and self.version != other.version:

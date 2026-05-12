@@ -11,9 +11,13 @@ highest-risk area:
   6. After forcing a paho disconnect + reconnect, subscriptions still work
      (the runtime wildcards must be re-played by on_connect)
 
-The test is skipped if:
-  - the bridge binary is not at the expected debug path
-  - mosquitto is not reachable on localhost:1883
+The bridge under test is `pyrustuyabridge.PyBridgeServer` running in a daemon
+thread — same Rust core as the bridge binary, just embedded via the Python
+bindings instead of spawned as a subprocess. That keeps CI free of the Rust
+toolchain while still exercising the byte-identical MQTT/parsing path the
+production bridge uses.
+
+The whole module skips if mosquitto is not reachable on localhost:1883.
 """
 
 from __future__ import annotations
@@ -23,16 +27,15 @@ import os
 import shutil
 import socket
 import subprocess
+import threading
 import time
 from pathlib import Path
 
+import pyrustuyabridge as pb
 import pytest
 
 from rustuya_manager.mqtt import BridgeClient
 from rustuya_manager.state import State
-
-
-BRIDGE_BIN = Path(__file__).resolve().parents[2] / "rustuya-bridge" / "target" / "debug" / "rustuya-bridge"
 
 
 def _broker_reachable() -> bool:
@@ -47,36 +50,35 @@ def _broker_reachable() -> bool:
 
 
 pytestmark = [
-    pytest.mark.skipif(not BRIDGE_BIN.exists(), reason="bridge debug binary not built"),
     pytest.mark.skipif(not _broker_reachable(), reason="no MQTT broker on localhost:1883"),
     pytest.mark.skipif(not shutil.which("mosquitto_pub"), reason="mosquitto_pub not installed"),
 ]
 
-# Use a dedicated root + ports per test to avoid clobbering anything else
-# running on the box. Each test gets its own root by using a random suffix.
+# Use a dedicated root per test to avoid clobbering anything else running on
+# the box. PID + epoch suffix prevents a re-run from colliding with leftover
+# retained state from a previous run.
 ROOT = "rustuya_mgr_e2e_test"
 
 
-def _spawn_bridge(root: str, tmp_path: Path) -> subprocess.Popen:
-    """Start a bridge with deliberately-custom templates so we exercise the
-    binding-backed parsing path (not the default templates)."""
+def _spawn_bridge(root: str, tmp_path: Path) -> tuple[object, threading.Thread]:
+    """Start an embedded bridge with deliberately-custom templates so we
+    exercise the binding-backed parsing path (not the default templates)."""
     state_file = tmp_path / "bridge_state.json"
-    log_file = tmp_path / "bridge.log"
-    proc = subprocess.Popen(
-        [
-            str(BRIDGE_BIN),
-            "--mqtt-broker", "mqtt://localhost:1883",
-            "--mqtt-root-topic", root,
-            "--mqtt-event-topic", "{root}/dev/{name}/dp/{dp}/state",
-            "--mqtt-message-topic", "tuyalog_test/{level}/{id}",
-            "--mqtt-command-topic", "{root}/cmd/{id}/{action}",
-            "--state-file", str(state_file),
-            "--log-level", "info",
-        ],
-        stdout=log_file.open("w"),
-        stderr=subprocess.STDOUT,
+    server = pb.PyBridgeServer(
+        mqtt_broker="mqtt://localhost:1883",
+        mqtt_root_topic=root,
+        mqtt_event_topic="{root}/dev/{name}/dp/{dp}/state",
+        mqtt_message_topic="tuyalog_test/{level}/{id}",
+        mqtt_command_topic="{root}/cmd/{id}/{action}",
+        state_file=str(state_file),
+        log_level="warn",
     )
-    return proc
+    # `start` blocks until close()/SIGINT — run it on a daemon thread so the
+    # test stays in control. Daemon ensures any leaked instance dies with
+    # the pytest process; teardown still tries a clean close() first.
+    thread = threading.Thread(target=server.start, daemon=True)
+    thread.start()
+    return server, thread
 
 
 def _wait_for_retained_config(root: str, timeout: float = 5.0) -> bool:
@@ -86,9 +88,15 @@ def _wait_for_retained_config(root: str, timeout: float = 5.0) -> bool:
         try:
             out = subprocess.check_output(
                 [
-                    "mosquitto_sub", "-h", "localhost",
-                    "-t", f"{root}/bridge/config",
-                    "-C", "1", "-W", "1",
+                    "mosquitto_sub",
+                    "-h",
+                    "localhost",
+                    "-t",
+                    f"{root}/bridge/config",
+                    "-C",
+                    "1",
+                    "-W",
+                    "1",
                 ],
                 timeout=2,
             )
@@ -100,34 +108,40 @@ def _wait_for_retained_config(root: str, timeout: float = 5.0) -> bool:
     return False
 
 
-def _kill_bridge(proc: subprocess.Popen) -> None:
-    if proc.poll() is None:
-        proc.terminate()
-        try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+def _kill_bridge(server: object, thread: threading.Thread) -> None:
+    # `close()` schedules cleanup on an asyncio loop, so we wrap it in a
+    # short-lived loop — without that it raises "no running event loop".
+    try:
+        asyncio.run(_close_async(server))
+    except Exception:
+        pass
+    thread.join(timeout=3)
+
+
+async def _close_async(server: object) -> None:
+    server.close()
+    # Give the bridge's tokio runtime a beat to flush its cleanup before
+    # the asyncio loop tears down underneath it.
+    await asyncio.sleep(0.05)
 
 
 @pytest.fixture
 def bridge(tmp_path):
     """Per-test bridge with a unique root, cleaned up on teardown."""
-    # Append PID + time to avoid duplicate-instance detection from
-    # leftover broker state across runs.
     root = f"{ROOT}_{os.getpid()}_{int(time.time())}"
     # Pre-clean the retained config so any stale state doesn't trip detection.
     subprocess.run(
         ["mosquitto_pub", "-h", "localhost", "-t", f"{root}/bridge/config", "-r", "-n"],
         check=False,
     )
-    proc = _spawn_bridge(root, tmp_path)
+    server, thread = _spawn_bridge(root, tmp_path)
     try:
         assert _wait_for_retained_config(root), "bridge did not publish retained config in time"
         yield root
     finally:
-        _kill_bridge(proc)
-        # Clear the retained config so the next test (or run) starts clean.
+        _kill_bridge(server, thread)
+        # Belt and braces: clear the retained config explicitly so even a
+        # half-closed server doesn't leave a poisoned topic behind.
         subprocess.run(
             ["mosquitto_pub", "-h", "localhost", "-t", f"{root}/bridge/config", "-r", "-n"],
             check=False,
@@ -150,6 +164,7 @@ async def _run_client_briefly(client: BridgeClient, fn) -> None:
 # Tests
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 async def test_bootstrap_resolves_custom_templates(bridge: str):
     state = State()
     client = BridgeClient(broker="mqtt://localhost:1883", root=bridge, state=state)
@@ -169,9 +184,15 @@ async def test_add_device_propagates_to_bridge_state(bridge: str):
     async def check():
         # Use the bridge's custom command topic to add a device
         subprocess.run(
-            ["mosquitto_pub", "-h", "localhost",
-             "-t", f"{bridge}/cmd/bf-test-1/add",
-             "-m", '{"key":"k1234567890abcdef","ip":"10.0.0.1"}'],
+            [
+                "mosquitto_pub",
+                "-h",
+                "localhost",
+                "-t",
+                f"{bridge}/cmd/bf-test-1/add",
+                "-m",
+                '{"key":"k1234567890abcdef","ip":"10.0.0.1"}',
+            ],
             check=True,
         )
         # Trigger a status query so the bridge replies with the device list
@@ -197,9 +218,15 @@ async def test_dps_event_arrives_through_custom_topic(bridge: str):
         # device `name` the manager has never seen — _resolve_device_key
         # correctly drops such events to avoid phantom DPS entries.
         subprocess.run(
-            ["mosquitto_pub", "-h", "localhost",
-             "-t", f"{bridge}/cmd/bf-test-evt/add",
-             "-m", '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"living_room"}'],
+            [
+                "mosquitto_pub",
+                "-h",
+                "localhost",
+                "-t",
+                f"{bridge}/cmd/bf-test-evt/add",
+                "-m",
+                '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"living_room"}',
+            ],
             check=True,
         )
         await client.publish_command("status", target_id="bridge")
@@ -217,9 +244,15 @@ async def test_dps_event_arrives_through_custom_topic(bridge: str):
         # pipeline accepts the topic+payload pair and resolves `name` →
         # the bridge id `bf-test-evt`.
         subprocess.run(
-            ["mosquitto_pub", "-h", "localhost",
-             "-t", f"{bridge}/dev/living_room/dp/1/state",
-             "-m", "true"],
+            [
+                "mosquitto_pub",
+                "-h",
+                "localhost",
+                "-t",
+                f"{bridge}/dev/living_room/dp/1/state",
+                "-m",
+                "true",
+            ],
             check=True,
         )
         for _ in range(30):
@@ -257,9 +290,15 @@ async def test_reconnect_preserves_subscriptions(bridge: str):
         # reconnect would be silently dropped at _resolve_device_key, masking
         # the actual subscription-survival question this test is asking.
         subprocess.run(
-            ["mosquitto_pub", "-h", "localhost",
-             "-t", f"{bridge}/cmd/bf-reconnect-dev/add",
-             "-m", '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"post_reconnect_dev"}'],
+            [
+                "mosquitto_pub",
+                "-h",
+                "localhost",
+                "-t",
+                f"{bridge}/cmd/bf-reconnect-dev/add",
+                "-m",
+                '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"post_reconnect_dev"}',
+            ],
             check=True,
         )
         await client.publish_command("status", target_id="bridge")
@@ -286,12 +325,18 @@ async def test_reconnect_preserves_subscriptions(bridge: str):
 
         # Auto-reconnect has min_delay=1s; give it plenty of slack.
         # We poll for the reconnect by trying a round-trip with a fresh event.
-        for attempt in range(40):
+        for _attempt in range(40):
             await asyncio.sleep(0.25)
             subprocess.run(
-                ["mosquitto_pub", "-h", "localhost",
-                 "-t", f"{bridge}/dev/post_reconnect_dev/dp/7/state",
-                 "-m", "42"],
+                [
+                    "mosquitto_pub",
+                    "-h",
+                    "localhost",
+                    "-t",
+                    f"{bridge}/dev/post_reconnect_dev/dp/7/state",
+                    "-m",
+                    "42",
+                ],
                 check=True,
             )
             await asyncio.sleep(0.1)
@@ -317,9 +362,15 @@ async def test_remove_clears_per_device_state(bridge: str):
         # Add a device with a name, populate runtime state via a DPS event,
         # confirm the manager has full per-device state for it.
         subprocess.run(
-            ["mosquitto_pub", "-h", "localhost",
-             "-t", f"{bridge}/cmd/bf-rm-dev/add",
-             "-m", '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"removable"}'],
+            [
+                "mosquitto_pub",
+                "-h",
+                "localhost",
+                "-t",
+                f"{bridge}/cmd/bf-rm-dev/add",
+                "-m",
+                '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"removable"}',
+            ],
             check=True,
         )
         await client.publish_command("status", target_id="bridge")
@@ -330,9 +381,15 @@ async def test_remove_clears_per_device_state(bridge: str):
         assert "bf-rm-dev" in state.bridge
 
         subprocess.run(
-            ["mosquitto_pub", "-h", "localhost",
-             "-t", f"{bridge}/dev/removable/dp/1/state",
-             "-m", "true"],
+            [
+                "mosquitto_pub",
+                "-h",
+                "localhost",
+                "-t",
+                f"{bridge}/dev/removable/dp/1/state",
+                "-m",
+                "true",
+            ],
             check=True,
         )
         for _ in range(30):

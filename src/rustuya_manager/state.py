@@ -83,14 +83,18 @@ class State:
             self.templates = t
             self._bump()
 
-    async def merge_dps(self, device_id: str, new_dps: dict[str, Any], at: float | None = None) -> None:
+    async def merge_dps(
+        self, device_id: str, new_dps: dict[str, Any], at: float | None = None
+    ) -> None:
         async with self._changed:
             existing = self.dps.setdefault(device_id, {})
             existing.update(new_dps)
             self.last_seen[device_id] = at if at is not None else _now()
             self._bump()
 
-    async def record_response(self, target_id: str, response: dict[str, Any], at: float | None = None) -> None:
+    async def record_response(
+        self, target_id: str, response: dict[str, Any], at: float | None = None
+    ) -> None:
         async with self._changed:
             self.last_response[target_id] = response
             self.last_seen[target_id] = at if at is not None else _now()

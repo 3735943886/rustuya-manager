@@ -12,7 +12,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import paho.mqtt.client as mqtt
-import pytest
 from fastapi.testclient import TestClient
 
 from rustuya_manager.mqtt import BridgeClient
@@ -20,16 +19,20 @@ from rustuya_manager.state import BridgeTemplates, State
 from rustuya_manager.web import build_app
 from rustuya_manager.wizard import WizardManager, WizardState
 
-
 SAMPLE_DEVICES = [
     {"id": "bf-aaaa", "name": "lamp", "local_key": "k1", "ip": "192.168.1.10"},
     {"id": "bf-bbbb", "name": "switch", "local_key": "k2", "ip": "192.168.1.11"},
 ]
 
 
-def _make_mock_wizard(*, login_returns=True, fetch_returns=None,
-                     qr_url="tuyaSmart--qrLogin?token=abc",
-                     fire_qr=True, login_delay=0.0):
+def _make_mock_wizard(
+    *,
+    login_returns=True,
+    fetch_returns=None,
+    qr_url="tuyaSmart--qrLogin?token=abc",
+    fire_qr=True,
+    login_delay=0.0,
+):
     """Returns a mock TuyaWizard whose `login_auto(user_code, creds, qr_cb)`
     matches the upstream contract: optionally fires qr_cb (when the saved-creds
     path falls back to QR), then returns True/False. `fire_qr=False` simulates
@@ -42,6 +45,7 @@ def _make_mock_wizard(*, login_returns=True, fetch_returns=None,
     def login_auto(user_code, creds, qr_callback):
         if login_delay:
             import time
+
             time.sleep(login_delay)
         if fire_qr and qr_callback is not None:
             qr_callback(qr_url)
@@ -55,6 +59,7 @@ def _make_mock_wizard(*, login_returns=True, fetch_returns=None,
 # ─────────────────────────────────────────────────────────────────────────────
 # WizardManager — direct tests with TuyaWizard mocked
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestWizardManager:
     async def test_happy_path_calls_callback(self, tmp_path: Path):
@@ -149,8 +154,10 @@ class TestWizardManager:
             postprocess_mode="parent",
         )
         mock_wizard = _make_mock_wizard()
-        with patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard), \
-             patch("rustuya_manager.wizard.postprocess_devices") as pp:
+        with (
+            patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard),
+            patch("rustuya_manager.wizard.postprocess_devices") as pp,
+        ):
             await wm.start()
             await wm._task
         pp.assert_called_once()
@@ -160,6 +167,7 @@ class TestWizardManager:
 # ─────────────────────────────────────────────────────────────────────────────
 # /api/wizard/* endpoints (full app, sync TestClient)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _build_app_fixture(tmp_path: Path):
     state = State()
@@ -192,8 +200,10 @@ class TestWizardEndpoints:
         """End-to-end: POST /start → poll /status → verify devices loaded."""
         state, client, creds = _build_app_fixture(tmp_path)
         mock_wizard = _make_mock_wizard()
-        with patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard), \
-             TestClient(build_app(state, client, creds_path=creds)) as tc:
+        with (
+            patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard),
+            TestClient(build_app(state, client, creds_path=creds)) as tc,
+        ):
             # Bypass postprocess scan (no network in tests)
             tc.app.state.wizard.postprocess_mode = ""
 
@@ -201,6 +211,7 @@ class TestWizardEndpoints:
             assert r.status_code == 200
             # Poll until we converge to done or error
             import time
+
             for _ in range(40):
                 body = tc.get("/api/wizard/status").json()
                 if body["state"] in ("done", "error"):

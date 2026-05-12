@@ -19,7 +19,6 @@ Note on the `{root}` placeholder:
 
 import pyrustuyabridge as pb
 
-
 ROOT = "rustuya"
 
 
@@ -31,6 +30,7 @@ def _resolve_root(template: str, root: str = ROOT) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # tpl_to_wildcard
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestTplToWildcard:
     def test_default_event_template(self):
@@ -44,15 +44,11 @@ class TestTplToWildcard:
 
     def test_per_dp_event_template(self):
         # Regression: 71e001d — `mqtt-event-topic` with `{name}/{dp}/state` form
-        assert (
-            pb.tpl_to_wildcard("tuya/{name}/{dp}/state", ROOT)
-            == "tuya/+/+/state"
-        )
+        assert pb.tpl_to_wildcard("tuya/{name}/{dp}/state", ROOT) == "tuya/+/+/state"
 
     def test_custom_root_prefix(self):
         assert (
-            pb.tpl_to_wildcard("{root}/event/{type}/{id}", "myhome/tuya")
-            == "myhome/tuya/event/+/+"
+            pb.tpl_to_wildcard("{root}/event/{type}/{id}", "myhome/tuya") == "myhome/tuya/event/+/+"
         )
 
     def test_command_with_id(self):
@@ -68,6 +64,7 @@ class TestTplToWildcard:
 # ─────────────────────────────────────────────────────────────────────────────
 # match_topic
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestMatchTopic:
     def test_event_topic_extracts_type_and_id(self):
@@ -127,6 +124,7 @@ class TestMatchTopic:
 # render_template
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestRenderTemplate:
     def test_substitutes_known_keys(self):
         assert (
@@ -168,6 +166,7 @@ class TestRenderTemplate:
 # ─────────────────────────────────────────────────────────────────────────────
 # parse_payload
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestParsePayload:
     def test_json_object_merges_topic_vars(self):
@@ -248,6 +247,7 @@ class TestParsePayload:
 # ─────────────────────────────────────────────────────────────────────────────
 # Integration: full manager-style pipeline on a custom user template
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestIntegration:
     """Simulates the manager's full subscribe-and-decode flow on a custom topic

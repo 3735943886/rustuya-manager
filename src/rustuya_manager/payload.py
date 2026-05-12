@@ -47,7 +47,7 @@ KNOWN_VARS = frozenset(
 # Either form is replaced with `"<sentinel>"` so the result is always a
 # JSON string at parse time.
 _PLACEHOLDER_RE = re.compile(
-    r'"\{(' + "|".join(KNOWN_VARS) + r')\}"|\{(' + "|".join(KNOWN_VARS) + r')\}'
+    r'"\{(' + "|".join(KNOWN_VARS) + r')\}"|\{(' + "|".join(KNOWN_VARS) + r")\}"
 )
 
 
@@ -79,7 +79,7 @@ def _walk(template: Any, payload: Any, sentinels: dict[str, str], out: dict[str,
     if isinstance(template, list) and isinstance(payload, list):
         if len(template) != len(payload):
             return False
-        return all(_walk(t, p, sentinels, out) for t, p in zip(template, payload))
+        return all(_walk(t, p, sentinels, out) for t, p in zip(template, payload, strict=True))
     # Primitive — must match exactly (sentinels already short-circuited above).
     return template == payload
 
@@ -127,7 +127,7 @@ def validate_payload_template(template: str | None) -> tuple[bool, str]:
             f"Payload template '{template}' isn't valid JSON after placeholder "
             f"substitution ({e.msg}). Manager can't extract DPS values from events. "
             "Use a JSON shape — e.g. '{value}' (default), '{\"v\":{value}}', "
-            "'{dps}', or '{\"id\":\"{id}\",\"data\":{dps}}' — in the bridge's "
+            '\'{dps}\', or \'{"id":"{id}","data":{dps}}\' — in the bridge\'s '
             "mqtt_payload_template."
         )
     return True, "Template recognized."

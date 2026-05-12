@@ -28,9 +28,10 @@ import io
 import json
 import logging
 import os
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import qrcode
 import qrcode.image.svg
@@ -137,7 +138,7 @@ class WizardManager:
         if not self.creds_path or not os.path.exists(self.creds_path):
             return None
         try:
-            with open(self.creds_path, "r", encoding="utf-8") as f:
+            with open(self.creds_path, encoding="utf-8") as f:
                 info = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
             logger.warning("Could not read user_code from %s: %s", self.creds_path, e)

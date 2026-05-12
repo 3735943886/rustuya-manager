@@ -1,14 +1,25 @@
 name: Release
 
-# Publishes the package to PyPI when a `v*` tag is pushed. Uses GitHub's
-# OIDC trusted-publishing flow — no API token stored in repo secrets.
+# Builds + publishes the package when a `v*` tag is pushed. Routes based on
+# the tag shape:
+#   v0.1.0       → PyPI         (plain MAJOR.MINOR.PATCH = final release)
+#   v0.1.0rc1    → TestPyPI     (any PEP 440 pre-release/dev/post suffix)
+#   v0.1.0a3     → TestPyPI
+#   v0.1.0.dev2  → TestPyPI
 #
-# One-time setup on PyPI (https://pypi.org/manage/account/publishing/):
-#   - Project name: rustuya-manager
-#   - Owner:        3735943886
-#   - Repository:   rustuya-manager
-#   - Workflow:     release.yml
-# After that, `git tag v0.X.Y && git push origin v0.X.Y` triggers a publish.
+# PyPI refuses re-uploads of the same version forever, so the rc cycle on
+# TestPyPI is the safety net: tag rc1, verify the wheel installs, fix any
+# issues, then tag the plain version for the real index.
+#
+# OIDC trusted publishing — no API tokens stored in repo secrets. One-time
+# setup needed on BOTH registries (the trust DBs are separate):
+#   https://pypi.org/manage/account/publishing/
+#   https://test.pypi.org/manage/account/publishing/
+# Same entry on each:
+#   Project name: rustuya-manager
+#   Owner:        3735943886
+#   Repository:   rustuya-manager
+#   Workflow:     release.yml
 
 on:
   push:
@@ -22,10 +33,8 @@ permissions:
 
 jobs:
   publish:
-    name: Build + publish to PyPI
+    name: Build + publish
     runs-on: ubuntu-latest
-    environment: pypi   # optional, harmless — useful if you later add
-                       # approval gates on the GitHub environment.
 
     steps:
       - uses: actions/checkout@v4
@@ -37,8 +46,8 @@ jobs:
           cache: pip
 
       - name: Sanity-check that the tag matches the package version
-        # `vX.Y.Z` tag must agree with pyproject's [project].version. Catches
-        # the easy mistake of bumping one but not the other before tagging.
+        # The tag (minus its leading `v`) must equal pyproject's [project].version.
+        # Catches the easy mistake of bumping one but not the other before tagging.
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           PKG_VER=$(python -c "import tomllib; print(tomllib.loads(open('pyproject.toml','rb').read().decode())['project']['version'])")
@@ -46,6 +55,21 @@ jobs:
             echo "Tag v$TAG does not match pyproject version $PKG_VER" >&2
             exit 1
           fi
+
+      - name: Decide TestPyPI vs PyPI from the tag shape
+        id: target
+        # Plain `MAJOR.MINOR.PATCH` → PyPI (final release).
+        # Anything else (rc, a, b, dev, post, .dev0, etc.) → TestPyPI.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          if [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "url=https://upload.pypi.org/legacy/" >> "$GITHUB_OUTPUT"
+            echo "name=PyPI" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=https://test.pypi.org/legacy/" >> "$GITHUB_OUTPUT"
+            echo "name=TestPyPI" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Target: $TAG → $(grep '^name=' "$GITHUB_OUTPUT" | tail -1)"
 
       - name: Install build tooling
         run: |
@@ -55,8 +79,7 @@ jobs:
         run: |
           python -m build --sdist --wheel
 
-      - name: Publish to PyPI
-        # OIDC: the action exchanges GitHub's id-token for a short-lived PyPI
-        # API token at publish time. PyPI must already have a "trusted
-        # publisher" entry for this (repo, workflow) pair.
+      - name: Publish to ${{ steps.target.outputs.name }}
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ steps.target.outputs.url }}

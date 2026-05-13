@@ -209,10 +209,13 @@ function matchesFilter(cls) {
 // Unknown/no-status sinks to the bottom so the noise stays out of the way.
 const LIVE_RANK = { online: 0, offline: 1, unknown: 2 };
 
-// Sync-category rank for the "category" sort. Actionable classes come first
-// so attention-needing devices cluster at the top; synced trails because
-// nothing's wrong; ungrouped (no cloud loaded) lands last as context-only.
-const CATEGORY_RANK = { mismatch: 0, missing: 1, orphan: 2, synced: 3, ungrouped: 4 };
+// Sync-category rank for the "category" sort. Order goes from "presence
+// itself is wrong" (missing → orphan) down to "presence right, just fields
+// drifted" (mismatch), then "all good" (synced). This puts the per-device
+// add/remove decisions at the top where they need real attention, with the
+// mass-apply "push cloud fields" mismatches below them; synced trails as
+// the no-op pile and ungrouped (no cloud loaded) lands last.
+const CATEGORY_RANK = { missing: 0, orphan: 1, mismatch: 2, synced: 3, ungrouped: 4 };
 
 function sortValue(id) {
   const dev = primaryDevice(id);

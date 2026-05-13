@@ -113,12 +113,22 @@ def _spawn_embedded_bridge(args: argparse.Namespace) -> tuple[Any, threading.Thr
     default_state = Path(args.cloud).resolve().parent / "bridge-state.json"
     state_file = args.bridge_state or str(default_state)
 
-    server = pb.PyBridgeServer(
-        mqtt_broker=args.broker,
-        mqtt_root_topic=args.root,
-        state_file=state_file,
-        log_level=args.log_level,
-    )
+    # The manager owns broker / root / state-file / log-level — embedded bridge
+    # must agree with the manager's view on those. Everything else (custom
+    # topics, mqtt user/password, scanner options, retain flag, …) is the
+    # bridge's domain and is read from `--bridge-config` when provided.
+    # pyrustuyabridge >= 0.1.1 reads + auto-creates that file in PyBridgeServer
+    # the same way the binary's `--config` flag does.
+    kwargs: dict[str, Any] = {
+        "mqtt_broker": args.broker,
+        "mqtt_root_topic": args.root,
+        "state_file": state_file,
+        "log_level": args.log_level,
+    }
+    if getattr(args, "bridge_config", None):
+        kwargs["config_path"] = args.bridge_config
+
+    server = pb.PyBridgeServer(**kwargs)
     thread = threading.Thread(target=server.start, daemon=True)
     thread.start()
     return server, thread
@@ -391,6 +401,18 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Path to the embedded bridge's state file (--embed-bridge only). "
             "Default: bridge-state.json next to the cloud file."
+        ),
+    )
+    parser.add_argument(
+        "--bridge-config",
+        default=None,
+        help=(
+            "Path to a JSON config file for the embedded bridge (--embed-bridge "
+            "only). Same format as rustuya-bridge's --config: existing file is "
+            "read and merged (manager flags still win), missing file is "
+            "auto-created from the merged settings. Lets you set custom topic "
+            "templates, MQTT auth, scanner options etc. without re-exposing "
+            "every bridge flag here."
         ),
     )
     args = parser.parse_args(argv)

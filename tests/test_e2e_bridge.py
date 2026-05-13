@@ -417,23 +417,21 @@ async def test_remove_clears_per_device_state(bridge: str):
     await _run_client_briefly(client, check)
 
 
-async def test_embed_bridge_spawns_when_no_external(tmp_path):
-    """`--embed-bridge` should bring up a PyBridgeServer in the same process
-    when no other bridge owns the root. Once it publishes its retained
-    config, the manager's normal bootstrap path picks it up exactly as if
-    it were an external bridge."""
+async def _run_embed_test(tmp_path, root: str, *, bridge_config: str | None = None):
+    """Shared scaffolding for embed-bridge e2e variants.
+
+    Spawns an embedded bridge on the given root, runs the manager against it,
+    waits for bootstrap, then cleanly tears down. Yields the `(state, args)`
+    tuple to the test body inside the bootstrapped window so the caller can
+    assert on state.templates etc."""
     from types import SimpleNamespace
 
     from rustuya_manager.cli import _close_embedded_bridge, _resolve_embedded_bridge
 
-    root = f"{ROOT}_embed_{os.getpid()}_{int(time.time())}"
-    # Pre-clean retained, otherwise a stale config from a previous run would
-    # look like "external bridge present" and the helper would refuse to spawn.
     subprocess.run(
         ["mosquitto_pub", "-h", "localhost", "-t", f"{root}/bridge/config", "-r", "-n"],
         check=False,
     )
-
     state = State()
     client = BridgeClient(broker="mqtt://localhost:1883", root=root, state=state)
     args = SimpleNamespace(
@@ -443,23 +441,19 @@ async def test_embed_bridge_spawns_when_no_external(tmp_path):
         cloud=str(tmp_path / "tuyadevices.json"),
         bridge_state=str(tmp_path / "bridge-state.json"),
         log_level="warn",
+        bridge_config=bridge_config,
     )
 
     embedded = None
     run_task = asyncio.create_task(client.run())
     try:
-        # The helper waits up to 1s for external bridge config; with the
-        # retained slot pre-cleaned, it times out and proceeds to spawn.
         embedded = await _resolve_embedded_bridge(state, args)
         assert embedded is not None, "embed-bridge should have spawned"
         assert "embedded_bridge_aborted" not in state.warnings
-
-        # Once the embedded bridge publishes its config, the manager's
-        # bootstrap completes — same code path as for an external bridge.
         await asyncio.wait_for(client._bootstrap_done.wait(), 7.0)
-        assert state.templates is not None
-        assert state.templates.root == root
+        return state, args
     finally:
+        # Caller's assertions ran (or raised); shut everything down regardless.
         await client.stop()
         await asyncio.wait_for(run_task, 5.0)
         if embedded is not None:
@@ -470,6 +464,67 @@ async def test_embed_bridge_spawns_when_no_external(tmp_path):
             ["mosquitto_pub", "-h", "localhost", "-t", f"{root}/bridge/config", "-r", "-n"],
             check=False,
         )
+
+
+async def test_embed_bridge_spawns_when_no_external(tmp_path):
+    """`--embed-bridge` should bring up a PyBridgeServer in the same process
+    when no other bridge owns the root. Once it publishes its retained
+    config, the manager's normal bootstrap path picks it up exactly as if
+    it were an external bridge."""
+    root = f"{ROOT}_embed_{os.getpid()}_{int(time.time())}"
+    state, _args = await _run_embed_test(tmp_path, root)
+    assert state.templates is not None
+    assert state.templates.root == root
+
+
+async def test_embed_bridge_reads_existing_bridge_config(tmp_path):
+    """When --bridge-config points at an existing file, the embedded bridge
+    must actually honor it. Pins the pyrustuyabridge >= 0.1.1 contract:
+    config_path kwarg → file is read → file values appear in the
+    eventually-published bridge/config retained payload → state.templates
+    reflects them."""
+    import json as _json
+
+    root = f"{ROOT}_embed_cfg_{os.getpid()}_{int(time.time())}"
+    cfg_path = tmp_path / "bridge.json"
+    # Custom event topic that the bridge's defaults would never produce on
+    # their own; this is what proves the file was actually read.
+    custom_event = "{root}/custom/dev/{name}/dp/{dp}"
+    cfg_path.write_text(_json.dumps({"mqtt_event_topic": custom_event}))
+
+    state, _args = await _run_embed_test(tmp_path, root, bridge_config=str(cfg_path))
+    assert state.templates is not None
+    # `state.templates.event` is the post-{root}-substituted form; the bridge
+    # renders {root} but leaves {name}/{dp} alone for the manager's matcher.
+    expected = custom_event.replace("{root}", root)
+    assert state.templates.event == expected, (
+        f"bridge ignored --bridge-config: templates.event={state.templates.event!r} "
+        f"expected={expected!r}"
+    )
+
+
+async def test_embed_bridge_auto_creates_missing_bridge_config(tmp_path):
+    """File-missing path: pyrustuyabridge >= 0.1.1 mirrors the binary's
+    auto-create behavior. If --bridge-config points at a nonexistent path,
+    the bridge writes its current (kwargs+defaults) settings there so the
+    next run reads from the same file. Without this, repeat starts would
+    silently lose any kwarg overrides the user expected to persist."""
+    root = f"{ROOT}_embed_auto_{os.getpid()}_{int(time.time())}"
+    # Subdir doesn't exist yet — the bridge must also `mkdir -p` its parent.
+    cfg_path = tmp_path / "subdir" / "bridge.json"
+    assert not cfg_path.exists()
+    assert not cfg_path.parent.exists()
+
+    await _run_embed_test(tmp_path, root, bridge_config=str(cfg_path))
+
+    # File created + populated with serialised config.
+    assert cfg_path.exists(), "bridge did not auto-create missing config file"
+    import json as _json
+
+    written = _json.loads(cfg_path.read_text())
+    # `mqtt_root_topic` is one of the manager-provided kwargs — it must land
+    # in the persisted config so subsequent runs reuse the same root.
+    assert written.get("mqtt_root_topic") == root, f"persisted config missing root: {written}"
 
 
 async def test_embed_bridge_aborts_when_external_exists(bridge: str):
@@ -490,6 +545,7 @@ async def test_embed_bridge_aborts_when_external_exists(bridge: str):
         cloud="ignored.json",
         bridge_state=None,
         log_level="warn",
+        bridge_config=None,
     )
 
     async def check():

@@ -46,6 +46,14 @@ Common flags:
 - `--root TOPIC` — must match the bridge's `--mqtt-root-topic`.
 - `--host`, `--port` — web server bind (default `127.0.0.1:8080`).
 - `--auth USER:PASS` — HTTP Basic auth for the web UI.
+- `--embed-bridge` — run the bridge inside this process via the
+  `pyrustuyabridge` bindings (single-process deploy). Refused at startup
+  if another bridge already publishes on `--root`.
+- `--bridge-config PATH` — JSON config file for the embedded bridge.
+  Same format as `rustuya-bridge --config`: existing file is read and
+  merged (manager flags still win), missing file is auto-created from
+  the merged settings. Lets you set custom topics / MQTT auth / scanner
+  options without re-exposing every bridge flag here.
 
 ### Run as a service (systemd, user-level, no sudo)
 

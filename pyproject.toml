@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rustuya-manager"
-version = "0.1.0rc2"
+version = "0.1.0rc3"
 description = "Management tool for rustuya-bridge — keeps Tuya Cloud devices and the bridge in sync"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -13,7 +13,7 @@ dependencies = [
     "rich>=13.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
-    "pyrustuyabridge>=0.1.0,<0.2",
+    "pyrustuyabridge>=0.1.1,<0.2",
     "tuyawizard>=0.1.5",
     "cryptography>=41",  # missing dep of tuya-sharing-sdk
     "rustuya>=0.2",      # UDP scan for IP/version

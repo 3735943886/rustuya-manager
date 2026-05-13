@@ -41,19 +41,26 @@ rustuya-manager --broker mqtt://localhost:1883 --root rustuya \
 Then open the URL printed at startup. The default bind is `127.0.0.1` so the UI is reachable only from the same machine. To open it to the LAN add `--host 0.0.0.0` — pair with a real `--auth user:pass`.
 
 Common flags:
-- `--cloud PATH` — Tuya devices JSON. If missing, the UI shows a drop-zone for upload.
-- `--broker URL` — `mqtt://[user:pass@]host:port`.
-- `--root TOPIC` — must match the bridge's `--mqtt-root-topic`.
-- `--host`, `--port` — web server bind (default `127.0.0.1:8080`).
-- `--auth USER:PASS` — HTTP Basic auth for the web UI.
-- `--embed-bridge` — run the bridge inside this process via the
-  `pyrustuyabridge` bindings (single-process deploy). Refused at startup
-  if another bridge already publishes on `--root`.
-- `--bridge-config PATH` — JSON config file for the embedded bridge.
-  Same format as `rustuya-bridge --config`: existing file is read and
-  merged (manager flags still win), missing file is auto-created from
-  the merged settings. Lets you set custom topics / MQTT auth / scanner
-  options without re-exposing every bridge flag here.
+- `--cloud PATH` (default `tuyadevices.json`) — Tuya devices JSON. If
+  missing, the UI shows a drop-zone for upload.
+- `--broker URL` (default `mqtt://localhost:1883`) — accepts
+  `mqtt://[user:pass@]host:port`.
+- `--root TOPIC` (default `rustuya`) — must match the bridge's
+  `--mqtt-root-topic`.
+- `--host`, `--port` (default `127.0.0.1:8080`) — web server bind.
+- `--auth USER:PASS` (default off) — HTTP Basic auth for the web UI.
+- `--embed-bridge` (default off) — run the bridge inside this process
+  via the `pyrustuyabridge` bindings (single-process deploy). Refused
+  at startup if another bridge already publishes on `--root`.
+- `--bridge-state PATH` (default: `bridge-state.json` next to
+  `--cloud`) — embedded bridge's device state file. **Only meaningful
+  with `--embed-bridge`.**
+- `--bridge-config PATH` (default off) — JSON config file for the
+  embedded bridge. Same format as `rustuya-bridge --config`: existing
+  file is read and merged (manager flags still win), missing file is
+  auto-created from the merged settings. Lets you set custom topics /
+  MQTT auth / scanner options without re-exposing every bridge flag
+  here. **Only meaningful with `--embed-bridge`** — ignored otherwise.
 
 ### Run as a service (systemd, user-level, no sudo)
 

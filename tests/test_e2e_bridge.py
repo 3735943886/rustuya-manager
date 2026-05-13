@@ -417,6 +417,94 @@ async def test_remove_clears_per_device_state(bridge: str):
     await _run_client_briefly(client, check)
 
 
+async def test_embed_bridge_spawns_when_no_external(tmp_path):
+    """`--embed-bridge` should bring up a PyBridgeServer in the same process
+    when no other bridge owns the root. Once it publishes its retained
+    config, the manager's normal bootstrap path picks it up exactly as if
+    it were an external bridge."""
+    from types import SimpleNamespace
+
+    from rustuya_manager.cli import _close_embedded_bridge, _resolve_embedded_bridge
+
+    root = f"{ROOT}_embed_{os.getpid()}_{int(time.time())}"
+    # Pre-clean retained, otherwise a stale config from a previous run would
+    # look like "external bridge present" and the helper would refuse to spawn.
+    subprocess.run(
+        ["mosquitto_pub", "-h", "localhost", "-t", f"{root}/bridge/config", "-r", "-n"],
+        check=False,
+    )
+
+    state = State()
+    client = BridgeClient(broker="mqtt://localhost:1883", root=root, state=state)
+    args = SimpleNamespace(
+        embed_bridge=True,
+        broker="mqtt://localhost:1883",
+        root=root,
+        cloud=str(tmp_path / "tuyadevices.json"),
+        bridge_state=str(tmp_path / "bridge-state.json"),
+        log_level="warn",
+    )
+
+    embedded = None
+    run_task = asyncio.create_task(client.run())
+    try:
+        # The helper waits up to 1s for external bridge config; with the
+        # retained slot pre-cleaned, it times out and proceeds to spawn.
+        embedded = await _resolve_embedded_bridge(state, args)
+        assert embedded is not None, "embed-bridge should have spawned"
+        assert "embedded_bridge_aborted" not in state.warnings
+
+        # Once the embedded bridge publishes its config, the manager's
+        # bootstrap completes — same code path as for an external bridge.
+        await asyncio.wait_for(client._bootstrap_done.wait(), 7.0)
+        assert state.templates is not None
+        assert state.templates.root == root
+    finally:
+        await client.stop()
+        await asyncio.wait_for(run_task, 5.0)
+        if embedded is not None:
+            server, thread = embedded
+            await _close_embedded_bridge(server)
+            thread.join(timeout=3)
+        subprocess.run(
+            ["mosquitto_pub", "-h", "localhost", "-t", f"{root}/bridge/config", "-r", "-n"],
+            check=False,
+        )
+
+
+async def test_embed_bridge_aborts_when_external_exists(bridge: str):
+    """Asking for `--embed-bridge` against a root that already has a bridge
+    must refuse cleanly with `embedded_bridge_aborted`. The `bridge` fixture
+    spawns an external bridge first, so the helper sees retained config
+    within the 1s collision-detection window and declines to spawn."""
+    from types import SimpleNamespace
+
+    from rustuya_manager.cli import _resolve_embedded_bridge
+
+    state = State()
+    client = BridgeClient(broker="mqtt://localhost:1883", root=bridge, state=state)
+    args = SimpleNamespace(
+        embed_bridge=True,
+        broker="mqtt://localhost:1883",
+        root=bridge,
+        cloud="ignored.json",
+        bridge_state=None,
+        log_level="warn",
+    )
+
+    async def check():
+        # External bridge is alive (fixture), so templates land via retained.
+        # The helper should detect that and refuse to spawn a second bridge.
+        result = await _resolve_embedded_bridge(state, args)
+        assert result is None, "embed-bridge must NOT spawn when external owns the root"
+        assert "embedded_bridge_aborted" in state.warnings
+        warn = state.warnings["embedded_bridge_aborted"]
+        assert warn["level"] == "error"
+        assert bridge in warn["message"]
+
+    await _run_client_briefly(client, check)
+
+
 async def test_add_response_triggers_status_refresh(bridge: str):
     """A successful `add` response should make the manager re-fetch status
     so state.bridge picks up the new device without waiting for a manual

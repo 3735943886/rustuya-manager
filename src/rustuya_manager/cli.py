@@ -18,6 +18,7 @@ import json
 import logging
 import signal
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -96,6 +97,70 @@ async def _serve_web(host: str, port: int, app: Any) -> None:
     await server.serve()
 
 
+def _spawn_embedded_bridge(args: argparse.Namespace) -> tuple[Any, threading.Thread]:
+    """Spin up a `pyrustuyabridge.PyBridgeServer` in a daemon thread.
+
+    Used when `--embed-bridge` is set AND no external bridge has claimed the
+    root topic yet (collision check happens in `run()` before this is called).
+    Returns (server, thread) so the caller can `server.close()` + join on
+    shutdown. The thread is daemon so a manager crash never leaves the
+    embedded bridge orphaned.
+    """
+    import pyrustuyabridge as pb  # imported lazily — only needed when embedding
+
+    default_state = Path(args.cloud).resolve().parent / "bridge-state.json"
+    state_file = args.bridge_state or str(default_state)
+
+    server = pb.PyBridgeServer(
+        mqtt_broker=args.broker,
+        mqtt_root_topic=args.root,
+        state_file=state_file,
+        log_level=args.log_level,
+    )
+    thread = threading.Thread(target=server.start, daemon=True)
+    thread.start()
+    return server, thread
+
+
+async def _close_embedded_bridge(server: Any) -> None:
+    """Wrap `server.close()` in an asyncio loop — the bridge's tokio runtime
+    expects to schedule cleanup work on one before shutting down."""
+    server.close()
+    # Tiny grace period so the bridge's cleanup futures can complete before
+    # the calling loop tears down underneath them.
+    await asyncio.sleep(0.1)
+
+
+async def _resolve_embedded_bridge(
+    state: State, args: argparse.Namespace
+) -> tuple[Any, threading.Thread] | None:
+    """Decide whether to spawn an embedded bridge, and if so spawn it.
+
+    Logic mirrored from a single source of truth so unit tests can exercise
+    the collision check without invoking the full CLI loop:
+      - Flag not set → never spawn.
+      - Flag set + external bridge already on this root (templates landed
+        within 1s) → set `embedded_bridge_aborted` warning, do not spawn.
+      - Flag set + no external → spawn.
+    Returns (server, thread) on spawn, None otherwise.
+    """
+    if not args.embed_bridge:
+        return None
+    external_present = await state.wait_for(lambda: state.templates is not None, timeout=1.0)
+    if external_present:
+        msg = (
+            f"--embed-bridge requested, but a bridge is already running on "
+            f"root '{args.root}'. Stop the external bridge, drop "
+            f"--embed-bridge, or pick a different --root."
+        )
+        await state.set_warning("embedded_bridge_aborted", "error", msg)
+        logger.error(msg)
+        return None
+    embedded = _spawn_embedded_bridge(args)
+    logger.info("Embedded bridge started on root=%r", args.root)
+    return embedded
+
+
 def _web_urls(host: str, port: int) -> list[str]:
     """URLs to print at startup so the user can click straight from the terminal.
 
@@ -169,12 +234,32 @@ async def run(args: argparse.Namespace) -> int:
     print(f"Connecting to {args.broker}, root={args.root!r} ...")
     run_task = asyncio.create_task(client.run())
 
+    # --embed-bridge handling — collision detection + spawn (see helper).
+    embedded_bridge = await _resolve_embedded_bridge(state, args)
+    if args.embed_bridge:
+        if embedded_bridge is None:
+            # Refused due to existing external — the helper already logged
+            # + set the state warning; mirror it to stdout for CLI users.
+            warn = state.warnings.get("embedded_bridge_aborted")
+            if warn:
+                print(f"⚠ {warn['message']}")
+        else:
+            print(f"✓ Embedded bridge running on root={args.root!r}")
+
     # Wait either for bootstrap or 6s — give a bit of slack over the client's 5s.
     try:
         await asyncio.wait_for(client._bootstrap_done.wait(), 6.0)
         print("✓ Bootstrap complete")
     except asyncio.TimeoutError:
-        print("⚠ Bootstrap timeout — bridge may be offline; using defaults")
+        # Distinguish "still retrying broker" from "broker OK but no bridge".
+        # state.warnings is the same signal the UI uses, so the CLI matches.
+        if "broker_unreachable" in state.warnings:
+            print(
+                "⚠ Broker still unreachable — manager will keep retrying. "
+                "Watch state warnings for status."
+            )
+        else:
+            print("⚠ Bootstrap timeout — bridge may be offline; using defaults")
 
     # Wait for the bridge's initial `status` reply to land (which populates
     # state.bridge). A naive "wait for any state change" wakes up on retained
@@ -223,6 +308,16 @@ async def run(args: argparse.Namespace) -> int:
         print("\nShutting down ...")
         await client.stop()
         await run_task
+
+    # Embedded bridge tear-down — only reached on clean shutdown of the
+    # manager. Daemon thread would die with the process anyway, but
+    # close() gives the bridge a chance to clear its retained config and
+    # release MQTT cleanly.
+    if embedded_bridge is not None:
+        server, thread = embedded_bridge
+        await _close_embedded_bridge(server)
+        thread.join(timeout=3)
+
     return 0
 
 
@@ -277,6 +372,24 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Path to tuyacreds.json (tuyawizard's session cache). "
         "Default: tuyacreds.json next to the cloud file.",
+    )
+    parser.add_argument(
+        "--embed-bridge",
+        action="store_true",
+        help=(
+            "Run the rustuya-bridge inside this manager process via the "
+            "pyrustuyabridge bindings. Useful for single-process deploys "
+            "(pipx install + run). Refused at startup with a clear warning "
+            "if another bridge is already publishing on --root."
+        ),
+    )
+    parser.add_argument(
+        "--bridge-state",
+        default=None,
+        help=(
+            "Path to the embedded bridge's state file (--embed-bridge only). "
+            "Default: bridge-state.json next to the cloud file."
+        ),
     )
     args = parser.parse_args(argv)
     try:

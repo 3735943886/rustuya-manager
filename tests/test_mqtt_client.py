@@ -435,6 +435,88 @@ class TestPublishCommand:
             await client.publish_command("status")
 
 
+class TestConnectWithRetry:
+    """Initial connect must NOT crash the manager when the broker is late.
+    Pre-fix behavior: paho's sync `connect()` raised `ConnectionRefusedError`,
+    asyncio surfaced it, the process exited. Post-fix: retries with backoff
+    and surfaces `broker_unreachable` to state.warnings so the UI can show
+    it while we wait."""
+
+    async def test_succeeds_immediately_when_broker_available(self):
+        client, paho = _make_client()
+        # paho.connect() returning normally = "broker reachable".
+        paho.connect.return_value = mqtt.MQTT_ERR_SUCCESS
+        # Tight timeout — should not need to retry.
+        await asyncio.wait_for(client._connect_with_retry(), timeout=1.0)
+        assert paho.connect.call_count == 1
+        assert "broker_unreachable" not in client.state.warnings
+
+    async def test_retries_then_succeeds_and_clears_warning(self):
+        client, paho = _make_client()
+        # Drop backoff to a hair above zero so retries fly through.
+        client._INITIAL_BACKOFF_SEC = 0.001
+        client._MAX_BACKOFF_SEC = 0.001
+        # Fail twice, then succeed. Each failure raises like real paho.
+        calls = {"n": 0}
+
+        def fake_connect(_host, _port):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise ConnectionRefusedError(111, "Connection refused")
+            return mqtt.MQTT_ERR_SUCCESS
+
+        paho.connect.side_effect = fake_connect
+        await asyncio.wait_for(client._connect_with_retry(), timeout=2.0)
+        assert paho.connect.call_count == 3
+        # Warning was set during retries then cleared on success.
+        assert "broker_unreachable" not in client.state.warnings
+
+    async def test_warning_message_carries_host_and_port(self):
+        client, paho = _make_client()
+        client._INITIAL_BACKOFF_SEC = 0.001
+        client._MAX_BACKOFF_SEC = 0.001
+        paho.connect.side_effect = ConnectionRefusedError(111, "Connection refused")
+
+        async def stop_after_first_failure():
+            # Give the loop one attempt to record the warning, then bail.
+            await asyncio.sleep(0.01)
+            client._stopped.set()
+
+        await asyncio.gather(
+            client._connect_with_retry(),
+            stop_after_first_failure(),
+        )
+        warn = client.state.warnings.get("broker_unreachable")
+        assert warn is not None
+        assert "localhost:1883" in warn["message"]
+        assert warn["level"] == "error"
+
+
+class TestBridgeOfflineWarning:
+    """`_apply_default_templates` is the fallback when bridge/config never
+    arrives. It must mark `bridge_offline` so the UI surfaces "manager is up
+    but bridge isn't"; `_on_bridge_config` must clear it the moment a real
+    config lands."""
+
+    async def test_default_templates_set_bridge_offline_warning(self):
+        client, _ = _make_client()
+        await client._apply_default_templates()
+        warn = client.state.warnings.get("bridge_offline")
+        assert warn is not None
+        assert warn["level"] == "warning"
+        assert "myhome/tuya/bridge/config" in warn["message"]
+
+    async def test_real_bridge_config_clears_offline_warning(self):
+        client, _ = _make_client()
+        await client._apply_default_templates()
+        assert "bridge_offline" in client.state.warnings
+
+        # Now a real retained config arrives. Use the same payload shape as
+        # the dispatch tests above; _on_bridge_config picks it up and clears.
+        await client._on_bridge_config(json.dumps(CUSTOM_CONFIG))
+        assert "bridge_offline" not in client.state.warnings
+
+
 # pytest-asyncio integration — auto mode is the simplest setup for our needs.
 def pytest_collection_modifyitems(items):
     for item in items:

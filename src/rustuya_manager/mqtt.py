@@ -156,7 +156,7 @@ class BridgeClient:
         """Connect, bootstrap, then process incoming messages until `stop()`."""
         self._loop = asyncio.get_running_loop()
         self._client = self._make_client()
-        self._client.connect(self.host, self.port)
+        await self._connect_with_retry()
         self._client.loop_start()
 
         try:
@@ -172,6 +172,67 @@ class BridgeClient:
 
     async def stop(self) -> None:
         self._stopped.set()
+
+    # Exponential backoff bounds for the initial connect retry loop. Exposed
+    # as class attributes (not constants) so tests can override them with 0
+    # to keep the suite fast.
+    _INITIAL_BACKOFF_SEC: float = 1.0
+    _MAX_BACKOFF_SEC: float = 60.0
+
+    async def _connect_with_retry(self) -> None:
+        """Block until the initial broker connect succeeds.
+
+        paho's sync `connect()` raises `OSError` (e.g. `ConnectionRefusedError`,
+        `socket.gaierror`) the moment the broker is unreachable on TCP. Without
+        this loop the manager would die on startup whenever the broker is even
+        a few seconds late — which is the common case when `rustuya-manager.service`
+        and `mosquitto.service` come up together at boot. Exponential backoff
+        (1s → 60s) mirrors paho's mid-session reconnect cadence so the two
+        paths feel the same to the operator.
+
+        A `broker_unreachable` state warning is set across attempts so the web
+        UI can surface what's happening; cleared on first successful connect.
+        """
+        assert self._client is not None
+        delay = self._INITIAL_BACKOFF_SEC
+        max_delay = self._MAX_BACKOFF_SEC
+        attempt = 0
+        while True:
+            try:
+                self._client.connect(self.host, self.port)
+                await self.state.clear_warning("broker_unreachable")
+                if attempt > 0:
+                    logger.info(
+                        "MQTT broker %s:%s reachable after %d retries",
+                        self.host,
+                        self.port,
+                        attempt,
+                    )
+                return
+            except OSError as e:
+                attempt += 1
+                await self.state.set_warning(
+                    "broker_unreachable",
+                    "error",
+                    f"MQTT broker {self.host}:{self.port} unreachable ({e}); "
+                    f"retrying every {int(delay)}s.",
+                )
+                logger.warning(
+                    "MQTT broker %s:%s unreachable (%s) — attempt %d, sleeping %.1fs",
+                    self.host,
+                    self.port,
+                    e,
+                    attempt,
+                    delay,
+                )
+                if self._stopped.is_set():
+                    return
+                try:
+                    await asyncio.wait_for(self._stopped.wait(), timeout=delay)
+                    return  # stop requested mid-sleep — exit cleanly
+                except asyncio.TimeoutError:
+                    pass  # backoff elapsed, try again
+                delay = min(delay * 2, max_delay)
 
     def _make_client(self) -> mqtt.Client:
         # paho-mqtt 2.0+ is required (see pyproject); v1 has a different
@@ -428,6 +489,9 @@ class BridgeClient:
         await self.state.set_templates(templates)
         await self._subscribe_runtime_topics(templates)
         await self._validate_payload_template(templates.payload)
+        # Bridge is alive — clear the offline placeholder warning if it was
+        # set by an earlier default-templates fallback.
+        await self.state.clear_warning("bridge_offline")
         if not self._bootstrap_done.is_set():
             await self._request_initial_status()
             self._bootstrap_done.set()
@@ -464,6 +528,18 @@ class BridgeClient:
         await self._subscribe_runtime_topics(templates)
         await self._validate_payload_template(templates.payload)
         self._bootstrap_done.set()
+        # Surface "we're up but the bridge isn't" so the UI doesn't pretend
+        # everything is fine. Cleared in _on_bridge_config when a real
+        # retained config eventually arrives.
+        await self.state.set_warning(
+            "bridge_offline",
+            "warning",
+            (
+                f"No bridge config received on {BRIDGE_CONFIG_TOPIC_TPL.replace('{root}', self.root)} "
+                f"within {BOOTSTRAP_TIMEOUT_SEC}s. Using default topic templates as a placeholder — "
+                f"devices will appear once a bridge starts on root='{self.root}'."
+            ),
+        )
 
     async def _subscribe_runtime_topics(self, t: BridgeTemplates) -> None:
         assert self._client is not None

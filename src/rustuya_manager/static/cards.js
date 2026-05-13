@@ -48,6 +48,17 @@ function computeEdgeColor(cls, live) {
   return "border-l-slate-200 dark:border-l-slate-600";
 }
 
+function computeCardBg(cls) {
+  // Synced + ungrouped cards stay pure-white so they read as the baseline.
+  // Problem cards (mismatch / missing / orphan) get a faint slate tint — a
+  // separate visual channel from the edge stripe's hue, communicating
+  // "this card needs attention" without doubling up on color.
+  if (cls === "synced" || cls === "ungrouped") {
+    return "bg-white dark:bg-slate-800";
+  }
+  return "bg-slate-50 dark:bg-slate-800/60";
+}
+
 function resolveIp(bridge, cloud) {
   const cloudIp = cloud?.ip;
   if (bridge) {
@@ -141,7 +152,7 @@ export function deviceCard(id, cls, isChild) {
   // 4 px strip in light mode, 6 px in dark — the wider stripe gives the
   // color more visual mass against the darker card so it remains a usable
   // scanning cue.
-  card.className = `bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 border-l-4 dark:border-l-[6px] ${edgeColor} p-3 ${indent} cursor-pointer`;
+  card.className = `${computeCardBg(cls)} rounded-lg border border-slate-200 dark:border-slate-700 border-l-4 dark:border-l-[6px] ${edgeColor} p-3 ${indent} cursor-pointer`;
   card.title = `${cls}${primary.type ? ` · ${primary.type}` : ""}${live?.state ? ` · ${live.state}` : ""}`;
   // Tap anywhere on the card to expand/collapse. Buttons inside stop the
   // event from propagating up so they don't accidentally toggle.

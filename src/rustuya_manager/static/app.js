@@ -14,7 +14,7 @@
 //   modal-sync.js    bulk-sync modal
 //   modal-wizard.js  Tuya cloud login flow
 
-import { state } from "./state.js";
+import { state, ALL_CATEGORIES, saveFilters } from "./state.js";
 import { formatAgo, toast } from "./dom.js";
 import { uploadCloud, postCommand } from "./api.js";
 import { connect } from "./ws.js";
@@ -62,7 +62,18 @@ const $sort = document.getElementById("sort-select");
 $filterTabs.addEventListener("click", (ev) => {
   const btn = ev.target.closest("button[data-filter]");
   if (!btn) return;
-  state.filter = btn.dataset.filter;
+  const key = btn.dataset.filter;
+  if (key === "all") {
+    // "all" is a reset, not a toggle — always end up with every category on.
+    state.filters = new Set(ALL_CATEGORIES);
+  } else {
+    if (state.filters.has(key)) state.filters.delete(key);
+    else state.filters.add(key);
+    // Empty filter would hide every card, which reads as a broken UI. Snap
+    // back to all-on so the user always sees *something*.
+    if (state.filters.size === 0) state.filters = new Set(ALL_CATEGORIES);
+  }
+  saveFilters();
   if (state.snapshot) renderFilterCounts();   // reapply active/idle styles
   renderDevices();
 });

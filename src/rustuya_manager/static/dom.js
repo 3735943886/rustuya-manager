@@ -68,8 +68,11 @@ export function iconButton(glyph, onClick, title, variant = "default") {
   // `danger` tints the icon rose so destructive actions read as risky at a
   // glance; the confirm dialog is still the actual guard.
   const styles = {
-    default: "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-300",
-    danger:  "border-rose-200 dark:border-rose-800 bg-white dark:bg-slate-700 hover:bg-rose-50 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400",
+    default:       "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-300",
+    danger:        "border-rose-200 dark:border-rose-800 bg-white dark:bg-slate-700 hover:bg-rose-50 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400",
+    // `danger-fill` is for the one-action-only orphan case: filled tile that
+    // reads as THE primary action against the rose-tinted card background.
+    "danger-fill": "border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/70 hover:bg-rose-200 dark:hover:bg-rose-800 text-rose-700 dark:text-rose-200",
   }[variant];
   const b = document.createElement("button");
   b.type = "button";

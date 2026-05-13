@@ -49,15 +49,13 @@ function computeEdgeColor(cls, live) {
 }
 
 function computeCardBg(cls) {
-  // Synced + ungrouped cards stay at the baseline (max text-vs-bg contrast).
-  // Problem cards (mismatch / missing / orphan) pull the background toward
-  // the text color so contrast *drops*: that's what "muddy / needs fixing"
-  // actually means. Crucially this is asymmetric per mode — go darker in
-  // light (toward black text) and lighter in dark (toward white text).
-  if (cls === "synced" || cls === "ungrouped") {
-    return "bg-white dark:bg-slate-800";
-  }
-  return "bg-slate-100 dark:bg-slate-700";
+  // Each problem class gets a faint wash of its category color so the card
+  // body — not just the left stripe — telegraphs the state at a glance.
+  // Synced + ungrouped stay neutral so attention lands on actionable rows.
+  if (cls === "missing")  return "bg-sky-50 dark:bg-sky-900/40";
+  if (cls === "orphan")   return "bg-rose-50 dark:bg-rose-900/40";
+  if (cls === "mismatch") return "bg-amber-50 dark:bg-amber-900/40";
+  return "bg-white dark:bg-slate-800";
 }
 
 function resolveIp(bridge, cloud) {
@@ -128,8 +126,16 @@ function appendInlineActions(container, id, cls, cloud, bridge, primary) {
     container.appendChild(
       iconButton("✎", () => openEditModal(id), "Edit device"),
     );
+    // Orphan's primary (really, only) action is delete — promote the trash
+    // icon to a filled rose tile so it reads as THE action on that card,
+    // not just one of three equally-weighted icons.
     container.appendChild(
-      iconButton("🗑", () => removeWithConfirm(id, primary.name), "Remove device", "danger"),
+      iconButton(
+        "🗑",
+        () => removeWithConfirm(id, primary.name),
+        "Remove device",
+        cls === "orphan" ? "danger-fill" : "danger",
+      ),
     );
     container.appendChild(
       iconButton("↻", () => publishCommand({ action: "get", id }), "Query status from bridge"),

@@ -2,7 +2,7 @@
 // are also exported so smaller subsystems (filter tab click, search input)
 // can re-run just the affected sub-tree without a full re-render.
 
-import { state } from "./state.js";
+import { state, ALL_CATEGORIES } from "./state.js";
 import { escapeHtml } from "./dom.js";
 import { deviceCard, missingParentCard, classifyDevice, primaryDevice } from "./cards.js";
 
@@ -138,15 +138,20 @@ export function renderFilterCounts() {
     missing: snap.diff.missing.length,
     orphan: snap.diff.orphaned.length,
   };
+  // "all" is active only when every real category is currently on — i.e.
+  // nothing is being filtered out. Toggling any category off de-activates
+  // the "all" pill so it's clear that the view is partial.
+  const allOn = ALL_CATEGORIES.every((c) => state.filters.has(c));
   for (const btn of $filterTabs.querySelectorAll("button[data-filter]")) {
     const key = btn.dataset.filter;
     const span = btn.querySelector("[data-count]");
     const n = counts[key] ?? 0;
     if (span) span.textContent = n > 0 ? n : "";
     const style = FILTER_STYLES[key] || FILTER_STYLES.all;
-    btn.className = `${FILTER_BASE} ${state.filter === key ? style.active : style.idle}`;
+    const on = key === "all" ? allOn : state.filters.has(key);
+    btn.className = `${FILTER_BASE} ${on ? style.active : style.idle}`;
     // Tabs with 0 fade to a quieter style so the eye lands on actionable ones.
-    btn.classList.toggle("opacity-50", n === 0 && key !== "all" && state.filter !== key);
+    btn.classList.toggle("opacity-50", n === 0 && key !== "all" && !on);
   }
 }
 
@@ -201,8 +206,10 @@ function matchesQuery(id) {
 }
 
 function matchesFilter(cls) {
-  if (state.filter === "all") return true;
-  return cls === state.filter;
+  // "ungrouped" is the no-cloud-loaded state, not a real sync class — it
+  // isn't togglable in the UI, so it always passes the filter.
+  if (cls === "ungrouped") return true;
+  return state.filters.has(cls);
 }
 
 // Live-status rank: online first so actionable devices bubble to the top.

@@ -149,16 +149,21 @@ function renderPlanRow(item, index) {
   // items-start so a wrapped reasons block doesn't push the checkbox down to
   // center on a tall row.
   li.className = "px-3 py-2 flex items-start gap-2 text-sm";
+  // `for=`/`id=` pairing: the browser routes any click inside the <label>
+  // back to its target checkbox natively — same pattern as the section's
+  // "select all" toggle, so the whole row reads consistently as one widget.
+  // The status pill stays outside the label since it's display-only.
+  const cbId = `sync-plan-cb-${index}`;
   li.innerHTML = `
-    <input type="checkbox" data-plan-idx="${index}" ${item.checked ? "checked" : ""} class="mt-1 rounded shrink-0" ${applying ? "disabled" : ""}>
-    <div class="flex-1 min-w-0">
+    <input type="checkbox" id="${cbId}" data-plan-idx="${index}" ${item.checked ? "checked" : ""} class="mt-1 rounded shrink-0" ${applying ? "disabled" : ""}>
+    <label for="${cbId}" class="flex-1 min-w-0 cursor-pointer">
       <div class="flex flex-wrap items-center gap-2">
         <span class="font-mono text-xs break-all">${escapeHtml(item.id)}</span>
         <span class="text-xs text-slate-500 dark:text-slate-400 break-words">${escapeHtml(item.dev.name || "—")}</span>
         <span class="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">${item.action}</span>
       </div>
       ${item.reasons.length ? `<div class="text-[11px] text-slate-600 dark:text-slate-300 mt-1 break-all">${item.reasons.map(escapeHtml).join("<br>")}</div>` : ""}
-    </div>
+    </label>
     <span data-status-idx="${index}" class="text-xs shrink-0">${statusLabel(item)}</span>
   `;
   return li;

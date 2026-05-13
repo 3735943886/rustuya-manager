@@ -527,6 +527,79 @@ async def test_embed_bridge_auto_creates_missing_bridge_config(tmp_path):
     assert written.get("mqtt_root_topic") == root, f"persisted config missing root: {written}"
 
 
+async def test_embed_bridge_inherits_broker_and_root_from_bridge_config(tmp_path):
+    """When --bridge-config supplies `mqtt_root_topic` (and broker), the
+    manager picks them up as its own defaults so the user doesn't have to
+    repeat them on the CLI. Pins the CLI > bridge-config > default
+    precedence: CLI flags are left at default here, so the JSON wins.
+
+    Verified end-to-end via state.templates: the embedded bridge boots
+    against the root in the JSON, the manager (which uses the same root
+    pulled from the JSON) successfully completes bootstrap, and the
+    resulting state.templates.root matches what the JSON declared."""
+    import json as _json
+    from types import SimpleNamespace
+
+    from rustuya_manager.cli import (
+        DEFAULT_BROKER,
+        DEFAULT_ROOT,
+        _apply_bridge_config_defaults,
+        _close_embedded_bridge,
+        _resolve_embedded_bridge,
+    )
+
+    root_in_cfg = f"{ROOT}_embed_inherit_{os.getpid()}_{int(time.time())}"
+    # Pre-clean retained so the helper doesn't see leftover config.
+    subprocess.run(
+        ["mosquitto_pub", "-h", "localhost", "-t", f"{root_in_cfg}/bridge/config", "-r", "-n"],
+        check=False,
+    )
+
+    cfg_path = tmp_path / "bridge.json"
+    cfg_path.write_text(
+        _json.dumps({"mqtt_broker": "mqtt://localhost:1883", "mqtt_root_topic": root_in_cfg})
+    )
+
+    # Manager-side CLI flags are left at default — the bridge-config is the
+    # only place broker/root are specified.
+    args = SimpleNamespace(
+        embed_bridge=True,
+        broker=DEFAULT_BROKER,
+        root=DEFAULT_ROOT,
+        cloud=str(tmp_path / "tuyadevices.json"),
+        bridge_state=str(tmp_path / "bridge-state.json"),
+        log_level="warn",
+        bridge_config=str(cfg_path),
+    )
+
+    # Apply the bridge-config defaults BEFORE building the manager's client.
+    _apply_bridge_config_defaults(args)
+    assert args.root == root_in_cfg, "manager did not pick up root from bridge-config"
+    assert args.broker == "mqtt://localhost:1883"
+
+    state = State()
+    client = BridgeClient(broker=args.broker, root=args.root, state=state)
+    embedded = None
+    run_task = asyncio.create_task(client.run())
+    try:
+        embedded = await _resolve_embedded_bridge(state, args)
+        assert embedded is not None
+        await asyncio.wait_for(client._bootstrap_done.wait(), 7.0)
+        assert state.templates is not None
+        assert state.templates.root == root_in_cfg
+    finally:
+        await client.stop()
+        await asyncio.wait_for(run_task, 5.0)
+        if embedded is not None:
+            server, thread = embedded
+            await _close_embedded_bridge(server)
+            thread.join(timeout=3)
+        subprocess.run(
+            ["mosquitto_pub", "-h", "localhost", "-t", f"{root_in_cfg}/bridge/config", "-r", "-n"],
+            check=False,
+        )
+
+
 async def test_embed_bridge_aborts_when_external_exists(bridge: str):
     """Asking for `--embed-bridge` against a root that already has a bridge
     must refuse cleanly with `embedded_bridge_aborted`. The `bridge` fixture

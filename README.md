@@ -57,10 +57,22 @@ Common flags:
   with `--embed-bridge`.**
 - `--bridge-config PATH` (default off) — JSON config file for the
   embedded bridge. Same format as `rustuya-bridge --config`: existing
-  file is read and merged (manager flags still win), missing file is
-  auto-created from the merged settings. Lets you set custom topics /
-  MQTT auth / scanner options without re-exposing every bridge flag
-  here. **Only meaningful with `--embed-bridge`** — ignored otherwise.
+  file is read and merged, missing file is auto-created from the
+  merged settings. Lets you set custom topics / MQTT auth / scanner
+  options without re-exposing every bridge flag here. **Only meaningful
+  with `--embed-bridge`** — ignored otherwise.
+
+  Special handling for the two fields that the manager and the bridge
+  *both* care about (`mqtt_broker`, `mqtt_root_topic`): when
+  `--bridge-config` supplies them, the manager adopts them as its own
+  defaults too, so they only need to be specified once. Precedence:
+    1. CLI flag (`--broker`, `--root`)
+    2. value from `--bridge-config`
+    3. manager default (`mqtt://localhost:1883`, `rustuya`)
+
+  If a CLI flag and the bridge-config value disagree, the CLI value
+  wins (the embedded bridge ends up with the same kwarg) and a warning
+  is logged so the contradiction doesn't go unnoticed.
 
 ### Run as a service (systemd, user-level, no sudo)
 

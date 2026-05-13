@@ -29,6 +29,78 @@ from .state import State
 
 logger = logging.getLogger(__name__)
 
+# Defaults are constants rather than inline argparse strings so the
+# "did the user override?" check in run() has a stable thing to compare
+# against — and so the bridge-config fallback knows which manager-side
+# defaults are placeholders worth replacing.
+DEFAULT_BROKER = "mqtt://localhost:1883"
+DEFAULT_ROOT = "rustuya"
+
+
+def _peek_bridge_config(path: str | None) -> dict:
+    """Parse a `--bridge-config` JSON file just enough to surface its
+    `mqtt_broker` / `mqtt_root_topic` to the manager.
+
+    Returns `{}` when the path is None, missing, unreadable, or invalid —
+    pyrustuyabridge's own loader will surface the *real* error at spawn time
+    (with its own line numbers and context). The peek is a best-effort
+    convenience read, not a validator.
+    """
+    if not path:
+        return {}
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        with p.open() as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _apply_bridge_config_defaults(args: argparse.Namespace) -> None:
+    """If `--bridge-config` carries `mqtt_broker` / `mqtt_root_topic`, treat
+    them as the manager's defaults too — so the user only has to specify
+    them in one place when embedding the bridge.
+
+    Precedence: CLI flag > bridge-config field > manager default. A CLI
+    flag at the manager-default value is treated as "not set" for this
+    fallback. If the user explicitly set the CLI flag AND it disagrees with
+    the bridge-config value, a warning is logged because the embedded
+    bridge will end up with the kwarg value (manager's CLI) while the
+    bridge-config file says something else — confusing on disk-diff.
+    """
+    if not args.embed_bridge or not args.bridge_config:
+        return
+    cfg = _peek_bridge_config(args.bridge_config)
+    cfg_broker = cfg.get("mqtt_broker")
+    cfg_root = cfg.get("mqtt_root_topic")
+
+    if cfg_broker:
+        if args.broker == DEFAULT_BROKER:
+            args.broker = cfg_broker
+            logger.info("Using broker %r from --bridge-config", cfg_broker)
+        elif args.broker != cfg_broker:
+            logger.warning(
+                "--broker (%r) disagrees with --bridge-config mqtt_broker (%r); "
+                "manager will use the CLI value, embedded bridge will follow.",
+                args.broker,
+                cfg_broker,
+            )
+
+    if cfg_root:
+        if args.root == DEFAULT_ROOT:
+            args.root = cfg_root
+            logger.info("Using root %r from --bridge-config", cfg_root)
+        elif args.root != cfg_root:
+            logger.warning(
+                "--root (%r) disagrees with --bridge-config mqtt_root_topic (%r); "
+                "manager will use the CLI value, embedded bridge will follow.",
+                args.root,
+                cfg_root,
+            )
+
 
 async def _on_event(
     matched_as: str,
@@ -219,6 +291,13 @@ async def run(args: argparse.Namespace) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    # If --embed-bridge + --bridge-config, let the JSON's mqtt_broker /
+    # mqtt_root_topic supply manager defaults so the user doesn't have to
+    # repeat the same values twice. Must run BEFORE BridgeClient is built
+    # since that fixes the broker/root for the manager's own MQTT
+    # connection. CLI-given values always win.
+    _apply_bridge_config_defaults(args)
+
     state = State()
     cloud_path = Path(args.cloud)
     # Remember where to persist later uploads, even if the file doesn't exist yet.
@@ -339,13 +418,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-b",
         "--broker",
-        default="mqtt://localhost:1883",
+        default=DEFAULT_BROKER,
         help="MQTT broker URL (mqtt://host:port)",
     )
     parser.add_argument(
         "-r",
         "--root",
-        default="rustuya",
+        default=DEFAULT_ROOT,
         help="MQTT root topic (must match the running bridge)",
     )
     parser.add_argument("--client-id", default="rustuya-manager")

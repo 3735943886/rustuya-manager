@@ -49,14 +49,15 @@ function computeEdgeColor(cls, live) {
 }
 
 function computeCardBg(cls) {
-  // Synced + ungrouped cards stay pure-white so they read as the baseline.
-  // Problem cards (mismatch / missing / orphan) get a faint slate tint — a
-  // separate visual channel from the edge stripe's hue, communicating
-  // "this card needs attention" without doubling up on color.
+  // Synced + ungrouped cards stay at the baseline (max text-vs-bg contrast).
+  // Problem cards (mismatch / missing / orphan) pull the background toward
+  // the text color so contrast *drops*: that's what "muddy / needs fixing"
+  // actually means. Crucially this is asymmetric per mode — go darker in
+  // light (toward black text) and lighter in dark (toward white text).
   if (cls === "synced" || cls === "ungrouped") {
     return "bg-white dark:bg-slate-800";
   }
-  return "bg-slate-50 dark:bg-slate-800/60";
+  return "bg-slate-100 dark:bg-slate-700";
 }
 
 function resolveIp(bridge, cloud) {

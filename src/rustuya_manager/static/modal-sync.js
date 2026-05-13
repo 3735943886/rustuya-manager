@@ -109,6 +109,11 @@ function renderModal() {
     const items = groups[scope];
     if (items.length === 0) continue;
     const [title, cls] = titles[scope];
+    // Reflect the actual selection state. Hard-coding `checked` here caused
+    // a double-bug where the toggle visually disagreed with its items in
+    // both the "all selected" and "none selected" cases.
+    const allChecked = items.every((i) => i.checked);
+    const someChecked = items.some((i) => i.checked);
 
     const section = document.createElement("section");
     section.className = `border rounded ${cls}`;
@@ -117,11 +122,15 @@ function renderModal() {
         <strong class="text-sm">${title}</strong>
         <span class="text-xs">${items.length}</span>
         <label class="ml-auto text-xs flex items-center gap-1 cursor-pointer">
-          <input type="checkbox" data-toggle-all="${scope}" checked class="rounded">
+          <input type="checkbox" data-toggle-all="${scope}"${allChecked ? " checked" : ""} class="rounded">
           <span>select all</span>
         </label>
       </div>
     `;
+    // `indeterminate` is a property, not an HTML attribute — it has to be
+    // set in JS after the element exists.
+    const toggleAll = section.querySelector(`input[data-toggle-all="${scope}"]`);
+    if (toggleAll) toggleAll.indeterminate = someChecked && !allChecked;
     const list = document.createElement("ul");
     list.className = "divide-y divide-current/10 bg-white/60 dark:bg-slate-800/40";
     for (const item of items) {
@@ -218,6 +227,17 @@ async function applyBatch() {
   $modalApply.onclick = () => { closeSyncModal(); $modalApply.onclick = applyBatch; };
 }
 
+function updateScopeToggle(scope) {
+  const items = currentPlan?.filter((i) => i.scope === scope) ?? [];
+  if (items.length === 0) return;
+  const el = $modalBody.querySelector(`input[data-toggle-all="${scope}"]`);
+  if (!el) return;
+  const allChecked = items.every((i) => i.checked);
+  const someChecked = items.some((i) => i.checked);
+  el.checked = allChecked;
+  el.indeterminate = someChecked && !allChecked;
+}
+
 function updateRowStatus(item) {
   const idx = currentPlan.indexOf(item);
   const el = $modalBody.querySelector(`[data-status-idx="${idx}"]`);
@@ -241,7 +261,12 @@ export function initSyncModal() {
     }
     if (t.dataset.planIdx !== undefined) {
       const idx = Number(t.dataset.planIdx);
-      if (currentPlan[idx]) currentPlan[idx].checked = t.checked;
+      if (currentPlan[idx]) {
+        currentPlan[idx].checked = t.checked;
+        // Keep the scope's select-all toggle in sync — without this an
+        // individual uncheck would leave the toggle stuck on "all selected".
+        updateScopeToggle(currentPlan[idx].scope);
+      }
       updateApplyButton();
     }
   });

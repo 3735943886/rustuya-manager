@@ -110,10 +110,12 @@ async function removeWithConfirm(id, name) {
 }
 
 function appendInlineActions(container, id, cls, cloud, bridge, primary) {
+  // Tint the per-class action to its sync-class color so the button and
+  // the device's edge stripe / filter tab read as one signal.
   if (cls === "missing") {
-    container.appendChild(button("Add", () => sync("add", primary)));
+    container.appendChild(button("Add", () => sync("add", primary), "sky"));
   } else if (cls === "mismatch") {
-    container.appendChild(button("Update", () => sync("add", cloud)));
+    container.appendChild(button("Update", () => sync("add", cloud), "amber"));
   }
   // Orphan no longer gets a dedicated "Remove" text button — the 🗑 icon
   // below covers it (with a confirm) and avoids two ways to do the same

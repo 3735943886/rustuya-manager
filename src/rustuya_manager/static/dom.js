@@ -81,8 +81,14 @@ export function iconButton(glyph, onClick, title, variant = "default") {
 }
 
 export function button(label, onClick, variant = "default") {
+  // Variants match the sync-class palette: sky = missing, amber = mismatch,
+  // danger (rose) = destructive (orphan / remove). The per-card action
+  // button gets the same hue as the device's edge stripe so the action and
+  // the state read as one signal.
   const styles = {
     default: "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200",
+    sky:     "border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-700 hover:bg-sky-50 dark:hover:bg-sky-900/40 text-sky-700 dark:text-sky-300",
+    amber:   "border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-700 hover:bg-amber-50 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-300",
     danger:  "border-rose-300 dark:border-rose-700 bg-white dark:bg-slate-700 hover:bg-rose-50 dark:hover:bg-rose-900/40 text-rose-700 dark:text-rose-300",
   }[variant];
   const b = document.createElement("button");

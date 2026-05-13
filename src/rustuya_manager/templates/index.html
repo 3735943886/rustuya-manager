@@ -93,14 +93,14 @@
        fitting on one line on narrow mobile widths. -->
   <section id="sync-bar" class="hidden">
     <div class="flex flex-wrap items-center gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5">
-      <button data-sync-scope="mismatch" class="hidden text-xs px-2 py-1 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 whitespace-nowrap">
-        Update mismatch
-      </button>
       <button data-sync-scope="missing" class="hidden text-xs px-2 py-1 rounded border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/40 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-200 whitespace-nowrap">
         Add missing
       </button>
       <button data-sync-scope="orphan" class="hidden text-xs px-2 py-1 rounded border border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-200 whitespace-nowrap">
         Remove orphan
+      </button>
+      <button data-sync-scope="mismatch" class="hidden text-xs px-2 py-1 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 whitespace-nowrap">
+        Update mismatch
       </button>
       <button data-sync-scope="all" class="ml-auto text-xs px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white font-medium whitespace-nowrap">
         Apply all
@@ -114,10 +114,10 @@
       <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-200">Devices</h2>
       <div class="flex flex-wrap gap-1 text-xs ml-auto" id="filter-tabs">
         <button data-filter="all"      class="px-2 py-1 rounded border border-slate-300 bg-white">all <span data-count></span></button>
-        <button data-filter="synced"   class="px-2 py-1 rounded border border-slate-300 bg-white">synced <span data-count></span></button>
-        <button data-filter="mismatch" class="px-2 py-1 rounded border border-slate-300 bg-white">mismatch <span data-count></span></button>
         <button data-filter="missing"  class="px-2 py-1 rounded border border-slate-300 bg-white">missing <span data-count></span></button>
         <button data-filter="orphan"   class="px-2 py-1 rounded border border-slate-300 bg-white">orphan <span data-count></span></button>
+        <button data-filter="mismatch" class="px-2 py-1 rounded border border-slate-300 bg-white">mismatch <span data-count></span></button>
+        <button data-filter="synced"   class="px-2 py-1 rounded border border-slate-300 bg-white">synced <span data-count></span></button>
       </div>
     </div>
     <div class="flex flex-wrap items-center gap-2 mb-3">

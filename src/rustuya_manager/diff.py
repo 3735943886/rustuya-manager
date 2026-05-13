@@ -23,9 +23,13 @@ class DiffResult:
         return bool(self.mismatched or self.missing or self.orphaned)
 
     def summary(self) -> str:
+        # Order matches the UI's presence-first category order:
+        # missing → orphan → mismatch → synced. Presence-wrong (missing /
+        # orphan) reads first since those are the high-attention decisions;
+        # mismatch is mass-applyable; synced is the no-op pile at the end.
         return (
-            f"{len(self.synced)} synced, {len(self.mismatched)} mismatch, "
-            f"{len(self.missing)} missing, {len(self.orphaned)} orphaned"
+            f"{len(self.missing)} missing, {len(self.orphaned)} orphaned, "
+            f"{len(self.mismatched)} mismatch, {len(self.synced)} synced"
         )
 
 

@@ -70,11 +70,9 @@ def _load_cloud(path: Path) -> dict[str, Device]:
 
 
 def _print_diff(diff: DiffResult) -> None:
+    # Section order matches the UI / DiffResult.summary order:
+    # missing → orphan → mismatch (synced is implicit when none of those fire).
     print(f"\n=== Diff: {diff.summary()} ===")
-    if diff.mismatched:
-        print("  MISMATCH:")
-        for dev, reasons in diff.mismatched:
-            print(f"    - {dev.id} ({dev.name}): {'; '.join(reasons)}")
     if diff.missing:
         print("  MISSING (in cloud, absent from bridge):")
         for dev in diff.missing:
@@ -83,6 +81,10 @@ def _print_diff(diff: DiffResult) -> None:
         print("  ORPHANED (in bridge, absent from cloud):")
         for dev in diff.orphaned:
             print(f"    - {dev.id} ({dev.name})")
+    if diff.mismatched:
+        print("  MISMATCH:")
+        for dev, reasons in diff.mismatched:
+            print(f"    - {dev.id} ({dev.name}): {'; '.join(reasons)}")
     if not diff.has_changes:
         print("  ✓ Bridge and cloud match.")
     print()

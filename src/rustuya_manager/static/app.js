@@ -150,6 +150,17 @@ document.getElementById("device-add-btn")?.addEventListener("click", () => {
   openAddModal();
 });
 
+// ── Mobile hamburger ───────────────────────────────────────────────────────
+// Each menu item carries `data-mobile-action="<desktop-button-id>"`; we
+// forward the click to that button so existing handlers stay the single
+// source of truth, then close the <details> so the panel dismisses itself.
+for (const el of document.querySelectorAll("[data-mobile-action]")) {
+  el.addEventListener("click", () => {
+    document.getElementById(el.dataset.mobileAction)?.click();
+    el.closest("details")?.removeAttribute("open");
+  });
+}
+
 // ── Init modals + open the socket ──────────────────────────────────────────
 initSyncModal();
 initWizardModal();

@@ -32,6 +32,19 @@
     /* Pulse the connection-state dot until we're live */
     @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
     .pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+    /* iOS Safari (and some mobile Chromium) auto-zooms a form field on
+       focus when its rendered font-size is < 16px. Force 16px on small
+       screens so tapping search / sort / modal inputs doesn't pull the
+       page into a zoom the user has to pinch back out of manually.
+       !important is needed to win over Tailwind's `text-sm` (specificity
+       0,1,0) which would otherwise beat the bare element selector. */
+    @media (max-width: 640px) {
+      input, select, textarea { font-size: 16px !important; }
+    }
+    /* Strip the default disclosure triangle from <summary> so the mobile
+       hamburger button reads as a normal icon button, not a list bullet. */
+    summary { list-style: none; cursor: pointer; }
+    summary::-webkit-details-marker { display: none; }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 min-h-screen">
@@ -43,18 +56,46 @@
       <span class="pulse-dot leading-none">●</span><span>connecting</span>
     </div>
     <div class="ml-auto flex items-center gap-2">
-      <button id="device-add-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Add device">
-        +
-      </button>
-      <button id="wizard-header-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Refresh devices from Tuya Cloud (tuyawizard)">
-        ☁
-      </button>
-      <button id="theme-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Toggle dark mode">
-        <span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span>
-      </button>
-      <button id="refresh-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Refresh page state">
-        ⟳
-      </button>
+      <!-- Desktop: 4 icon buttons inline. On narrow screens these collapse
+           into the hamburger below to keep the header on a single line. -->
+      <div class="hidden sm:flex items-center gap-2">
+        <button id="device-add-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Add device">
+          +
+        </button>
+        <button id="wizard-header-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Refresh devices from Tuya Cloud (tuyawizard)">
+          ☁
+        </button>
+        <button id="theme-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Toggle dark mode">
+          <span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span>
+        </button>
+        <button id="refresh-btn" class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Refresh page state">
+          ⟳
+        </button>
+      </div>
+      <!-- Mobile: native <details> hamburger. The dropdown buttons each
+           carry `data-mobile-action` pointing at their desktop twin's id;
+           a single delegated handler in app.js forwards the click so we
+           don't duplicate event wiring. -->
+      <details class="sm:hidden relative">
+        <summary class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none" title="Menu">
+          ☰
+        </summary>
+        <div class="absolute right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-lg p-1 z-20 min-w-[180px]">
+          <button data-mobile-action="device-add-btn" class="w-full px-3 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-sm text-left">
+            <span class="w-5 text-center">+</span><span>Add device</span>
+          </button>
+          <button data-mobile-action="wizard-header-btn" class="w-full px-3 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-sm text-left">
+            <span class="w-5 text-center">☁</span><span>Fetch from cloud</span>
+          </button>
+          <button data-mobile-action="theme-btn" class="w-full px-3 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-sm text-left">
+            <span class="w-5 text-center"><span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span></span>
+            <span><span class="dark:hidden">Dark mode</span><span class="hidden dark:inline">Light mode</span></span>
+          </button>
+          <button data-mobile-action="refresh-btn" class="w-full px-3 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-sm text-left">
+            <span class="w-5 text-center">⟳</span><span>Refresh</span>
+          </button>
+        </div>
+      </details>
     </div>
   </div>
 </header>
@@ -93,14 +134,14 @@
        fitting on one line on narrow mobile widths. -->
   <section id="sync-bar" class="hidden">
     <div class="flex flex-wrap items-center gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5">
-      <button data-sync-scope="missing" class="hidden text-xs px-2 py-1 rounded border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/40 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-200 whitespace-nowrap">
-        Add missing
+      <button data-sync-scope="missing" class="hidden text-xs px-2 py-1 rounded border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/40 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-200 whitespace-nowrap" title="Add missing">
+        Add<span class="hidden sm:inline"> missing</span>
       </button>
-      <button data-sync-scope="orphan" class="hidden text-xs px-2 py-1 rounded border border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-200 whitespace-nowrap">
-        Remove orphan
+      <button data-sync-scope="orphan" class="hidden text-xs px-2 py-1 rounded border border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-200 whitespace-nowrap" title="Remove orphan">
+        Remove<span class="hidden sm:inline"> orphan</span>
       </button>
-      <button data-sync-scope="mismatch" class="hidden text-xs px-2 py-1 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 whitespace-nowrap">
-        Update mismatch
+      <button data-sync-scope="mismatch" class="hidden text-xs px-2 py-1 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 whitespace-nowrap" title="Update mismatch">
+        Update<span class="hidden sm:inline"> mismatch</span>
       </button>
       <button data-sync-scope="all" class="ml-auto text-xs px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white font-medium whitespace-nowrap">
         Apply all
@@ -110,19 +151,20 @@
 
   <!-- Device list -->
   <section>
-    <div class="flex flex-wrap items-center gap-2 mb-2">
-      <h2 class="text-sm font-semibold text-slate-700 dark:text-slate-200">Devices</h2>
-      <div class="flex flex-wrap gap-1 text-xs ml-auto" id="filter-tabs">
+    <!-- "Devices" header label dropped — the filter tabs + the card list
+         below are self-explanatory, and on mobile the freed row saves a
+         wrap. Search + filter + sort all live on one logical row; flex-wrap
+         lets it break naturally on narrow viewports. -->
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <input id="search-input" type="search" placeholder="search id / name / ip / cid"
+             class="flex-1 min-w-[180px] text-sm px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500">
+      <div class="flex flex-wrap gap-1 text-xs" id="filter-tabs">
         <button data-filter="all"      class="px-2 py-1 rounded border border-slate-300 bg-white">all <span data-count></span></button>
         <button data-filter="missing"  class="px-2 py-1 rounded border border-slate-300 bg-white">missing <span data-count></span></button>
         <button data-filter="orphan"   class="px-2 py-1 rounded border border-slate-300 bg-white">orphan <span data-count></span></button>
         <button data-filter="mismatch" class="px-2 py-1 rounded border border-slate-300 bg-white">mismatch <span data-count></span></button>
         <button data-filter="synced"   class="px-2 py-1 rounded border border-slate-300 bg-white">synced <span data-count></span></button>
       </div>
-    </div>
-    <div class="flex flex-wrap items-center gap-2 mb-3">
-      <input id="search-input" type="search" placeholder="search id / name / ip / cid"
-             class="flex-1 min-w-[180px] text-sm px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500">
       <label class="text-xs text-slate-500 dark:text-slate-400">
         sort
         <select id="sort-select" class="ml-1 text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">

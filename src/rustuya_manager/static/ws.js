@@ -14,15 +14,18 @@ function wsUrl() {
 
 export function setConn(label) {
   // Short labels keep the badge compact; the longest ("connecting") fits in
-  // ~80 px. The fixed width prevents header reflow on state transitions.
+  // ~80 px. On desktop the badge is a fixed width so state transitions don't
+  // reflow the header; on mobile we shrink to just the dot — header real
+  // estate is too scarce to spend 96px on a status word.
   const styles = {
     connecting: ["bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600", "connecting", true],
     live:       ["bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700", "live", false],
     lost:       ["bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700", "lost", true],
   };
   const [cls, text, pulse] = styles[label];
-  $conn.className = `text-xs px-2 py-1 rounded-full border ${cls} inline-flex items-center justify-center w-[96px] whitespace-nowrap gap-1`;
-  $conn.innerHTML = `<span class="${pulse ? "pulse-dot " : ""}leading-none">●</span><span>${text}</span>`;
+  $conn.className = `text-xs px-2 py-1 rounded-full border ${cls} inline-flex items-center justify-center w-auto sm:w-[96px] whitespace-nowrap gap-1`;
+  $conn.title = text;
+  $conn.innerHTML = `<span class="${pulse ? "pulse-dot " : ""}leading-none">●</span><span class="hidden sm:inline">${text}</span>`;
 }
 
 let backoffMs = 500;

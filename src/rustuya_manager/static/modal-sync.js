@@ -144,6 +144,13 @@ function renderModal() {
   updateApplyButton();
 }
 
+// Display verb per scope. `item.action` stays bound to the MQTT command
+// vocabulary ("add"/"remove") because that's what `buildCommandBody` and the
+// bridge expect — re-publishing "add" on a mismatch is how field drift is
+// reconciled, so we surface that intent as "update" to the user without
+// touching the wire payload.
+const ROW_LABELS = { mismatch: "update", missing: "add", orphan: "remove" };
+
 function renderPlanRow(item, index) {
   const li = document.createElement("li");
   // items-start so a wrapped reasons block doesn't push the checkbox down to
@@ -160,7 +167,7 @@ function renderPlanRow(item, index) {
       <div class="flex flex-wrap items-center gap-2">
         <span class="font-mono text-xs break-all">${escapeHtml(item.id)}</span>
         <span class="text-xs text-slate-500 dark:text-slate-400 break-words">${escapeHtml(item.dev.name || "—")}</span>
-        <span class="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">${item.action}</span>
+        <span class="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">${ROW_LABELS[item.scope]}</span>
       </div>
       ${item.reasons.length ? `<div class="text-[11px] text-slate-600 dark:text-slate-300 mt-1 break-all">${item.reasons.map(escapeHtml).join("<br>")}</div>` : ""}
     </label>

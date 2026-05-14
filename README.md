@@ -14,15 +14,22 @@ A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bri
 
 Requires Python 3.10+ and a running [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) reachable via MQTT.
 
-### Install (pipx)
+### Install
 
+**pipx (recommended)** — drops a `rustuya-manager` shim into `~/.local/bin/`, no activate step:
 ```bash
 sudo apt install -y pipx                          # if not already
 pipx ensurepath
 pipx install rustuya-manager
 ```
 
-This installs into an isolated venv at `~/.local/pipx/venvs/rustuya-manager/` and drops a `rustuya-manager` shim into `~/.local/bin/`.
+**venv + pip** — if you'd rather not pull pipx in:
+```bash
+python3 -m venv ~/.venvs/rustuya-manager
+~/.venvs/rustuya-manager/bin/pip install rustuya-manager
+~/.venvs/rustuya-manager/bin/rustuya-manager --help
+```
+Run it by full path, or activate the venv first (`source ~/.venvs/rustuya-manager/bin/activate`). The systemd unit in the next section assumes the pipx path — change `ExecStart` to `%h/.venvs/rustuya-manager/bin/rustuya-manager` if you went the venv route.
 
 ### Run
 
@@ -92,7 +99,9 @@ sudo loginctl enable-linger $USER
 ### Update
 
 ```bash
-pipx upgrade rustuya-manager
+pipx upgrade rustuya-manager                                   # pipx install
+# or, for the venv install:
+~/.venvs/rustuya-manager/bin/pip install -U rustuya-manager
 systemctl --user restart rustuya-manager
 ```
 

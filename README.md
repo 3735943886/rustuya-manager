@@ -23,7 +23,7 @@ pipx ensurepath
 pipx install rustuya-manager
 ```
 
-**venv + pip** — if you'd rather not pull pipx in:
+**venv + pip** — in case you prefer a plain venv over adding pipx:
 ```bash
 python3 -m venv ~/.venvs/rustuya-manager
 ~/.venvs/rustuya-manager/bin/pip install rustuya-manager

@@ -1,6 +1,6 @@
 # Rustuya Manager
 
-A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) that diffs Tuya Cloud devices against the running bridge and syncs add / remove / update operations. Ships with a web UI (with built-in Tuya Cloud login) and a CLI.
+A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) that diffs Tuya Cloud devices against the running bridge and syncs add / remove / update operations. Ships with a web UI with built-in Tuya Cloud login.
 
 ## Key Features
 
@@ -8,7 +8,7 @@ A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bri
 - **Built-in Tuya Cloud login** — fetch your device list straight from the web UI; no external tooling needed. A `tuyadevices.json` upload / drop-zone is still available for offline workflows.
 - **No separate config** — picks up the bridge's topic and payload templates from its retained `bridge/config`.
 - **Live updates over MQTT** — DPS values stream into the UI in real time.
-- **Web UI + CLI** — single-page UI with search, sort, sub-device tree, per-device add / edit / remove and bulk-sync. CLI prints diff + event stream for SSH-style workflows.
+- **Web UI** — single-page UI with search, sort, sub-device tree, per-device add / edit / remove and bulk-sync.
 
 ## Quick Start
 
@@ -33,12 +33,6 @@ Run it by full path, or activate the venv first (`source ~/.venvs/rustuya-manage
 
 ### Run
 
-CLI mode (diff + event stream to stdout):
-```bash
-rustuya-manager --broker mqtt://localhost:1883 --root rustuya
-```
-
-Web UI mode:
 ```bash
 rustuya-manager --broker mqtt://localhost:1883 --root rustuya \
                 --web --port 8080 --auth admin:CHANGE_ME

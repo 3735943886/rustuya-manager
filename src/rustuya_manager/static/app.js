@@ -79,9 +79,26 @@ $filterTabs.addEventListener("click", (ev) => {
   renderDevices();
 });
 
+// Custom clear button. Visibility is driven from the input value so it
+// shows up only when there's something to clear; the click handler also
+// re-focuses the input so the user keeps typing momentum.
+const $searchClear = document.getElementById("search-clear");
+function syncSearchClear() {
+  $searchClear?.classList.toggle("hidden", !$search.value);
+}
+
 $search.addEventListener("input", (e) => {
   state.query = e.target.value.trim();
+  syncSearchClear();
   renderDevices();
+});
+
+$searchClear?.addEventListener("click", () => {
+  $search.value = "";
+  state.query = "";
+  syncSearchClear();
+  renderDevices();
+  $search.focus();
 });
 
 // `/` focuses search, ESC clears
@@ -92,6 +109,7 @@ document.addEventListener("keydown", (e) => {
   } else if (e.key === "Escape" && document.activeElement === $search) {
     $search.value = "";
     state.query = "";
+    syncSearchClear();
     renderDevices();
   }
 });

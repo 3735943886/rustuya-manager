@@ -45,6 +45,10 @@
        hamburger button reads as a normal icon button, not a list bullet. */
     summary { list-style: none; cursor: pointer; }
     summary::-webkit-details-marker { display: none; }
+    /* WebKit shows its own cancel button on <input type="search">; we
+       supply a custom one for cross-browser consistency, so suppress the
+       native one to avoid two X icons stacked. */
+    input[type="search"]::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-900 dark:bg-slate-900 dark:text-slate-100 min-h-screen">
@@ -100,7 +104,11 @@
   </div>
 </header>
 
-<main class="max-w-6xl mx-auto px-4 py-3 space-y-4">
+<!-- Vertical rhythm: the header owns the 12px gap below its content via
+     its own py-3; main has no top padding so the header→first-section gap
+     also lands at 12px. space-y-3 + the search row's mb-3 keep every
+     in-main gap at the same 12px for a uniform cadence top to bottom. -->
+<main class="max-w-6xl mx-auto px-4 pt-0 pb-6 space-y-3">
 
   <!-- Summary lives inside the filter tabs (data-count on each) — see app.js -->
   <section id="summary" class="hidden"></section>
@@ -156,9 +164,23 @@
          wrap. Search + filter + sort all live on one logical row; flex-wrap
          lets it break naturally on narrow viewports. -->
     <div class="flex flex-wrap items-center gap-2 mb-3">
-      <input id="search-input" type="search" placeholder="search id / name / ip / cid"
-             class="flex-1 min-w-[180px] text-sm px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500">
-      <div class="flex flex-wrap gap-1 text-xs" id="filter-tabs">
+      <!-- Search input + clear button. The wrapper takes the flex/min-width
+           so the X stays glued to the right edge of the input regardless of
+           viewport. The native WebKit X is suppressed via CSS (see <head>),
+           so the custom button is the only cancel affordance on every
+           browser. -->
+      <div class="relative flex-1 min-w-[180px]">
+        <input id="search-input" type="search" placeholder="search id / name / ip / cid"
+               class="w-full text-sm pl-3 pr-8 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500">
+        <button type="button" id="search-clear" aria-label="Clear search" title="Clear" class="absolute right-1.5 top-1/2 -translate-y-1/2 hidden w-5 h-5 inline-flex items-center justify-center rounded-full text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs leading-none">
+          ✕
+        </button>
+      </div>
+      <!-- `order-last sm:order-none`: on narrow viewports the filter row
+           drops below search + sort (which pair up on one row), turning
+           a three-line stack into two lines. On sm+ everyone fits on one
+           line in DOM order. -->
+      <div class="flex flex-wrap gap-1 text-xs order-last sm:order-none" id="filter-tabs">
         <button data-filter="all"      class="px-2 py-1 rounded border border-slate-300 bg-white">all <span data-count></span></button>
         <button data-filter="missing"  class="px-2 py-1 rounded border border-slate-300 bg-white">missing <span data-count></span></button>
         <button data-filter="orphan"   class="px-2 py-1 rounded border border-slate-300 bg-white">orphan <span data-count></span></button>

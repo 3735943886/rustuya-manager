@@ -4,7 +4,7 @@ A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bri
 
 ## Key Features
 
-- **Status dashboard** — Synced / Mismatched / Missing / Orphaned categories by diffing the Tuya Cloud device list against the bridge's live state.
+- **Status dashboard** — Missing / Orphaned / Mismatched / Synced categories by diffing the Tuya Cloud device list against the bridge's live state.
 - **Built-in Tuya Cloud login** — fetch the device list straight from the web UI; no external tooling needed. A `tuyadevices.json` upload / drop-zone is still available for offline workflows.
 - **No separate config** — picks up the bridge's topic and payload templates from its retained `bridge/config`.
 - **Live updates over MQTT** — DPS values stream into the UI in real time.

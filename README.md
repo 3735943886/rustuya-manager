@@ -35,7 +35,7 @@ Run it by full path, or activate the venv first (`source ~/.venvs/rustuya-manage
 
 ```bash
 rustuya-manager --broker mqtt://localhost:1883 --root rustuya \
-                --web --port 8080 --auth admin:CHANGE_ME
+                --web --port 8373 --auth admin:CHANGE_ME
 ```
 Then open the URL printed at startup. The default bind is `127.0.0.1` so the UI is reachable only from the same machine. To open it to the LAN add `--host 0.0.0.0` — pair with a real `--auth user:pass`.
 
@@ -47,7 +47,7 @@ Common flags:
   `mqtt://[user:pass@]host:port`.
 - `--root TOPIC` (default `rustuya`) — must match the bridge's
   `--mqtt-root-topic`.
-- `--host`, `--port` (default `127.0.0.1:8080`) — web server bind.
+- `--host`, `--port` (default `127.0.0.1:8373`) — web server bind.
 - `--auth USER:PASS` (default off) — HTTP Basic auth for the web UI.
 - `--embed-bridge` (default off) — run the bridge inside this process
   via the `pyrustuyabridge` bindings (single-process deploy). Refused
@@ -98,6 +98,43 @@ pipx upgrade rustuya-manager                                   # pipx install
 ~/.venvs/rustuya-manager/bin/pip install -U rustuya-manager
 systemctl --user restart rustuya-manager
 ```
+
+## Docker
+
+Single-container deploy with the bridge bundled in. Aimed at HA OS,
+unraid, CasaOS, and similar container-first setups — distinct from the
+pipx + systemd track above, which keeps `rustuya-bridge` as a separate
+service.
+
+```bash
+docker run -d \
+  --name rustuya-manager \
+  -p 8373:8373 \
+  -e BROKER=mqtt://your-mosquitto-host:1883 \
+  -e AUTH=admin:CHANGE_ME \
+  -v rustuya-manager-data:/data \
+  3735943886/rustuya-manager:latest
+```
+
+The image runs `rustuya-manager --web --embed-bridge` — manager and
+bridge live in the same process, so the only external dependency is an
+MQTT broker.
+
+Environment variables (defaults shown; all optional unless noted):
+
+| Variable | Default | Maps to |
+|---|---|---|
+| `HOST` | `0.0.0.0` | `--host` |
+| `PORT` | `8373` | `--port` |
+| `BROKER` | `mqtt://localhost:1883` | `--broker` |
+| `ROOT` | `rustuya` | `--root` |
+| `AUTH` | *(off)* | `--auth USER:PASS` |
+| `CLOUD` | `tuyadevices.json` *(in `/data`)* | `--cloud` |
+| `BRIDGE_CONFIG` | *(off)* | `--bridge-config` |
+| `BRIDGE_STATE` | *(next to `CLOUD`)* | `--bridge-state` |
+
+The `/data` volume persists `tuyadevices.json`, `tuyacreds.json`, and
+the embedded bridge's state across restarts.
 
 ## License
 MIT

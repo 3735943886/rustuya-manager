@@ -1,0 +1,64 @@
+name: Docker
+
+# Fires on the same `v*` tag shape as release.yml. The Dockerfile builds
+# the wheel itself in a multi-stage build, so this workflow has no
+# dependency on PyPI publish completing — the two run in parallel.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Decide tag matrix
+        id: tags
+        # Plain `vX.Y.Z` is a stable release → also stamp `:X.Y` and `:latest`.
+        # Anything with a pre-release suffix (rc / a / b / dev) gets ONLY its
+        # exact version tag, so `:latest` and `:X.Y` always point at a
+        # stable build. Hand-rolled regex instead of docker/metadata-action's
+        # type=semver because PEP 440's `0.1.0rc6` isn't strict semver, and
+        # the action's `coerce()` strips the suffix entirely.
+        run: |
+          ref="${GITHUB_REF#refs/tags/v}"
+          image="3735943886/rustuya-manager"
+          tags="$image:$ref"
+          if [[ "$ref" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            minor="${ref%.*}"
+            tags="$tags,$image:$minor,$image:latest"
+          fi
+          echo "Will push: $tags"
+          echo "tags=$tags" >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        # arm64 emulation so we can build linux/arm64 from a Linux/amd64 runner
+        # (HA OS / Raspberry Pi users live there).
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          # GitHub Actions cache backs subsequent runs so unchanged layers
+          # (apt, pip wheel downloads) skip rebuilding on emulated arm64.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

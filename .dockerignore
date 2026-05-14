@@ -1,0 +1,17 @@
+# Trim the build context — anything not needed by `python -m build`
+# stays on the host. Smaller context = faster builds, fewer surprises.
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+build
+dist
+*.egg-info
+tests
+examples
+.gitignore
+Dockerfile
+.dockerignore

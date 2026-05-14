@@ -23,7 +23,7 @@ ExecStart=%h/.local/bin/rustuya-manager \
   --broker mqtt://localhost:1883 \
   --root rustuya \
   --web \
-  --port 8080 \
+  --port 8373 \
   --auth admin:CHANGE_ME \
   --cloud %h/.local/share/rustuya-manager/tuyadevices.json \
   --creds %h/.local/share/rustuya-manager/tuyacreds.json

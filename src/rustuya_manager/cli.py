@@ -450,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
             "0.0.0.0 to bind on every interface (pair with --auth)."
         ),
     )
-    parser.add_argument("--port", type=int, default=8080, help="Web server port (--web only)")
+    parser.add_argument("--port", type=int, default=8373, help="Web server port (--web only)")
     parser.add_argument(
         "--auth",
         default=None,

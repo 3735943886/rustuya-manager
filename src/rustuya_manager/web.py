@@ -290,11 +290,13 @@ def build_app(
     # class of "did my fix actually deploy?" confusion.
     _NO_CACHE = {"cache-control": "no-cache, must-revalidate"}
     if _STATIC_DIR.is_dir():
+
         class _NoCacheStaticFiles(StaticFiles):
             async def get_response(self, path, scope):
                 response = await super().get_response(path, scope)
                 response.headers.update(_NO_CACHE)
                 return response
+
         app.mount("/static", _NoCacheStaticFiles(directory=_STATIC_DIR), name="static")
 
     @app.get("/")

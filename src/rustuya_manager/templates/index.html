@@ -179,8 +179,13 @@
       <!-- `order-last sm:order-none`: on narrow viewports the filter row
            drops below search + sort (which pair up on one row), turning
            a three-line stack into two lines. On sm+ everyone fits on one
-           line in DOM order. -->
-      <div class="flex flex-wrap gap-1 text-xs order-last sm:order-none" id="filter-tabs">
+           line in DOM order.
+           `ml-auto sm:ml-0`: when filter is the lone item on its wrapped
+           row (mobile), the auto margin pushes it to the right edge so it
+           sits flush under sort. On sm+ the auto margin is removed —
+           otherwise it would steal flex-grow space from search and shrink
+           the search input. -->
+      <div class="flex flex-wrap gap-1 text-xs order-last sm:order-none ml-auto sm:ml-0" id="filter-tabs">
         <button data-filter="all"      class="px-2 py-1 rounded border border-slate-300 bg-white">all <span data-count></span></button>
         <button data-filter="missing"  class="px-2 py-1 rounded border border-slate-300 bg-white">missing <span data-count></span></button>
         <button data-filter="orphan"   class="px-2 py-1 rounded border border-slate-300 bg-white">orphan <span data-count></span></button>

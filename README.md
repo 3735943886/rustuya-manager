@@ -4,8 +4,8 @@ A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bri
 
 ## Key Features
 
-- **Status dashboard** — Synced / Mismatched / Missing / Orphaned categories by diffing your Tuya Cloud devices against the bridge's live state.
-- **Built-in Tuya Cloud login** — fetch your device list straight from the web UI; no external tooling needed. A `tuyadevices.json` upload / drop-zone is still available for offline workflows.
+- **Status dashboard** — Synced / Mismatched / Missing / Orphaned categories by diffing the Tuya Cloud device list against the bridge's live state.
+- **Built-in Tuya Cloud login** — fetch the device list straight from the web UI; no external tooling needed. A `tuyadevices.json` upload / drop-zone is still available for offline workflows.
 - **No separate config** — picks up the bridge's topic and payload templates from its retained `bridge/config`.
 - **Live updates over MQTT** — DPS values stream into the UI in real time.
 - **Web UI** — single-page UI with search, sort, sub-device tree, per-device add / edit / remove and bulk-sync.
@@ -23,13 +23,13 @@ pipx ensurepath
 pipx install rustuya-manager
 ```
 
-**venv + pip** — in case you prefer a plain venv over adding pipx:
+**venv + pip** — alternative install without pipx:
 ```bash
 python3 -m venv ~/.venvs/rustuya-manager
 ~/.venvs/rustuya-manager/bin/pip install rustuya-manager
 ~/.venvs/rustuya-manager/bin/rustuya-manager --help
 ```
-Run it by full path, or activate the venv first (`source ~/.venvs/rustuya-manager/bin/activate`). The systemd unit in the next section assumes the pipx path — change `ExecStart` to `%h/.venvs/rustuya-manager/bin/rustuya-manager` if you went the venv route.
+Run it by full path, or activate the venv first (`source ~/.venvs/rustuya-manager/bin/activate`). The systemd unit in the next section assumes the pipx path — change `ExecStart` to `%h/.venvs/rustuya-manager/bin/rustuya-manager` for the venv install.
 
 ### Run
 
@@ -41,8 +41,8 @@ Then open the URL printed at startup. The default bind is `127.0.0.1` so the UI 
 
 Common flags:
 - `--cloud PATH` (default `tuyadevices.json`) — Tuya devices JSON. If
-  missing, the web UI prompts you to either log in to Tuya Cloud
-  in-app or drop a JSON file.
+  missing, the web UI offers an in-app Tuya Cloud login or a JSON
+  drop-zone.
 - `--broker URL` (default `mqtt://localhost:1883`) — accepts
   `mqtt://[user:pass@]host:port`.
 - `--root TOPIC` (default `rustuya`) — must match the bridge's
@@ -58,7 +58,7 @@ Common flags:
 - `--bridge-config PATH` (default off) — JSON config file for the
   embedded bridge. Same format as `rustuya-bridge --config`: existing
   file is read and merged, missing file is auto-created from the
-  merged settings. Lets you set custom topics / MQTT auth / scanner
+  merged settings. Allows setting custom topics / MQTT auth / scanner
   options without re-exposing every bridge flag here. **Only meaningful
   with `--embed-bridge`** — ignored otherwise.
 
@@ -79,7 +79,7 @@ Common flags:
 ```bash
 mkdir -p ~/.config/systemd/user ~/.local/share/rustuya-manager
 cp examples/rustuya-manager.service ~/.config/systemd/user/
-# edit the file — change --auth, --broker, --root to match your setup
+# edit the file — change --auth, --broker, --root to match the local setup
 systemctl --user daemon-reload
 systemctl --user enable --now rustuya-manager
 journalctl --user -u rustuya-manager -f         # follow logs

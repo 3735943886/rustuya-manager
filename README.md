@@ -1,16 +1,14 @@
 # Rustuya Manager
 
-A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) that synchronizes Tuya devices between the Tuya Cloud (via `tuyadevices.json`) and the running bridge. Ships with both a CLI mode and a web UI.
-
-> [!TIP]
-> Use **[tuyawizard](https://github.com/3735943886/tuyawizard)** to generate `tuyadevices.json` from your Tuya Cloud account.
+A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) that diffs Tuya Cloud devices against the running bridge and syncs add / remove / update operations. Ships with a web UI (with built-in Tuya Cloud login) and a CLI.
 
 ## Key Features
 
-- **Status dashboard** — Synced / Mismatched / Missing / Orphaned categories by diffing your cloud JSON against the bridge's live state.
+- **Status dashboard** — Synced / Mismatched / Missing / Orphaned categories by diffing your Tuya Cloud devices against the bridge's live state.
+- **Built-in Tuya Cloud login** — fetch your device list straight from the web UI; no external tooling needed. A `tuyadevices.json` upload / drop-zone is still available for offline workflows.
 - **No separate config** — picks up the bridge's topic and payload templates from its retained `bridge/config`.
 - **Live updates over MQTT** — DPS values stream into the UI in real time.
-- **Web UI + CLI** — single-page UI with drag-and-drop cloud-JSON upload, search, sort, sub-device tree, per-device add/edit/remove. CLI prints diff + event stream for SSH-style workflows.
+- **Web UI + CLI** — single-page UI with search, sort, sub-device tree, per-device add / edit / remove and bulk-sync. CLI prints diff + event stream for SSH-style workflows.
 
 ## Quick Start
 
@@ -42,7 +40,8 @@ Then open the URL printed at startup. The default bind is `127.0.0.1` so the UI 
 
 Common flags:
 - `--cloud PATH` (default `tuyadevices.json`) — Tuya devices JSON. If
-  missing, the UI shows a drop-zone for upload.
+  missing, the web UI prompts you to either log in to Tuya Cloud
+  in-app or drop a JSON file.
 - `--broker URL` (default `mqtt://localhost:1883`) — accepts
   `mqtt://[user:pass@]host:port`.
 - `--root TOPIC` (default `rustuya`) — must match the bridge's

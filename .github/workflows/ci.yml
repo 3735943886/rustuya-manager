@@ -1,10 +1,8 @@
 name: CI
 
 # Runs on PRs targeting master and on direct pushes to master.
-# Tests under both the lowest supported Python (3.10, the `requires-python`
-# floor) and a current release (3.12). The pair catches deprecation/removal
-# regressions in either direction; 3.11 is interpolated and covered in
-# practice by the 3.10-or-3.12 result.
+# The actual ruff + pytest matrix lives in _test.yml so the same checks
+# also run as a pre-flight inside release.yml and docker-publish.yml.
 
 on:
   push:
@@ -21,63 +19,7 @@ concurrency:
 
 jobs:
   test:
-    name: test (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.12"]
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install + start mosquitto
-        # The e2e tests shell out to mosquitto_pub / mosquitto_sub and connect
-        # PyBridgeServer to localhost:1883. Mosquitto >= 2.0 ships with
-        # allow_anonymous defaulting to false, so we drop a CI-only config
-        # that re-enables anonymous on the default port before starting it.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mosquitto mosquitto-clients
-          sudo tee /etc/mosquitto/conf.d/ci.conf > /dev/null <<'EOF'
-          listener 1883
-          allow_anonymous true
-          EOF
-          sudo systemctl restart mosquitto
-          # Wait for the broker to actually accept connections before tests
-          # try to use it — systemd reports "active" before the listener is
-          # ready under some kernel/seccomp combos.
-          for _ in $(seq 1 20); do
-            if mosquitto_sub -h localhost -t '$SYS/broker/version' -C 1 -W 2 >/dev/null 2>&1; then
-              echo "mosquitto reachable"
-              exit 0
-            fi
-            sleep 0.5
-          done
-          echo "mosquitto did not become reachable"
-          sudo journalctl -u mosquitto --no-pager | tail -50
-          exit 1
-
-      - name: Install package + dev extras
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: ruff check
-        run: ruff check src tests
-
-      - name: ruff format --check
-        run: ruff format --check src tests
-
-      - name: pytest
-        # -q to keep logs compact; the e2e suite alone takes ~30s.
-        run: pytest -q
+    uses: ./.github/workflows/_test.yml
 
   build:
     name: build wheel

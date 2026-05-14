@@ -42,10 +42,19 @@ WORKDIR /data
 #     published port — loopback inside the container is useless.
 #   * `mqtt://localhost:1883` is a placeholder; almost every real
 #     deploy will override BROKER to point at a sibling container.
+#   * Three persistent-state paths all land in `/data` so every artifact
+#     the running stack produces — cloud cache, wizard creds, bridge
+#     config, bridge state — is in the same volume and discoverable via
+#     `docker exec`. `rustuya.json` (not `bridge-state.json`) matches
+#     the standalone bridge's own DEFAULT_STATE_FILE so the on-disk
+#     layout is identical to a manual install.
 ENV HOST=0.0.0.0 \
     PORT=8373 \
     BROKER=mqtt://localhost:1883 \
-    ROOT=rustuya
+    ROOT=rustuya \
+    CLOUD=/data/tuyadevices.json \
+    BRIDGE_CONFIG=/data/config.json \
+    BRIDGE_STATE=/data/rustuya.json
 
 EXPOSE 8373
 

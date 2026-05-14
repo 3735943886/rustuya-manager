@@ -32,8 +32,13 @@ permissions:
   id-token: write
 
 jobs:
+  # Same checks as CI — gates the publish so a broken tag can't reach PyPI.
+  test:
+    uses: ./.github/workflows/_test.yml
+
   publish:
     name: Build + publish
+    needs: test
     runs-on: ubuntu-latest
 
     steps:

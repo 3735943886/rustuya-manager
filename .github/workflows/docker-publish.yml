@@ -9,7 +9,13 @@ on:
       - "v*"
 
 jobs:
+  # Same checks as CI — gates the image build so a broken tag can't reach
+  # Docker Hub.
+  test:
+    uses: ./.github/workflows/_test.yml
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

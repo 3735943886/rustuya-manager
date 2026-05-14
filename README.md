@@ -109,7 +109,7 @@ service.
 ```bash
 docker run -d \
   --name rustuya-manager \
-  -p 8373:8373 \
+  --network host \
   -e BROKER=mqtt://your-mosquitto-host:1883 \
   -e AUTH=admin:CHANGE_ME \
   -v rustuya-manager-data:/data \
@@ -120,6 +120,14 @@ The image runs `rustuya-manager --web --embed-bridge` — manager and
 bridge live in the same process, so the only external dependency is an
 MQTT broker.
 
+`--network host` is **required**: the embedded `rustuya-bridge` scans
+the LAN with UDP broadcasts on ports 6666/6667 to discover Tuya
+devices, and Docker's default bridge network isolates broadcast
+traffic to the docker bridge — devices are never seen. Host networking
+gives the container direct access to the LAN segment. (With host
+networking the `-p` flag is unnecessary; the container binds `PORT`
+directly on the host.)
+
 Environment variables (defaults shown; all optional unless noted):
 
 | Variable | Default | Maps to |
@@ -129,12 +137,16 @@ Environment variables (defaults shown; all optional unless noted):
 | `BROKER` | `mqtt://localhost:1883` | `--broker` |
 | `ROOT` | `rustuya` | `--root` |
 | `AUTH` | *(off)* | `--auth USER:PASS` |
-| `CLOUD` | `tuyadevices.json` *(in `/data`)* | `--cloud` |
-| `BRIDGE_CONFIG` | *(off)* | `--bridge-config` |
-| `BRIDGE_STATE` | *(next to `CLOUD`)* | `--bridge-state` |
+| `CLOUD` | `/data/tuyadevices.json` | `--cloud` |
+| `BRIDGE_CONFIG` | `/data/config.json` | `--bridge-config` |
+| `BRIDGE_STATE` | `/data/rustuya.json` | `--bridge-state` |
 
-The `/data` volume persists `tuyadevices.json`, `tuyacreds.json`, and
-the embedded bridge's state across restarts.
+Every persistent artifact — cloud cache (`tuyadevices.json`), wizard
+credentials (`tuyacreds.json`), embedded bridge config (`config.json`,
+auto-created on first run from defaults), and bridge state
+(`rustuya.json`) — lives under `/data` so the volume is the sole
+backup target. To disable any of the optional flags pass an empty
+value, e.g. `-e BRIDGE_CONFIG=` to skip writing a bridge config file.
 
 ## License
 MIT

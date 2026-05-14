@@ -168,4 +168,11 @@ export function initWizardModal() {
   $wizardUserCode?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") startWizard();
   });
+  // ESC mirrors the X / Cancel buttons so the wizard's dismissal story
+  // matches every other modal in the app (confirm, device, sync).
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$wizardModal.classList.contains("hidden")) {
+      cancelWizard();
+    }
+  });
 }

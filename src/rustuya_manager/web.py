@@ -144,7 +144,7 @@ def build_app(
     creds_path: str | None = None,
     auth: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version="0.1.0rc4")
+    app = FastAPI(title="rustuya-manager", version="0.1.0rc5")
     if auth:
         if ":" not in auth:
             raise ValueError("--auth must be in 'user:password' form")

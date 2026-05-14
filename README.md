@@ -99,12 +99,5 @@ pipx upgrade rustuya-manager                                   # pipx install
 systemctl --user restart rustuya-manager
 ```
 
-## Development
-
-```bash
-pip install -e ".[dev]"
-pytest -q
-```
-
 ## License
 MIT

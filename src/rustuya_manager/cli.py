@@ -158,7 +158,10 @@ def _print_diff(diff: DiffResult) -> None:
         for dev, reasons in diff.mismatched:
             print(f"    - {dev.id} ({dev.name}): {'; '.join(reasons)}")
     if not diff.has_changes:
-        print("  ✓ Bridge and cloud match.")
+        # No-changes line lives at column 0 (like `✓ Bootstrap complete`)
+        # rather than indented as a "detail" of a section that doesn't
+        # exist — the alignment with sibling status messages reads cleaner.
+        print("✓ Bridge and cloud match.")
     print()
 
 

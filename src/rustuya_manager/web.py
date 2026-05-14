@@ -280,14 +280,28 @@ def build_app(
 
     # Static assets (JS, eventual CSS, icons). Tailwind comes from a CDN inside
     # the HTML, so there's no build step.
+    #
+    # `Cache-Control: no-cache` forces every load to revalidate against the
+    # server's ETag / Last-Modified — when nothing changed, Starlette returns
+    # 304 with no body, so the perceived cost is negligible. The alternative
+    # (default heuristic caching) bites every release: ES-module imports use
+    # bare paths like `./state.js`, so a `?v=` busted root script.js still
+    # pulls stale siblings out of disk cache. Revalidation skips that whole
+    # class of "did my fix actually deploy?" confusion.
+    _NO_CACHE = {"cache-control": "no-cache, must-revalidate"}
     if _STATIC_DIR.is_dir():
-        app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+        class _NoCacheStaticFiles(StaticFiles):
+            async def get_response(self, path, scope):
+                response = await super().get_response(path, scope)
+                response.headers.update(_NO_CACHE)
+                return response
+        app.mount("/static", _NoCacheStaticFiles(directory=_STATIC_DIR), name="static")
 
     @app.get("/")
     async def root() -> FileResponse:
         index = _TEMPLATES_DIR / "index.html"
         if not index.exists():
             raise HTTPException(500, "index.html missing from package")
-        return FileResponse(index, media_type="text/html")
+        return FileResponse(index, media_type="text/html", headers=_NO_CACHE)
 
     return app

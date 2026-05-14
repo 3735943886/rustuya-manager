@@ -71,8 +71,8 @@ Common flags:
     3. manager default (`mqtt://localhost:1883`, `rustuya`)
 
   If a CLI flag and the bridge-config value disagree, the CLI value
-  wins (the embedded bridge ends up with the same kwarg) and a warning
-  is logged so the contradiction doesn't go unnoticed.
+  overrides (the embedded bridge ends up with the same kwarg) and a
+  warning is logged so the contradiction doesn't go unnoticed.
 
 ### Run as a service (systemd, user-level, no sudo)
 

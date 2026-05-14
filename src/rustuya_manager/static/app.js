@@ -64,14 +64,15 @@ $filterTabs.addEventListener("click", (ev) => {
   if (!btn) return;
   const key = btn.dataset.filter;
   if (key === "all") {
-    // "all" is a reset, not a toggle — always end up with every category on.
-    state.filters = new Set(ALL_CATEGORIES);
+    // Master toggle: all-on flips to all-off, anything else (partial or
+    // all-off) flips to all-on. Snap-back-on-empty used to be here; it
+    // overrode legitimate "hide everything" intent. The empty-state pane
+    // now guides recovery.
+    const allOn = ALL_CATEGORIES.every((c) => state.filters.has(c));
+    state.filters = new Set(allOn ? [] : ALL_CATEGORIES);
   } else {
     if (state.filters.has(key)) state.filters.delete(key);
     else state.filters.add(key);
-    // Empty filter would hide every card, which reads as a broken UI. Snap
-    // back to all-on so the user always sees *something*.
-    if (state.filters.size === 0) state.filters = new Set(ALL_CATEGORIES);
   }
   saveFilters();
   if (state.snapshot) renderFilterCounts();   // reapply active/idle styles

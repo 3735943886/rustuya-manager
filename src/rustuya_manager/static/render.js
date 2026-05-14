@@ -276,10 +276,24 @@ function visibleEntries() {
   return out;
 }
 
+function describeEmptyReason() {
+  // Tell the user *why* the list is empty so they know how to recover.
+  // The most common case used to be hidden behind a snap-back; now the
+  // empty-state owns that explanation.
+  if (state.filters.size === 0) {
+    return "No category enabled — click a filter above (or “all”) to show devices.";
+  }
+  if (state.query) {
+    return `No devices match “${state.query}”.`;
+  }
+  return "No devices match the active filter.";
+}
+
 export function renderDevices() {
   $list.innerHTML = "";
   const entries = visibleEntries();
   if (entries.length === 0) {
+    $empty.textContent = describeEmptyReason();
     $empty.classList.remove("hidden");
     return;
   }

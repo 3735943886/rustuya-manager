@@ -13,16 +13,18 @@ const VALID_SORT_KEYS = new Set(["id", "name", "status", "category"]);
 const savedSortKey = localStorage.getItem("sortKey");
 
 // Filter is a facet-style multi-toggle: each real sync class is independently
-// on/off. The "all" button is a reset (turns every category back on); when
-// every category is on, "all" reads as active. "ungrouped" is the no-cloud
-// state and always shows — it isn't a togglable category.
+// on/off. The "all" button is a master toggle — flips between "all on" and
+// "all off"; when every category is on it reads as active. "ungrouped" is
+// the no-cloud state and always shows — it isn't a togglable category.
+// An empty filter set is a legitimate "show nothing" state (the empty-state
+// pane explains how to recover), so we persist it as-is rather than
+// snapping back to defaults.
 export const ALL_CATEGORIES = ["missing", "orphan", "mismatch", "synced"];
 const savedFilters = (() => {
   try {
     const arr = JSON.parse(localStorage.getItem("filters") || "null");
     if (!Array.isArray(arr)) return null;
-    const valid = arr.filter((f) => ALL_CATEGORIES.includes(f));
-    return valid.length > 0 ? valid : null;
+    return arr.filter((f) => ALL_CATEGORIES.includes(f));
   } catch {
     return null;
   }

@@ -165,15 +165,19 @@
         <button data-filter="mismatch" class="px-2 py-1 rounded border border-slate-300 bg-white">mismatch <span data-count></span></button>
         <button data-filter="synced"   class="px-2 py-1 rounded border border-slate-300 bg-white">synced <span data-count></span></button>
       </div>
-      <label class="text-xs text-slate-500 dark:text-slate-400">
-        sort
-        <select id="sort-select" class="ml-1 text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+      <!-- The external "sort" label is folded into the select itself via
+           <optgroup label="sort by">. Native browsers render the optgroup
+           label as a non-selectable italic header when the dropdown is
+           open, so the context is preserved without spending a row on a
+           separate label. Closed state shows only the current value. -->
+      <select id="sort-select" title="Sort devices" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+        <optgroup label="sort by">
           <option value="id">id</option>
           <option value="name">name</option>
           <option value="status">status</option>
           <option value="category">category</option>
-        </select>
-      </label>
+        </optgroup>
+      </select>
     </div>
     <div id="device-list" class="space-y-2"></div>
     <div id="empty-state" class="hidden bg-white dark:bg-slate-800 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-6 text-center text-slate-500 dark:text-slate-400 text-sm">

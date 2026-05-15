@@ -311,6 +311,11 @@ _ANNOTATE_JS = r"""
         '<b>Mismatch</b> — click <b>Update</b> to push cloud → bridge.',
         1390, 340
     );
+    annotate(
+        findCardByName('Heavy Duty Outlet'),
+        '<b>Synced</b> — in both, fields match. Click row to expand · live DPs.',
+        1390, 420
+    );
 }
 """
 

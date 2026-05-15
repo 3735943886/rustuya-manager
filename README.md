@@ -132,9 +132,7 @@ MQTT broker.
 the LAN with UDP broadcasts on ports 6666/6667 to discover Tuya
 devices, and Docker's default bridge network isolates broadcast
 traffic to the docker bridge — devices are never seen. Host networking
-gives the container direct access to the LAN segment. (With host
-networking the `-p` flag is unnecessary; the container binds `PORT`
-directly on the host.)
+gives the container direct access to the LAN segment.
 
 Environment variables (defaults shown; all optional unless noted):
 

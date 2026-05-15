@@ -278,23 +278,33 @@ _ANNOTATE_JS = r"""
 
     annotate(
         document.querySelector('header .ml-auto > div'),
-        'Quick actions:<br><b>+</b> add · <b>☁</b> cloud · <b>🌙</b> theme · <b>⟳</b> refresh',
-        1390, 20
+        'Top-right: <b>+</b> add · <b>☁</b> cloud · <b>🌙</b> theme · <b>⟳</b> refresh',
+        1390, 15
+    );
+    annotate(
+        document.querySelector('#sync-bar'),
+        '<b>Bulk sync</b> — fix one category or apply all.',
+        1390, 80
+    );
+    annotate(
+        document.querySelector('#search-input').closest('.flex'),
+        '<b>Search · filter · sort</b> — narrow the list.',
+        1390, 135
     );
     annotate(
         findCardByName('legacy-device'),
         '<b>Orphan</b> — only in bridge. Click <b>🗑</b> to remove.',
-        1390, 175
+        1390, 190
     );
     annotate(
         findCardByName('Floor Lamp'),
         '<b>Missing</b> — only in cloud. Click <b>Add</b> to publish.',
-        1390, 250
+        1390, 265
     );
     annotate(
         findCardByName('RF Hub'),
-        '<b>Mismatch</b> — fields differ. Click <b>Update</b> to push cloud → bridge.',
-        1390, 325
+        '<b>Mismatch</b> — click <b>Update</b> to push cloud → bridge.',
+        1390, 340
     );
 }
 """

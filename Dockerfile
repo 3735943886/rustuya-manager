@@ -21,20 +21,25 @@ RUN python -m build --wheel
 
 FROM python:3.12-slim
 
+# gosu is a tiny (~1.2MB) setuid-safe replacement for `su` / `sudo`,
+# used by the entrypoint to drop from root to the `manager` user once
+# UID/GID renumbering and /data chown are done.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/*
+
 # pyrustuyabridge ships a manylinux wheel that bundles the Rust binary,
 # so the runtime image needs no compilers — just the Python deps.
 COPY --from=builder /build/dist/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl
 
-# Non-root runtime user. `/data` is the persistent mount point —
-# `tuyadevices.json`, `tuyacreds.json`, and the embedded bridge's
-# `bridge-state.json` all live here so a container restart preserves
-# the cloud cache, wizard credentials, and the bridge's view of what's
-# running.
+# Pre-create the manager user. The actual UID/GID is reset by the
+# entrypoint from PUID/PGID env vars so that bind-mounts owned by any
+# host UID work without pre-chowning the directory; the user name is
+# the only stable handle.
 RUN useradd --create-home --shell /usr/sbin/nologin manager \
-    && mkdir -p /data \
-    && chown manager:manager /data
-USER manager
+    && mkdir -p /data
+
 WORKDIR /data
 
 # Defaults tuned for the container-first persona:
@@ -48,29 +53,26 @@ WORKDIR /data
 #     `docker exec`. `rustuya.json` (not `bridge-state.json`) matches
 #     the standalone bridge's own DEFAULT_STATE_FILE so the on-disk
 #     layout is identical to a manual install.
+#   * PUID/PGID default to 1000 which matches the first non-root user
+#     on most desktop / Pi / Armbian installs. Override with
+#     `-e PUID=$(id -u) -e PGID=$(id -g)` for hosts where the data
+#     directory is owned by a different UID (NAS, HA OS, etc.).
 ENV HOST=0.0.0.0 \
     PORT=8373 \
     BROKER=mqtt://localhost:1883 \
     ROOT=rustuya \
     CLOUD=/data/tuyadevices.json \
     BRIDGE_CONFIG=/data/config.json \
-    BRIDGE_STATE=/data/rustuya.json
+    BRIDGE_STATE=/data/rustuya.json \
+    PUID=1000 \
+    PGID=1000
 
 EXPOSE 8373
 
-# Shell-form CMD so the `${VAR:+--flag $VAR}` pattern works — optional
-# flags only appear when their env var is non-empty, keeping the command
-# usable without extra config. `exec` hands PID 1 to the python process
-# so SIGTERM from `docker stop` propagates straight to uvicorn / the
-# embedded bridge instead of being swallowed by /bin/sh.
-CMD exec rustuya-manager \
-    --web \
-    --embed-bridge \
-    --host "$HOST" \
-    --port "$PORT" \
-    --broker "$BROKER" \
-    --root "$ROOT" \
-    ${AUTH:+--auth "$AUTH"} \
-    ${CLOUD:+--cloud "$CLOUD"} \
-    ${BRIDGE_CONFIG:+--bridge-config "$BRIDGE_CONFIG"} \
-    ${BRIDGE_STATE:+--bridge-state "$BRIDGE_STATE"}
+# Entrypoint starts as root, renumbers manager to PUID/PGID, chowns
+# /data, then re-execs itself under `gosu manager` so the actual app
+# runs unprivileged. See docker-entrypoint.sh for details.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

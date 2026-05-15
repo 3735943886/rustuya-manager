@@ -173,6 +173,8 @@ Environment variables (defaults shown; all optional unless noted):
 | `CLOUD` | `/data/tuyadevices.json` | `--cloud` |
 | `BRIDGE_CONFIG` | `/data/config.json` | `--bridge-config` |
 | `BRIDGE_STATE` | `/data/rustuya.json` | `--bridge-state` |
+| `PUID` | `1000` | UID the app runs as |
+| `PGID` | `1000` | GID the app runs as |
 
 Every persistent artifact — cloud cache (`tuyadevices.json`), wizard
 credentials (`tuyacreds.json`), embedded bridge config (`config.json`,
@@ -180,6 +182,18 @@ auto-created on first run from defaults), and bridge state
 (`rustuya.json`) — lives under `/data` so the volume is the sole
 backup target. To disable any of the optional flags pass an empty
 value, e.g. `-e BRIDGE_CONFIG=` to skip writing a bridge config file.
+
+For **bind-mounted** host directories (`-v /host/path:/data` instead
+of the named-volume `rustuya-manager-data:/data`), pass `PUID`/`PGID`
+so the in-container user can write to them:
+
+```bash
+-e PUID=$(id -u) -e PGID=$(id -g)
+```
+
+The entrypoint then renumbers its internal `manager` user to that
+UID/GID and `chown`s `/data` on startup, so any host owner works. With
+named volumes Docker handles ownership and the defaults are fine.
 
 ## License
 MIT

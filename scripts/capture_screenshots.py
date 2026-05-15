@@ -276,6 +276,11 @@ _ANNOTATE_JS = r"""
         svg.appendChild(dot);
     }
 
+    // Callouts stack on a uniform 65px vertical rhythm (~50px tall +
+    // ~15px gap) regardless of where their targets sit, so the right
+    // column reads as an evenly-spaced legend. The arrows absorb any
+    // small diagonal that introduces — readers track callout-to-target
+    // by following the line, not by horizontal alignment.
     annotate(
         document.querySelector('header .ml-auto > div'),
         'Top-right: <b>+</b> add · <b>☁</b> cloud · <b>🌙</b> theme · <b>⟳</b> refresh',
@@ -289,17 +294,17 @@ _ANNOTATE_JS = r"""
     annotate(
         document.querySelector('#search-input').closest('.flex'),
         '<b>Search · filter · sort</b> — narrow the list.',
-        1390, 135
+        1390, 145
     );
     annotate(
         findCardByName('legacy-device'),
         '<b>Orphan</b> — only in bridge. Click <b>🗑</b> to remove.',
-        1390, 190
+        1390, 210
     );
     annotate(
         findCardByName('Floor Lamp'),
         '<b>Missing</b> — only in cloud. Click <b>Add</b> to publish.',
-        1390, 265
+        1390, 275
     );
     annotate(
         findCardByName('RF Hub'),

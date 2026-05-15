@@ -205,6 +205,22 @@ export function deviceCard(id, cls, isChild) {
   }
   card.appendChild(headerBottom);
 
+  // Collapsed cards in the `synced` category have no other visual signal
+  // for a live bridge error — mismatch / missing / orphan already telegraph
+  // a data-state problem via the edge stripe and washed background, so
+  // overlaying a runtime error on top would be noise. Synced cards stay
+  // neutral, so when one of them errors (e.g. ERR_STATE 906 / ip_mismatch)
+  // the message would otherwise be invisible behind a collapsed row.
+  // Render the formatted MSG as a third row so it reads at a glance; the
+  // expanded view already shows the same message in the field grid.
+  if (!isExpanded && cls === "synced" && live?.state === "offline" && live.message) {
+    const errLine = document.createElement("div");
+    errLine.className = "mt-0.5 text-[11px] text-rose-600 dark:text-rose-400 truncate min-w-0";
+    errLine.title = live.message;
+    errLine.textContent = `⚠ ${live.message}`;
+    card.appendChild(errLine);
+  }
+
   if (!isExpanded) return card;
 
   // ── Expanded body: field grid + mismatch reasons + DPS chips ───────────

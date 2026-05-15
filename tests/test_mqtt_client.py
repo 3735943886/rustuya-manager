@@ -21,7 +21,11 @@ from unittest.mock import MagicMock
 import paho.mqtt.client as mqtt
 import pytest
 
-from rustuya_manager.mqtt import BRIDGE_CONFIG_TOPIC_TPL, BridgeClient
+from rustuya_manager.mqtt import (
+    BRIDGE_CONFIG_TOPIC_TPL,
+    BridgeClient,
+    _format_error_message,
+)
 from rustuya_manager.state import BridgeTemplates, State
 
 # Sample bridge/config that mirrors the custom topology used in our e2e:
@@ -515,6 +519,67 @@ class TestBridgeOfflineWarning:
         # the dispatch tests above; _on_bridge_config picks it up and clears.
         await client._on_bridge_config(json.dumps(CUSTOM_CONFIG))
         assert "bridge_offline" not in client.state.warnings
+
+
+class TestFormatErrorMessage:
+    """`_format_error_message` is the bridge-error renderer used for the UI's
+    MSG cell. It must take any structured error payload and produce a single
+    line — without per-errorCode special-casing, so new error variants from
+    rustuya don't require manager updates."""
+
+    def test_plain_error_returns_just_msg(self):
+        assert (
+            _format_error_message({"errorCode": 100, "errorMsg": "Device offline"})
+            == "Device offline"
+        )
+
+    def test_envelope_only_returns_empty_string(self):
+        # No errorMsg, no payloadStr, no extras — still safe (no crash).
+        assert _format_error_message({"errorCode": 100}) == ""
+
+    def test_ip_mismatch_appends_structured_extras(self):
+        # The 906 / ip_mismatch payload shape from rustuya 0.2.6. The formatter
+        # has no knowledge of 906 specifically — it just appends every scalar
+        # extra after the base errorMsg.
+        msg = _format_error_message(
+            {
+                "errorCode": 906,
+                "errorMsg": "State error",
+                "reason": "ip_mismatch",
+                "configured": "192.168.1.10",
+                "discovered": "192.168.1.42",
+            }
+        )
+        assert msg.startswith("State error (")
+        assert msg.endswith(")")
+        assert "reason=ip_mismatch" in msg
+        assert "configured=192.168.1.10" in msg
+        assert "discovered=192.168.1.42" in msg
+
+    def test_payload_str_fallback_when_no_error_msg(self):
+        assert (
+            _format_error_message({"errorCode": 500, "payloadStr": "raw garbage"}) == "raw garbage"
+        )
+
+    def test_nested_extras_skipped(self):
+        # Lists/dicts as extra fields would blow out the single-line MSG cell,
+        # so the formatter only includes scalar extras.
+        msg = _format_error_message(
+            {
+                "errorCode": 500,
+                "errorMsg": "Boom",
+                "trace": ["a", "b"],  # list — skipped
+                "detail": {"k": "v"},  # dict — skipped
+                "code_str": "abc",  # scalar — kept
+            }
+        )
+        assert msg == "Boom (code_str=abc)"
+
+    def test_extras_only_when_no_base_msg(self):
+        # No errorMsg/payloadStr but structured extras: render the extras
+        # alone so the user still sees something diagnostic.
+        msg = _format_error_message({"errorCode": 906, "reason": "ip_mismatch"})
+        assert msg == "reason=ip_mismatch"
 
 
 # pytest-asyncio integration — auto mode is the simplest setup for our needs.

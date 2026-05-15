@@ -41,6 +41,37 @@ logger = logging.getLogger(__name__)
 BRIDGE_CONFIG_TOPIC_TPL = "{root}/bridge/config"
 BOOTSTRAP_TIMEOUT_SEC = 5.0
 
+# Wrapper/envelope keys the bridge's error_helper always emits — they belong
+# to the error frame itself, not the per-error detail. Anything else in the
+# payload is treated as structured detail and surfaced after errorMsg.
+_ERROR_ENVELOPE_KEYS = frozenset(
+    {"errorCode", "errorMsg", "payloadStr", "errorPayloadObj", "payloadRaw"}
+)
+
+
+def _format_error_message(parsed: dict[str, Any]) -> str:
+    """Render a bridge error payload as a single human-readable line.
+
+    The bridge ships every error as `{errorCode, errorMsg, ...}` where the
+    `...` is whatever structured context the device task chose to attach —
+    e.g. `{reason: "ip_mismatch", configured, discovered}` for fixed-IP
+    devices whose scanner sighting drifted. We append those extras to the
+    base `errorMsg` so the UI surfaces them without per-code branching: any
+    future error variant gets formatted the same way as soon as the bridge
+    starts emitting it. Scalar fields only — nested dicts/lists would blow
+    the single-line MSG cell out.
+    """
+    base = parsed.get("errorMsg") or parsed.get("payloadStr") or ""
+    extras = {
+        k: v
+        for k, v in parsed.items()
+        if k not in _ERROR_ENVELOPE_KEYS and v is not None and not isinstance(v, (dict, list))
+    }
+    if not extras:
+        return str(base)
+    details = ", ".join(f"{k}={v}" for k, v in extras.items())
+    return f"{base} ({details})" if base else details
+
 
 def _parse_broker_url(broker: str) -> tuple[str, int]:
     """Accepts 'mqtt://host:port' or 'host:port' or 'host'."""
@@ -366,7 +397,7 @@ class BridgeClient:
                 # any non-zero code means the device is unreachable / errored.
                 if level == "error" and target != "bridge" and "errorCode" in parsed:
                     code = parsed.get("errorCode")
-                    msg = parsed.get("errorMsg") or parsed.get("payloadStr") or ""
+                    msg = _format_error_message(parsed)
                     online = code == 0
                     await self.state.set_live_status(
                         target,

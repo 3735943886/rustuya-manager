@@ -185,7 +185,7 @@ def _spawn_embedded_bridge(args: argparse.Namespace) -> tuple[Any, threading.Thr
     """
     import pyrustuyabridge as pb  # imported lazily — only needed when embedding
 
-    default_state = Path(args.cloud).resolve().parent / "bridge-state.json"
+    default_state = Path(args.cloud).resolve().parent / "rustuya.json"
     state_file = args.bridge_state or str(default_state)
 
     # The manager owns broker / root / state-file / log-level — embedded bridge
@@ -482,7 +482,8 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help=(
             "Path to the embedded bridge's state file (--embed-bridge only). "
-            "Default: bridge-state.json next to the cloud file."
+            "Default: rustuya.json in the same directory as the cloud "
+            "file (matches the standalone bridge's DEFAULT_STATE_FILE)."
         ),
     )
     parser.add_argument(

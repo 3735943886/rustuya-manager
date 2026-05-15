@@ -117,9 +117,10 @@ Common flags:
 - `--embed-bridge` (default off) — run the bridge inside this process
   via the `pyrustuyabridge` bindings (single-process deploy). Refused
   at startup if another bridge already publishes on `--root`.
-- `--bridge-state PATH` (default: `bridge-state.json` next to
-  `--cloud`) — embedded bridge's device state file. **Only meaningful
-  with `--embed-bridge`.**
+- `--bridge-state PATH` (default: `rustuya.json` in the same
+  directory as `--cloud`, matching the standalone bridge's filename) —
+  embedded bridge's device state file. **Only meaningful with
+  `--embed-bridge`.**
 - `--bridge-config PATH` (default off) — JSON config file for the
   embedded bridge. Same format as `rustuya-bridge --config`: existing
   file is read and merged, missing file is auto-created from the

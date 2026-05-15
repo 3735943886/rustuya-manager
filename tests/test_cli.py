@@ -44,8 +44,9 @@ class TestSpawnEmbeddedBridgeKwargs:
 
         args = _make_args(tmp_path)
         _spawn_embedded_bridge(args)
-        # `bridge-state.json` next to the (still-nonexistent) cloud file.
-        assert seen["state_file"] == str(tmp_path / "bridge-state.json")
+        # `rustuya.json` next to the (still-nonexistent) cloud file —
+        # matches the standalone bridge's DEFAULT_STATE_FILE.
+        assert seen["state_file"] == str(tmp_path / "rustuya.json")
         # `config_path` must NOT be in kwargs when --bridge-config wasn't set —
         # otherwise pyrustuyabridge would try to auto-create a file at None.
         assert "config_path" not in seen

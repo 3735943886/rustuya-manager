@@ -50,9 +50,9 @@ WORKDIR /data
 #   * Three persistent-state paths all land in `/data` so every artifact
 #     the running stack produces — cloud cache, wizard creds, bridge
 #     config, bridge state — is in the same volume and discoverable via
-#     `docker exec`. `rustuya.json` (not `bridge-state.json`) matches
-#     the standalone bridge's own DEFAULT_STATE_FILE so the on-disk
-#     layout is identical to a manual install.
+#     `docker exec`. `rustuya.json` matches the standalone bridge's
+#     own DEFAULT_STATE_FILE so the on-disk layout is identical to a
+#     manual install.
 #   * PUID/PGID default to 1000 which matches the first non-root user
 #     on most desktop / Pi / Armbian installs. Override with
 #     `-e PUID=$(id -u) -e PGID=$(id -g)` for hosts where the data

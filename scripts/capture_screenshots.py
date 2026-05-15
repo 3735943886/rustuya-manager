@@ -392,6 +392,27 @@ def main() -> None:
             page.screenshot(path=str(OUT / "sync-modal.png"))
             ctx.close()
 
+            # Tuya Cloud wizard modal — open and capture the idle pane so
+            # README readers see the user-code field plus the scan toggle.
+            # The popover is left closed: it's absolute-positioned and
+            # overflows the panel's bounding box, so an element-scoped
+            # screenshot would clip it. README prose covers what the
+            # toggle does instead.
+            ctx = browser.new_context(
+                viewport={"width": 1280, "height": 900}, color_scheme="light"
+            )
+            page = ctx.new_page()
+            page.goto(url)
+            page.get_by_text("RF Hub").first.wait_for()
+            page.locator("#wizard-header-btn").click()
+            page.locator("#wizard-modal").wait_for(state="visible")
+            # The first child of #wizard-modal is the rounded panel itself;
+            # the outer wrapper is just a centered dimmed backdrop.
+            page.locator("#wizard-modal > div").screenshot(
+                path=str(OUT / "wizard-modal.png")
+            )
+            ctx.close()
+
             # Annotated hero — wider viewport so absolute-positioned
             # callouts live in the right margin and SVG arrows point at
             # the actual UI elements without overlapping card content.

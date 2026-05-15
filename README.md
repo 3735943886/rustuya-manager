@@ -45,6 +45,31 @@ version. The pencil ✎ opens an editor that re-publishes the device
 to the bridge with the modified fields (the cloud-of-record JSON is
 unchanged); the trash 🗑 removes the device from the bridge.
 
+### Refreshing from Tuya Cloud
+
+The ☁ button in the header opens the in-app login wizard. Sign in
+once via QR with the Smart Life or Tuya Smart app — credentials are
+cached in `tuyacreds.json`, so subsequent re-fetches skip the scan and
+go straight to the device list.
+
+<img src="docs/screenshots/wizard-modal.png" alt="Tuya Cloud login modal" width="420">
+
+**Scan device IPs after fetch** (off by default) decides what the
+manager writes into the bridge record:
+
+- **Off (default)** — devices ship to the bridge with no IP. The
+  bridge runs its own LAN scan at runtime and catches DHCP IP
+  changes automatically. Recommended unless every Tuya device on the
+  LAN has a pinned address.
+- **On** — best performance: the bridge **never scans the LAN** and
+  every reconnect goes straight to the recorded address. Only useful
+  when every device has a pinned IP (manual static or DHCP
+  reservation on the router). On DHCP networks where leases rotate
+  the bridge ends up retrying stale addresses, and the cloud must be
+  re-fetched to recover.
+
+The toggle state is persisted per browser.
+
 ## Quick Start
 
 Requires Python 3.10+ and a running [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) reachable via MQTT.

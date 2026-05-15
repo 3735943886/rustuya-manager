@@ -4,7 +4,9 @@ A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bri
 
 ![rustuya-manager web UI](docs/screenshots/main-annotated.png)
 
-<sub>Other views: [unannotated](docs/screenshots/main-light.png) · [dark](docs/screenshots/main-dark.png) · [mobile](docs/screenshots/main-mobile.png) · [bulk sync](docs/screenshots/sync-modal.png)</sub>
+<img src="docs/screenshots/main-mobile.png" alt="Mobile layout" width="280">
+
+<sub>Other views: [unannotated](docs/screenshots/main-light.png) · [dark](docs/screenshots/main-dark.png) · [bulk sync](docs/screenshots/sync-modal.png)</sub>
 
 ## Key Features
 

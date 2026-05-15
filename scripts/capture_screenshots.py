@@ -393,7 +393,7 @@ def main() -> None:
             page.evaluate(_ANNOTATE_JS)
             page.screenshot(
                 path=str(OUT / "main-annotated.png"),
-                clip={"x": 160, "y": 0, "width": 1440, "height": 1000},
+                clip={"x": 160, "y": 0, "width": 1440, "height": 900},
             )
             ctx.close()
 

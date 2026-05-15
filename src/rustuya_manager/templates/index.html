@@ -261,21 +261,13 @@
           <div id="wizard-scan-popover" class="hidden absolute left-0 right-0 mt-2 z-10 p-3 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed shadow-lg space-y-2">
             <div>
               <strong class="text-slate-800 dark:text-slate-100">On</strong> —
-              UDP-scans the LAN after fetching from cloud and bakes each
-              device's current IP into the bridge record.
-              <ul class="list-disc list-inside mt-1 space-y-0.5">
-                <li>Faster initial connect for static-IP / reserved-DHCP setups.</li>
-                <li>If a DHCP-leased IP later changes, the bridge keeps trying the stale address — re-fetch needed to recover.</li>
-              </ul>
+              Best performance (bridge never scans the LAN) when every
+              device has a pinned IP (manual static or DHCP reservation).
             </div>
             <div>
               <strong class="text-slate-800 dark:text-slate-100">Off</strong> (default) —
-              Sends devices to the bridge with no IP. The bridge discovers
-              and re-discovers them on its own at runtime.
-              <ul class="list-disc list-inside mt-1 space-y-0.5">
-                <li>Survives DHCP IP changes automatically.</li>
-                <li>Slightly slower first contact per device (one scan instead of a direct connect).</li>
-              </ul>
+              Normal case. Bridge handles IPs at runtime and catches DHCP
+              changes automatically.
             </div>
           </div>
         </div>

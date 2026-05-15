@@ -65,10 +65,20 @@ manager writes into the bridge record:
   every reconnect goes straight to the recorded address. Only useful
   when every device has a pinned IP (manual static or DHCP
   reservation on the router). On DHCP networks where leases rotate
-  the bridge ends up retrying stale addresses, and the cloud must be
-  re-fetched to recover.
+  the bridge ends up retrying stale addresses; the header's **📡 Scan**
+  button (or a fresh cloud re-fetch) recovers visibility.
 
 The toggle state is persisted per browser.
+
+The **📡 Scan** button asks the bridge to run a one-shot LAN scan even
+when its runtime scanner is disarmed (i.e. every device claims a fixed
+IP). Any device currently in reconnect backoff whose scanner sighting
+differs from its stored IP surfaces as `ERR_STATE 906` in the row's
+MSG line — and as a rose ⚠ warning on collapsed synced cards. Useful
+when **Scan after fetch** was used in a mostly-static fleet but one or
+two devices turned out not to have a router reservation after all:
+the Scan tells the user *which* IP drifted, so the router config can
+be fixed at the source.
 
 ## Quick Start
 

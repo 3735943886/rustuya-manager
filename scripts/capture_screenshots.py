@@ -283,7 +283,7 @@ _ANNOTATE_JS = r"""
     // by following the line, not by horizontal alignment.
     annotate(
         document.querySelector('header .ml-auto > div'),
-        'Top-right: <b>+</b> add · <b>☁</b> cloud · <b>🌙</b> theme · <b>⟳</b> refresh',
+        'Top-right: <b>+</b> add · <b>☁</b> cloud · <b>📡</b> scan · <b>🌙</b> theme · <b>⟳</b> refresh',
         1390, 15
     );
     annotate(

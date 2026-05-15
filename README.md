@@ -1,6 +1,6 @@
 # Rustuya Manager
 
-A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) that diffs Tuya Cloud devices against the running bridge and syncs add / remove / update operations. Ships with a web UI with built-in Tuya Cloud login.
+A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) that diffs Tuya Cloud devices against the running bridge and syncs add / remove / update operations. Includes a web UI with built-in Tuya Cloud login.
 
 ![rustuya-manager web UI](docs/screenshots/main-annotated.png)
 <sub>Desktop view — sync categories highlighted with their actions. Each row also carries a live-status dot and per-device ✎ edit / 🗑 remove / ↻ query-status icons.</sub>

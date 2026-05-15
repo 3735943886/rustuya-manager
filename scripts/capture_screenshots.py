@@ -377,6 +377,13 @@ def main() -> None:
             # the actual UI elements without overlapping card content.
             # All annotation HTML is injected post-render via
             # page.evaluate, so the underlying app code is untouched.
+            #
+            # `clip` drops the extra left margin that the wide viewport
+            # introduces: content is centered (max-w-6xl + mx-auto) at
+            # x=224 in a 1600-wide viewport. Clipping x=160..1600 brings
+            # the content's left edge to x=64 in the saved image — the
+            # same horizontal offset as the 1280-wide unannotated shots,
+            # so the two screenshots feel like the same UI side-by-side.
             ctx = browser.new_context(
                 viewport={"width": 1600, "height": 1000}, color_scheme="light"
             )
@@ -384,7 +391,10 @@ def main() -> None:
             page.goto(url)
             page.get_by_text("RF Hub").first.wait_for()
             page.evaluate(_ANNOTATE_JS)
-            page.screenshot(path=str(OUT / "main-annotated.png"))
+            page.screenshot(
+                path=str(OUT / "main-annotated.png"),
+                clip={"x": 160, "y": 0, "width": 1440, "height": 1000},
+            )
             ctx.close()
 
             browser.close()

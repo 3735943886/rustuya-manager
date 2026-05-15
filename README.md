@@ -25,14 +25,14 @@ dashboard loads every device known to either side and categorizes
 it by how the bridge's view compares to the Tuya Cloud-of-record
 — uploaded as `tuyadevices.json` or pulled in-app via the ☁ button:
 
-- **Missing** — in cloud, not yet on the bridge. Click **Add** on
+- 🟦 **Missing** — in cloud, not yet on the bridge. Click **Add** on
   the card to publish it; the bridge picks it up and starts polling.
-- **Orphan** — on the bridge, not in cloud (or dropped from cloud
+- 🟥 **Orphan** — on the bridge, not in cloud (or dropped from cloud
   since last sync). Click **🗑** to remove it from the bridge.
-- **Mismatch** — in both, but a field drifted (IP / key / version
+- 🟨 **Mismatch** — in both, but a field drifted (IP / key / version
   differ). Click **Update** to push the cloud values; expand the row
   to see exactly which fields are out of sync.
-- **Synced** — in both, fields match. No action needed.
+- 🟩 **Synced** — in both, fields match. No action needed.
 
 Every per-card action has a bulk path — the buttons above the list
 (**Add missing** / **Remove orphan** / **Update mismatch** / **Apply

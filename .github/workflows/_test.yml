@@ -61,12 +61,26 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - name: Install Playwright browsers
+        # Chromium only — keeps the install footprint to ~140MB. apt deps
+        # are needed for the bundled chromium-headless-shell to launch on
+        # the GitHub runner.
+        run: python -m playwright install --with-deps chromium
+
       - name: ruff check
         run: ruff check src tests
 
       - name: ruff format --check
         run: ruff format --check src tests
 
-      - name: pytest
-        # -q to keep logs compact; the e2e suite alone takes ~30s.
-        run: pytest -q
+      - name: pytest (unit + mqtt e2e)
+        # The mqtt e2e suite is the slow one (~30s). Run it separately
+        # from the UI smoke so a flaky browser test doesn't get blamed
+        # on a backend regression and vice versa.
+        run: pytest -q --ignore=tests/e2e_ui
+
+      - name: pytest (ui smoke)
+        # Browser-driven smoke. Boots uvicorn in-thread with a stub
+        # BridgeClient, navigates Playwright through the page, asserts
+        # against the rendered DOM.
+        run: pytest -q tests/e2e_ui --browser chromium

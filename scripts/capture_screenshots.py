@@ -233,89 +233,92 @@ _ANNOTATE_JS = r"""
         return null;
     }
 
-    function annotate(target, html, calloutX, calloutY) {
-        if (!target) return;
-        const rect = target.getBoundingClientRect();
-        const sX = window.scrollX, sY = window.scrollY;
+    // Two-pass layout: first stack the callouts down the right margin
+    // with a uniform gap between every (rendered) bottom and the next
+    // top, so visual rhythm doesn't depend on each callout's text wrap.
+    // Then draw the arrows so they can absorb the diagonals to each
+    // target. The arrowhead is rotated to align with its own shaft so
+    // it visually "points" at the callout regardless of slope.
+    const CALLOUT_X = 1390;
+    const FIRST_Y = 15;
+    const GAP = 14;
 
+    const items = [
+        [document.querySelector('header .ml-auto > div'),
+         'Top-right: <b>+</b> add · <b>☁</b> cloud · <b>📡</b> scan · <b>🌙</b> theme · <b>⟳</b> refresh'],
+        [document.querySelector('#sync-bar'),
+         '<b>Bulk sync</b> — fix one category or apply all.'],
+        [document.querySelector('#search-input').closest('.flex'),
+         '<b>Search · filter · sort</b> — narrow the list.'],
+        [findCardByName('legacy-device'),
+         '<b>Orphan</b> — only in bridge. Click <b>🗑</b> to remove.'],
+        [findCardByName('Floor Lamp'),
+         '<b>Missing</b> — only in cloud. Click <b>Add</b> to publish.'],
+        [findCardByName('RF Hub'),
+         '<b>Mismatch</b> — click <b>Update</b> to push cloud → bridge.'],
+        [findCardByName('Heavy Duty Outlet'),
+         '<b>Synced</b> — in both, fields match. Click row to expand · live DPs.'],
+    ];
+
+    const sX = window.scrollX, sY = window.scrollY;
+    const placed = [];
+    let cursorY = FIRST_Y;
+    for (const [target, html] of items) {
+        if (!target) continue;
         const callout = document.createElement('div');
         callout.className = 'demo-callout';
         callout.innerHTML = html;
-        callout.style.left = calloutX + 'px';
-        callout.style.top = (calloutY + sY) + 'px';
+        callout.style.left = CALLOUT_X + 'px';
+        callout.style.top = (cursorY + sY) + 'px';
         document.body.appendChild(callout);
-
         const cRect = callout.getBoundingClientRect();
+        placed.push({ target, callout, cRect });
+        cursorY += cRect.height + GAP;
+    }
+
+    for (const { target, cRect } of placed) {
+        const rect = target.getBoundingClientRect();
         const x1 = rect.right + sX;
         const y1 = rect.top + rect.height / 2 + sY;
         const x2 = cRect.left + sX;
         const y2 = cRect.top + cRect.height / 2 + sY;
 
+        // Unit vector along the shaft so the line can stop short of the
+        // arrowhead in *any* direction, not just horizontal.
+        const dx = x2 - x1, dy = y2 - y1;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const ux = dx / len, uy = dy / len;
+        const tipBack = 8;
+        const lineX2 = x2 - ux * tipBack;
+        const lineY2 = y2 - uy * tipBack;
+
         const line = document.createElementNS(svgNS, 'line');
         line.setAttribute('x1', x1); line.setAttribute('y1', y1);
-        // Line stops short of the callout so the arrowhead has room to sit.
-        line.setAttribute('x2', x2 - 8); line.setAttribute('y2', y2);
+        line.setAttribute('x2', lineX2); line.setAttribute('y2', lineY2);
         line.setAttribute('stroke', '#ca8a04');
         line.setAttribute('stroke-width', '3');
         line.setAttribute('stroke-linecap', 'round');
         svg.appendChild(line);
 
-        // Filled triangle pointing right at the callout.
+        // Arrowhead built around the right-pointing canonical shape, then
+        // rotated to match the shaft angle. The polygon's tip sits at
+        // (x2, y2) so rotation around that point keeps the tip pinned and
+        // swings the base into alignment with the line.
         const head = document.createElementNS(svgNS, 'polygon');
         head.setAttribute('points',
             (x2 - 9) + ',' + (y2 - 6) + ' ' +
             x2 + ',' + y2 + ' ' +
             (x2 - 9) + ',' + (y2 + 6));
         head.setAttribute('fill', '#ca8a04');
+        const angleDeg = Math.atan2(dy, dx) * 180 / Math.PI;
+        head.setAttribute('transform', 'rotate(' + angleDeg + ' ' + x2 + ' ' + y2 + ')');
         svg.appendChild(head);
 
-        // Origin dot at the target end so it's clear what's being pointed at.
         const dot = document.createElementNS(svgNS, 'circle');
         dot.setAttribute('cx', x1); dot.setAttribute('cy', y1);
         dot.setAttribute('r', '4'); dot.setAttribute('fill', '#ca8a04');
         svg.appendChild(dot);
     }
-
-    // Callouts stack on a uniform 65px vertical rhythm (~50px tall +
-    // ~15px gap) regardless of where their targets sit, so the right
-    // column reads as an evenly-spaced legend. The arrows absorb any
-    // small diagonal that introduces — readers track callout-to-target
-    // by following the line, not by horizontal alignment.
-    annotate(
-        document.querySelector('header .ml-auto > div'),
-        'Top-right: <b>+</b> add · <b>☁</b> cloud · <b>📡</b> scan · <b>🌙</b> theme · <b>⟳</b> refresh',
-        1390, 15
-    );
-    annotate(
-        document.querySelector('#sync-bar'),
-        '<b>Bulk sync</b> — fix one category or apply all.',
-        1390, 80
-    );
-    annotate(
-        document.querySelector('#search-input').closest('.flex'),
-        '<b>Search · filter · sort</b> — narrow the list.',
-        1390, 145
-    );
-    annotate(
-        findCardByName('legacy-device'),
-        '<b>Orphan</b> — only in bridge. Click <b>🗑</b> to remove.',
-        1390, 210
-    );
-    annotate(
-        findCardByName('Floor Lamp'),
-        '<b>Missing</b> — only in cloud. Click <b>Add</b> to publish.',
-        1390, 275
-    );
-    annotate(
-        findCardByName('RF Hub'),
-        '<b>Mismatch</b> — click <b>Update</b> to push cloud → bridge.',
-        1390, 340
-    );
-    annotate(
-        findCardByName('Heavy Duty Outlet'),
-        '<b>Synced</b> — in both, fields match. Click row to expand · live DPs.',
-        1390, 420
-    );
 }
 """
 

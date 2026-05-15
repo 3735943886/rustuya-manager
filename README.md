@@ -18,6 +18,33 @@ A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bri
 - **Live updates over MQTT** — DPS values stream into the UI in real time.
 - **Web UI** — single-page UI with search, sort, sub-device tree, per-device add / edit / remove and bulk-sync.
 
+## Usage
+
+Start with `--web` (the Docker image does this by default). The
+dashboard loads every device known to either side and categorizes
+it by how the bridge's view compares to the Tuya Cloud-of-record
+— uploaded as `tuyadevices.json` or pulled in-app via the ☁ button:
+
+- **Missing** — in cloud, not yet on the bridge. Click **Add** on
+  the card to publish it; the bridge picks it up and starts polling.
+- **Orphan** — on the bridge, not in cloud (or dropped from cloud
+  since last sync). Click **🗑** to remove it from the bridge.
+- **Mismatch** — in both, but a field drifted (IP / key / version
+  differ). Click **Update** to push the cloud values; expand the row
+  to see exactly which fields are out of sync.
+- **Synced** — in both, fields match. No action needed.
+
+Every per-card action has a bulk path — the buttons above the list
+(**Add missing** / **Remove orphan** / **Update mismatch** / **Apply
+all**) open a modal showing the full plan, let individual rows be
+unchecked to skip, then run them sequentially with per-row status.
+
+Click any row to expand it: live DP values stream in via MQTT, plus
+the bridge's last error/status message and the resolved IP / key /
+version. The pencil ✎ opens an editor that re-publishes the device
+to the bridge with the modified fields (the cloud-of-record JSON is
+unchanged); the trash 🗑 removes the device from the bridge.
+
 ## Quick Start
 
 Requires Python 3.10+ and a running [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) reachable via MQTT.

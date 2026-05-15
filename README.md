@@ -2,6 +2,10 @@
 
 A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) that diffs Tuya Cloud devices against the running bridge and syncs add / remove / update operations. Ships with a web UI with built-in Tuya Cloud login.
 
+![rustuya-manager web UI](docs/screenshots/main-annotated.png)
+
+<sub>Other views: [unannotated](docs/screenshots/main-light.png) · [dark](docs/screenshots/main-dark.png) · [mobile](docs/screenshots/main-mobile.png) · [bulk sync](docs/screenshots/sync-modal.png)</sub>
+
 ## Key Features
 
 - **Status dashboard** — Missing / Orphaned / Mismatched / Synced categories by diffing the Tuya Cloud device list against the bridge's live state.

@@ -3,7 +3,7 @@
 A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) that diffs Tuya Cloud devices against the running bridge and syncs add / remove / update operations. Includes a web UI with built-in Tuya Cloud login.
 
 ![rustuya-manager web UI](docs/screenshots/main-annotated.png)
-<sub>Desktop view — sync categories highlighted with their actions. Each row also carries a live-status dot and per-device ✎ edit / 🗑 remove / ↻ query-status icons.</sub>
+<sub>Desktop view — sync categories highlighted with their actions; <b>📡</b> in the header triggers a bridge LAN scan. Each row also carries a live-status dot and per-device ✎ edit / 🗑 remove / ↻ query-status icons.</sub>
 
 <img src="docs/screenshots/main-mobile.png" alt="Mobile layout" width="280">
 <br><sub>Mobile view — layout adapts to narrow viewports.</sub>
@@ -70,15 +70,10 @@ manager writes into the bridge record:
 
 The toggle state is persisted per browser.
 
-The **📡 Scan** button asks the bridge to run a one-shot LAN scan even
-when its runtime scanner is disarmed (i.e. every device claims a fixed
-IP). Any device currently in reconnect backoff whose scanner sighting
-differs from its stored IP surfaces as `ERR_STATE 906` in the row's
-MSG line — and as a rose ⚠ warning on collapsed synced cards. Useful
-when **Scan after fetch** was used in a mostly-static fleet but one or
-two devices turned out not to have a router reservation after all:
-the Scan tells the user *which* IP drifted, so the router config can
-be fixed at the source.
+The **📡 Scan** button asks the bridge for a one-shot LAN scan. Any
+device registered with an explicit (non-auto) IP that has drifted
+surfaces as `ERR_STATE 906` in the MSG line, so the right device can
+be fixed at the router.
 
 ## Quick Start
 

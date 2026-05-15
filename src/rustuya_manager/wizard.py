@@ -91,25 +91,28 @@ class WizardManager:
         self,
         creds_path: str,
         on_devices: DevicesCallback | None = None,
-        postprocess_mode: str = "all",
     ):
         self.creds_path = creds_path
         self._on_devices = on_devices
-        # "parent" links sub-devices, "scan" enriches with IP/version via UDP,
-        # "all" does both. Set to "" to skip postprocessing entirely.
-        self.postprocess_mode = postprocess_mode
         self.session = WizardSession()
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
 
-    async def start(self, user_code: str | None = None) -> WizardSession:
+    async def start(self, user_code: str | None = None, scan: bool = False) -> WizardSession:
         """Begin a new session. If one is already running, returns its current
-        state without restarting."""
+        state without restarting.
+
+        `scan` chooses postprocess mode: False → "parent" only (link
+        sub-devices to their gateway), True → "all" (parent + UDP scan to
+        bake current LAN IP into the device record). Default is False
+        because baking an IP makes DHCP changes invisible to the bridge —
+        the bridge can scan on its own at runtime when no IP is present.
+        """
         async with self._lock:
             if self._task and not self._task.done():
                 return self.session
             self.session = WizardSession(state=WizardState.REQUESTING_QR)
-            self._task = asyncio.create_task(self._run(user_code))
+            self._task = asyncio.create_task(self._run(user_code, scan))
         return self.session
 
     async def cancel(self) -> None:
@@ -146,7 +149,7 @@ class WizardManager:
         code = info.get("user_code") if isinstance(info, dict) else None
         return code if isinstance(code, str) and code else None
 
-    async def _run(self, user_code: str | None) -> None:
+    async def _run(self, user_code: str | None, scan: bool) -> None:
         """The blocking wizard flow, broken into thread-pool calls so the
         event loop stays responsive.
 
@@ -200,15 +203,16 @@ class WizardManager:
             self.session.devices_count = len(devices)
             self.session.message = f"Fetched {len(devices)} devices"
 
-            # Postprocess: link sub-devices to parents (parent mode) and/or
-            # enrich with IP/version via UDP scan (scan mode). The scan adds
-            # ~2-5 seconds; users typically want it so the bridge can register
-            # devices without manual IP configuration.
-            if self.postprocess_mode:
-                self.session.message = f"Postprocessing ({self.postprocess_mode})…"
-                await loop.run_in_executor(
-                    None, postprocess_devices, devices, self.postprocess_mode
-                )
+            # Postprocess: "parent" links sub-devices to their gateway —
+            # always needed so the bridge can route them. "all" adds a UDP
+            # scan that enriches each device with its current LAN IP and
+            # firmware version (~2-5s). The scan is off by default because
+            # baking an IP into the record means DHCP changes won't be
+            # caught — the bridge can scan on demand at runtime when no IP
+            # is present, which survives router DHCP renewals.
+            mode = "all" if scan else "parent"
+            self.session.message = f"Postprocessing ({mode})…"
+            await loop.run_in_executor(None, postprocess_devices, devices, mode)
 
             if self._on_devices is not None:
                 await self._on_devices(devices)

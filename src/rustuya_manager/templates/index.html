@@ -247,6 +247,38 @@
         <p class="text-[11px] text-slate-500 dark:text-slate-400">
           Credentials are cached in <code>tuyacreds.json</code> on the manager host. Future runs will reuse them automatically.
         </p>
+        <div class="relative pt-1">
+          <div class="flex items-center gap-2">
+            <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+              <input id="wizard-scan-toggle" type="checkbox" class="rounded">
+              <span class="text-sm text-slate-700 dark:text-slate-300">Scan device IPs after fetch</span>
+            </label>
+            <button id="wizard-scan-info" type="button" aria-label="About scan option" class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-slate-300 dark:border-slate-600 text-[10px] text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">?</button>
+          </div>
+          <!-- Popover. Anchored beneath the row; closed by clicking the icon
+               again or anywhere outside it. Stays inside the modal so it
+               disappears with the modal on cancel/done. -->
+          <div id="wizard-scan-popover" class="hidden absolute left-0 right-0 mt-2 z-10 p-3 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed shadow-lg space-y-2">
+            <div>
+              <strong class="text-slate-800 dark:text-slate-100">On</strong> —
+              UDP-scans the LAN after fetching from cloud and bakes each
+              device's current IP into the bridge record.
+              <ul class="list-disc list-inside mt-1 space-y-0.5">
+                <li>Faster initial connect for static-IP / reserved-DHCP setups.</li>
+                <li>If a DHCP-leased IP later changes, the bridge keeps trying the stale address — re-fetch needed to recover.</li>
+              </ul>
+            </div>
+            <div>
+              <strong class="text-slate-800 dark:text-slate-100">Off</strong> (default) —
+              Sends devices to the bridge with no IP. The bridge discovers
+              and re-discovers them on its own at runtime.
+              <ul class="list-disc list-inside mt-1 space-y-0.5">
+                <li>Survives DHCP IP changes automatically.</li>
+                <li>Slightly slower first contact per device (one scan instead of a direct connect).</li>
+              </ul>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div data-wizard-pane="requesting_qr" class="hidden text-center text-slate-600 dark:text-slate-300 py-6">

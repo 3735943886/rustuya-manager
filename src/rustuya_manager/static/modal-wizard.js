@@ -16,6 +16,9 @@ const $wizardWorkingMsg = document.getElementById("wizard-working-message");
 const $wizardDoneMsg = document.getElementById("wizard-done-message");
 const $wizardErrorMsg = document.getElementById("wizard-error-message");
 const $wizardHeaderBtn = document.getElementById("wizard-header-btn");
+const $wizardScanToggle = document.getElementById("wizard-scan-toggle");
+const $wizardScanInfo = document.getElementById("wizard-scan-info");
+const $wizardScanPopover = document.getElementById("wizard-scan-popover");
 
 let wizardPollTimer = null;
 
@@ -28,6 +31,12 @@ async function openWizardModal() {
   // (this-browser fallback). The server read is best-effort and shouldn't
   // block the modal — open first, populate when the response lands.
   $wizardUserCode.value = localStorage.getItem("tuyaUserCode") || "";
+  // Restore the scan toggle from this browser's preference. Default OFF —
+  // matches the backend default and is the safer choice for DHCP networks.
+  if ($wizardScanToggle) {
+    $wizardScanToggle.checked = localStorage.getItem("tuyaWizardScan") === "true";
+  }
+  if ($wizardScanPopover) $wizardScanPopover.classList.add("hidden");
   $wizardUserCode.focus();
   try {
     const res = await fetch("/api/wizard/info");
@@ -104,6 +113,8 @@ function wizardCurrentState() {
 async function startWizard() {
   const userCode = $wizardUserCode.value.trim();
   if (userCode) localStorage.setItem("tuyaUserCode", userCode);
+  const scan = !!($wizardScanToggle && $wizardScanToggle.checked);
+  localStorage.setItem("tuyaWizardScan", scan ? "true" : "false");
 
   // If we're sitting on the "done" or "error" pane, restart cleanly
   const cur = wizardCurrentState();
@@ -113,7 +124,7 @@ async function startWizard() {
       const res = await fetch("/api/wizard/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_code: userCode }),
+        body: JSON.stringify({ user_code: userCode, scan }),
       });
       const session = await res.json();
       applyWizardSession(session);
@@ -123,6 +134,12 @@ async function startWizard() {
       showWizardPane("error");
     }
   }
+}
+
+function toggleScanPopover(e) {
+  e.stopPropagation();
+  if (!$wizardScanPopover) return;
+  $wizardScanPopover.classList.toggle("hidden");
 }
 
 function startWizardPoll() {
@@ -168,11 +185,24 @@ export function initWizardModal() {
   $wizardUserCode?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") startWizard();
   });
+  // Info icon opens/closes the scan explainer popover; clicks elsewhere
+  // inside the modal close it without dismissing the modal itself.
+  $wizardScanInfo?.addEventListener("click", toggleScanPopover);
+  $wizardBody?.addEventListener("click", (e) => {
+    if (!$wizardScanPopover || $wizardScanPopover.classList.contains("hidden")) return;
+    if (e.target === $wizardScanInfo) return;
+    if ($wizardScanPopover.contains(e.target)) return;
+    $wizardScanPopover.classList.add("hidden");
+  });
   // ESC mirrors the X / Cancel buttons so the wizard's dismissal story
-  // matches every other modal in the app (confirm, device, sync).
+  // matches every other modal in the app (confirm, device, sync). If the
+  // scan-info popover is open, close it first instead of the whole modal.
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !$wizardModal.classList.contains("hidden")) {
-      cancelWizard();
+    if (e.key !== "Escape" || $wizardModal.classList.contains("hidden")) return;
+    if ($wizardScanPopover && !$wizardScanPopover.classList.contains("hidden")) {
+      $wizardScanPopover.classList.add("hidden");
+      return;
     }
+    cancelWizard();
   });
 }

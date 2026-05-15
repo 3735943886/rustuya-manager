@@ -144,7 +144,7 @@ def build_app(
     creds_path: str | None = None,
     auth: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version="0.1.0rc7")
+    app = FastAPI(title="rustuya-manager", version="0.1.0rc8")
     if auth:
         if ":" not in auth:
             raise ValueError("--auth must be in 'user:password' form")
@@ -186,9 +186,14 @@ def build_app(
     @app.post("/api/wizard/start")
     async def wizard_start(body: dict[str, Any] | None = None) -> dict[str, Any]:
         """Kick off the QR login flow. `user_code` is the Tuya account ID
-        retrieved from Smart Life → Me → Settings → Account and Security."""
-        user_code = (body or {}).get("user_code") if isinstance(body, dict) else None
-        session = await wizard.start(user_code=user_code or None)
+        retrieved from Smart Life → Me → Settings → Account and Security.
+        `scan` toggles the post-fetch UDP scan that bakes a current LAN IP
+        into each device record — off by default so DHCP changes don't
+        silently break bridge connectivity."""
+        body = body if isinstance(body, dict) else {}
+        user_code = body.get("user_code") or None
+        scan = bool(body.get("scan"))
+        session = await wizard.start(user_code=user_code, scan=scan)
         return session.to_dict()
 
     @app.get("/api/wizard/status")

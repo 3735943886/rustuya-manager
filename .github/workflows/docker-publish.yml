@@ -46,7 +46,7 @@ jobs:
       - name: Set up QEMU
         # arm64 emulation so we can build linux/arm64 from a Linux/amd64 runner
         # (HA OS / Raspberry Pi users live there).
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v4

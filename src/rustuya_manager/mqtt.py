@@ -1,35 +1,40 @@
 """Async MQTT client that talks to a running rustuya-bridge.
 
-Bridges paho-mqtt's callback-based API to asyncio: callbacks push messages onto
-an `asyncio.Queue` via `call_soon_threadsafe`, then an async consumer task uses
-`pyrustuyabridge` helpers to parse the topic+payload identically to how the
-bridge would. Parsed events are written into the shared `State`.
+Built on aiomqtt's canonical reconnect-loop pattern: a single
+`async with aiomqtt.Client(...)` lives inside a `while True:` so any
+broker-side disconnect raises `MqttError` and we re-enter the context
+after exponential backoff. Subscriptions are replayed from a cached
+wildcard list on every (re)connect, so the manager survives broker
+restarts without dropping the bridge's templated topic set.
 
 Bootstrap order (mirrors the bridge's contract):
   1. Connect to the broker.
-  2. Subscribe to `{root}/bridge/config` (retained). The bridge publishes its
-     resolved config there at startup, so this is the source of truth for the
-     user's customised topic/payload templates.
-  3. Once the retained config arrives, derive the post-`{root}` templates and
-     subscribe to event/message/scanner wildcards.
-  4. Publish a `status` command and wait for the bridge's reply to populate
-     the initial device list.
+  2. Subscribe to `{root}/bridge/config` (retained). The bridge publishes
+     its resolved config there at startup, so this is the source of truth
+     for the user's customised topic/payload templates.
+  3. Once the retained config arrives, derive the post-`{root}` templates
+     and subscribe to event/message/scanner wildcards.
+  4. Publish a `status` command and wait for the bridge's reply to
+     populate the initial device list.
 
-Notes on threading:
-  paho's `on_message` runs on paho's internal loop thread. Any state mutation
-  must hop back to the asyncio loop via `call_soon_threadsafe`. We do that by
-  pushing raw (topic, payload) tuples onto an asyncio.Queue.
+Lifecycle (used as an async context manager):
+    async with BridgeClient(broker, root, state) as client:
+        await client.wait_bootstrap(timeout=6.0)
+        await client.publish_command("status", target_id="bridge")
+        # ...web server runs...
+    # exit -> reconnect task cancelled, aiomqtt context closed cleanly
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import paho.mqtt.client as mqtt
+import aiomqtt
 import pyrustuyabridge as pb
 
 from .models import Device
@@ -87,13 +92,28 @@ def _parse_broker_url(broker: str) -> tuple[str, int]:
 
 
 class BridgeClient:
-    """Owns the paho-mqtt client and the async receive loop.
+    """Async-context-managed MQTT client.
 
-    Public API:
-        await client.run()                 # bootstrap + run until stopped
-        await client.publish_command(...)  # forward-render command topic and publish
-        await client.stop()
+    Usage:
+        async with BridgeClient(broker, root, state) as client:
+            await client.wait_bootstrap(timeout=6.0)
+            await client.publish_command("status", target_id="bridge")
+            ...
+
+    Public surface:
+        await client.wait_bootstrap(timeout=...)   # block until templates resolved
+        await client.publish_command(action, ...)  # forward-render + publish
     """
+
+    # Exponential backoff bounds for the (re)connect loop. Exposed as class
+    # attributes so tests can override them to 0 for fast suites.
+    _INITIAL_BACKOFF_SEC: float = 1.0
+    _MAX_BACKOFF_SEC: float = 60.0
+    # Cap the internal aiomqtt incoming queue so a wedged dispatch surfaces as
+    # a paho-side warning rather than unbounded memory growth. 1000 is well
+    # above any realistic manager-side burst (bridge `status` reply is the
+    # biggest single payload and arrives once per request).
+    _MAX_QUEUED_INCOMING: int = 1000
 
     def __init__(
         self,
@@ -113,174 +133,156 @@ class BridgeClient:
         self._client_id = client_id
         self._on_event = on_event
 
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
-        self._client: mqtt.Client | None = None
-        self._stopped = asyncio.Event()
+        # Set inside the reconnect loop while the aiomqtt context is alive;
+        # cleared on disconnect. publish_command() refuses when not set.
+        self._client: aiomqtt.Client | None = None
+        self._connected = asyncio.Event()
         self._bootstrap_done = asyncio.Event()
-        # Cache of the runtime wildcards we want to keep subscribed. Refreshed
-        # whenever templates are resolved. The on_connect callback replays this
-        # list on every (re)connect so subscriptions survive broker hiccups
-        # even with the paho default clean_session=True.
+        self._reconnect_task: asyncio.Task[None] | None = None
+        # Cache of the runtime wildcards we want to keep subscribed. Updated
+        # whenever templates resolve and replayed by `_subscribe_initial` on
+        # every (re)connect so subscriptions survive broker hiccups even with
+        # aiomqtt's default clean session.
         self._runtime_wildcards: list[str] = []
 
-    # ── paho v2 callbacks (run on paho's loop thread) ────────────────────
-    def _on_connect(
-        self,
-        client: mqtt.Client,
-        _userdata: Any,
-        _flags: Any,
-        reason_code: Any,
-        _properties: Any = None,
-    ) -> None:
-        # `reason_code` is a paho ReasonCode object; its is_failure attribute
-        # is True on a refused/errored CONNACK.
-        if reason_code.is_failure:
-            logger.error("MQTT CONNACK failed: %s", reason_code)
-            return
+    # ── async context manager ────────────────────────────────────────────
+    async def __aenter__(self) -> BridgeClient:
+        self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+        return self
 
-        cfg_topic = BRIDGE_CONFIG_TOPIC_TPL.replace("{root}", self.root)
-        rc, _mid = client.subscribe(cfg_topic)
-        if rc != mqtt.MQTT_ERR_SUCCESS:
-            logger.error("Subscribe FAILED rc=%s for %s", rc, cfg_topic)
+    async def __aexit__(self, *exc: Any) -> None:
+        if self._reconnect_task is not None:
+            self._reconnect_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._reconnect_task
+            self._reconnect_task = None
+        self._connected.clear()
+        self._client = None
+
+    async def wait_bootstrap(self, timeout: float | None = None) -> None:
+        """Block until the first retained bridge/config has been processed
+        (or the internal timeout guard has applied fallback templates).
+
+        On timeout we silently return — the caller can inspect
+        `state.warnings` to distinguish "broker still unreachable" from
+        "bridge offline, using defaults"."""
+        if timeout is None:
+            await self._bootstrap_done.wait()
         else:
-            logger.info("Subscribed to bridge config: %s", cfg_topic)
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._bootstrap_done.wait(), timeout)
 
-        # Replay runtime subscriptions on reconnect. First connect has an empty
-        # list; subsequent connects after bootstrap re-establish the wildcards.
-        for wildcard in self._runtime_wildcards:
-            rc, _mid = client.subscribe(wildcard)
-            if rc != mqtt.MQTT_ERR_SUCCESS:
-                logger.error("Re-subscribe FAILED rc=%s for %s", rc, wildcard)
-            else:
-                logger.info("Re-subscribed: %s", wildcard)
+    # ── reconnect loop ───────────────────────────────────────────────────
+    async def _reconnect_loop(self) -> None:
+        """Owns the aiomqtt client. Runs for the lifetime of __aenter__.
 
-    def _on_disconnect(
-        self,
-        _client: mqtt.Client,
-        _userdata: Any,
-        _disconnect_flags: Any,
-        reason_code: Any,
-        _properties: Any = None,
-    ) -> None:
-        # paho v2 signature. `reason_code` is a ReasonCode object whose
-        # `is_failure` is False for "Normal disconnection" (the clean path
-        # triggered by client.disconnect()) and True for any broker-side
-        # disconnect we should auto-reconnect from.
-        if reason_code is None or not reason_code.is_failure:
-            logger.info("MQTT disconnected cleanly")
-        else:
-            logger.warning("MQTT disconnected unexpectedly: %s (paho will retry)", reason_code)
-
-    def _on_message(self, _client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
-        payload = msg.payload.decode("utf-8", errors="replace")
-        # Carry the retain flag through to listeners — the CLI suppresses prints
-        # for retained messages so the initial subscribe burst (which can be
-        # hundreds of lines on a busy broker) doesn't drown live activity.
-        if self._loop is not None:
-            self._loop.call_soon_threadsafe(
-                self._queue.put_nowait, (msg.topic, payload, bool(msg.retain))
-            )
-
-    # ── lifecycle ────────────────────────────────────────────────────────
-    async def run(self) -> None:
-        """Connect, bootstrap, then process incoming messages until `stop()`."""
-        self._loop = asyncio.get_running_loop()
-        self._client = self._make_client()
-        await self._connect_with_retry()
-        self._client.loop_start()
-
-        try:
-            consumer_task = asyncio.create_task(self._consume_loop())
-            bootstrap_task = asyncio.create_task(self._bootstrap())
-            await self._stopped.wait()
-            consumer_task.cancel()
-            bootstrap_task.cancel()
-            await asyncio.gather(consumer_task, bootstrap_task, return_exceptions=True)
-        finally:
-            self._client.loop_stop()
-            self._client.disconnect()
-
-    async def stop(self) -> None:
-        self._stopped.set()
-
-    # Exponential backoff bounds for the initial connect retry loop. Exposed
-    # as class attributes (not constants) so tests can override them with 0
-    # to keep the suite fast.
-    _INITIAL_BACKOFF_SEC: float = 1.0
-    _MAX_BACKOFF_SEC: float = 60.0
-
-    async def _connect_with_retry(self) -> None:
-        """Block until the initial broker connect succeeds.
-
-        paho's sync `connect()` raises `OSError` (e.g. `ConnectionRefusedError`,
-        `socket.gaierror`) the moment the broker is unreachable on TCP. Without
-        this loop the manager would die on startup whenever the broker is even
-        a few seconds late — which is the common case when `rustuya-manager.service`
-        and `mosquitto.service` come up together at boot. Exponential backoff
-        (1s → 60s) mirrors paho's mid-session reconnect cadence so the two
-        paths feel the same to the operator.
-
-        A `broker_unreachable` state warning is set across attempts so the web
-        UI can surface what's happening; cleared on first successful connect.
-        """
-        assert self._client is not None
+        Each loop iteration enters a fresh `aiomqtt.Client` context — that
+        is the canonical aiomqtt pattern because any broker-side disconnect
+        raises `MqttError` out of `async for messages`. The cached
+        `_runtime_wildcards` are re-subscribed on every reconnect, and after
+        the first successful bootstrap we additionally re-issue a `status`
+        request so the device list reflects any state change that happened
+        during the disconnect gap (clean-session means we lose live events
+        published while we were away)."""
         delay = self._INITIAL_BACKOFF_SEC
-        max_delay = self._MAX_BACKOFF_SEC
-        attempt = 0
-        while True:
-            try:
-                self._client.connect(self.host, self.port)
-                await self.state.clear_warning("broker_unreachable")
-                if attempt > 0:
-                    logger.info(
-                        "MQTT broker %s:%s reachable after %d retries",
-                        self.host,
-                        self.port,
-                        attempt,
-                    )
-                return
-            except OSError as e:
-                attempt += 1
-                await self.state.set_warning(
-                    "broker_unreachable",
-                    "error",
-                    f"MQTT broker {self.host}:{self.port} unreachable ({e}); "
-                    f"retrying every {int(delay)}s.",
-                )
-                logger.warning(
-                    "MQTT broker %s:%s unreachable (%s) — attempt %d, sleeping %.1fs",
-                    self.host,
-                    self.port,
-                    e,
-                    attempt,
-                    delay,
-                )
-                if self._stopped.is_set():
-                    return
+        was_disconnected_after_bootstrap = False
+        bootstrap_guard: asyncio.Task[None] | None = None
+        try:
+            while True:
                 try:
-                    await asyncio.wait_for(self._stopped.wait(), timeout=delay)
-                    return  # stop requested mid-sleep — exit cleanly
-                except asyncio.TimeoutError:
-                    pass  # backoff elapsed, try again
-                delay = min(delay * 2, max_delay)
+                    async with aiomqtt.Client(
+                        hostname=self.host,
+                        port=self.port,
+                        identifier=self._client_id,
+                        max_queued_incoming_messages=self._MAX_QUEUED_INCOMING,
+                    ) as client:
+                        if delay != self._INITIAL_BACKOFF_SEC:
+                            logger.info("MQTT reconnected; resetting backoff.")
+                            delay = self._INITIAL_BACKOFF_SEC
+                        await self.state.clear_warning("broker_unreachable")
+                        self._client = client
+                        await self._subscribe_initial(client)
+                        self._connected.set()
+                        # On a *re*connect after bootstrap, re-request status so
+                        # the device list reflects whatever changed during the
+                        # gap. First-connect path triggers status from
+                        # `_on_bridge_config` after templates resolve, so don't
+                        # double-fire here.
+                        if was_disconnected_after_bootstrap and self._bootstrap_done.is_set():
+                            asyncio.create_task(self.publish_command("status", target_id="bridge"))
+                            was_disconnected_after_bootstrap = False
+                        # First-time bootstrap fallback — if bridge/config never
+                        # arrives, apply defaults so the UI isn't frozen waiting
+                        # for templates forever.
+                        if bootstrap_guard is None and not self._bootstrap_done.is_set():
+                            bootstrap_guard = asyncio.create_task(self._bootstrap_timeout_guard())
+                        async for msg in client.messages:
+                            try:
+                                await self._dispatch(
+                                    str(msg.topic),
+                                    msg.payload.decode("utf-8", "replace")
+                                    if isinstance(msg.payload, bytes)
+                                    else str(msg.payload),
+                                    retain=bool(msg.retain),
+                                )
+                            except Exception:  # noqa: BLE001 - log + keep running
+                                logger.exception("Failed to handle MQTT message on %s", msg.topic)
+                except aiomqtt.MqttError as e:
+                    self._connected.clear()
+                    self._client = None
+                    if self._bootstrap_done.is_set():
+                        was_disconnected_after_bootstrap = True
+                    await self.state.set_warning(
+                        "broker_unreachable",
+                        "error",
+                        f"MQTT broker {self.host}:{self.port} unreachable ({e}); "
+                        f"retrying every {int(delay)}s.",
+                    )
+                    logger.warning("MQTT error: %s — reconnect in %.1fs", e, delay)
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, self._MAX_BACKOFF_SEC)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:  # noqa: BLE001
+                    # Unlike tuya2mqtt (which terminates and relies on systemd
+                    # to restart), the manager runs without a supervisor — log
+                    # the traceback and reconnect so a single bug doesn't take
+                    # the whole UI down.
+                    self._connected.clear()
+                    self._client = None
+                    if self._bootstrap_done.is_set():
+                        was_disconnected_after_bootstrap = True
+                    logger.exception("Unexpected MQTT worker crash; will reconnect")
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, self._MAX_BACKOFF_SEC)
+        finally:
+            self._connected.clear()
+            self._client = None
+            if bootstrap_guard is not None and not bootstrap_guard.done():
+                bootstrap_guard.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await bootstrap_guard
 
-    def _make_client(self) -> mqtt.Client:
-        # paho-mqtt 2.0+ is required (see pyproject); v1 has a different
-        # callback signature and isn't supported here.
-        c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=self._client_id)
-        c.on_connect = self._on_connect
-        c.on_disconnect = self._on_disconnect
-        c.on_message = self._on_message
-        # Bound exponential backoff for transient broker outages.
-        c.reconnect_delay_set(min_delay=1, max_delay=60)
-        return c
+    async def _subscribe_initial(self, client: aiomqtt.Client) -> None:
+        """Replay subscriptions on every (re)connect.
 
-    # ── async loops ──────────────────────────────────────────────────────
-    async def _bootstrap(self) -> None:
-        """Wait for the retained bridge/config, derive templates, subscribe, and
-        request initial status. Bails out cleanly on timeout (CLI keeps the
-        retained-fallback option to use defaults)."""
+        On first connect `_runtime_wildcards` is empty, so we only subscribe
+        to the bridge config topic — the retained config triggers
+        `_on_bridge_config` which then populates the wildcard cache and
+        issues the runtime subscribes. On reconnect the cache is non-empty
+        and we re-subscribe to both bridge/config (idempotent) and every
+        runtime wildcard so live events resume immediately."""
+        cfg_topic = BRIDGE_CONFIG_TOPIC_TPL.replace("{root}", self.root)
+        await client.subscribe(cfg_topic)
+        logger.info("Subscribed to bridge config: %s", cfg_topic)
+        for wildcard in self._runtime_wildcards:
+            await client.subscribe(wildcard)
+            logger.info("Re-subscribed: %s", wildcard)
+
+    async def _bootstrap_timeout_guard(self) -> None:
+        """Apply default templates if the retained bridge/config doesn't
+        arrive within BOOTSTRAP_TIMEOUT_SEC. Without this the UI sits empty
+        forever when the bridge is offline."""
         try:
             await asyncio.wait_for(self._bootstrap_done.wait(), BOOTSTRAP_TIMEOUT_SEC)
         except asyncio.TimeoutError:
@@ -291,20 +293,7 @@ class BridgeClient:
             )
             await self._apply_default_templates()
 
-    async def _consume_loop(self) -> None:
-        while True:
-            item = await self._queue.get()
-            # Older callers may queue (topic, payload); accept both shapes.
-            if len(item) == 3:
-                topic, payload, retain = item
-            else:
-                topic, payload = item
-                retain = False
-            try:
-                await self._dispatch(topic, payload, retain=retain)
-            except Exception:  # noqa: BLE001 - log and keep running, never let the loop die
-                logger.exception("Failed to handle MQTT message on %s", topic)
-
+    # ── dispatch ─────────────────────────────────────────────────────────
     async def _dispatch(self, topic: str, payload: str, *, retain: bool = False) -> None:
         # The retained bridge/config arrives first; once it does we resolve
         # templates and subscribe to event/message/scanner.
@@ -573,35 +562,40 @@ class BridgeClient:
         )
 
     async def _subscribe_runtime_topics(self, t: BridgeTemplates) -> None:
-        assert self._client is not None
-        # Recompute the wildcard list and cache it for reconnect replay.
+        """Diff the cached wildcards against the new template-derived set,
+        then (un)subscribe accordingly.
+
+        The cache is updated BEFORE issuing subscribe/unsubscribe so that, if
+        an MqttError fires mid-way through (broker dropped during the call),
+        the reconnect's `_subscribe_initial` replays the intended set rather
+        than the partial one."""
         wildcards = [pb.tpl_to_wildcard(tpl, t.root) for tpl in (t.event, t.message, t.scanner)]
         # Deduplicate while preserving order — custom templates can collapse to
         # the same wildcard (e.g. event {root}/x/{id} and message {root}/x/{id}).
         seen: set[str] = set()
         new_wildcards = [w for w in wildcards if not (w in seen or seen.add(w))]
 
-        # Unsubscribe wildcards we no longer need.
-        for stale in self._runtime_wildcards:
-            if stale not in new_wildcards:
-                self._client.unsubscribe(stale)
-                logger.info("Unsubscribed: %s", stale)
+        stale = [w for w in self._runtime_wildcards if w not in new_wildcards]
+        previously = set(self._runtime_wildcards)
+        newcomers = [w for w in new_wildcards if w not in previously]
 
+        # Intent-first cache update; see docstring.
+        self._runtime_wildcards = new_wildcards
+
+        if self._client is None:
+            # Not currently connected — cache is enough; reconnect replays.
+            return
+
+        for w in stale:
+            await self._client.unsubscribe(w)
+            logger.info("Unsubscribed: %s", w)
         # Subscribe only the newcomers — re-subscribing an existing wildcard
         # forces the broker to re-deliver every retained message, which is
         # both wasteful and (in the case of bridge/config) the trigger for an
         # infinite bootstrap loop.
-        previously = set(self._runtime_wildcards)
-        for wildcard in new_wildcards:
-            if wildcard in previously:
-                continue
-            rc, _mid = self._client.subscribe(wildcard)
-            if rc != mqtt.MQTT_ERR_SUCCESS:
-                logger.error("Subscribe FAILED rc=%s for %s", rc, wildcard)
-            else:
-                logger.info("Subscribed: %s", wildcard)
-
-        self._runtime_wildcards = new_wildcards
+        for w in newcomers:
+            await self._client.subscribe(w)
+            logger.info("Subscribed: %s", w)
 
     async def _request_initial_status(self) -> None:
         await self.publish_command("status", target_id="bridge")
@@ -622,9 +616,13 @@ class BridgeClient:
         and call `publish_command("status", target_id="bridge")` yields the
         topic `{root_value}/cmd/bridge/status`. The full payload also includes
         these fields so the bridge accepts it regardless of where the data is
-        carried."""
-        if self._client is None:
-            raise RuntimeError("MQTT client not connected")
+        carried.
+
+        Raises `RuntimeError` when the broker is currently disconnected or the
+        publish itself fails — FastAPI handlers translate this into a clear
+        503 + UI toast rather than silently dropping the command."""
+        if not self._connected.is_set() or self._client is None:
+            raise RuntimeError("MQTT broker not connected — try again shortly")
         if self.state.templates is None:
             raise RuntimeError("templates not yet resolved (bootstrap incomplete)")
 
@@ -646,4 +644,7 @@ class BridgeClient:
 
         body = json.dumps(payload)
         logger.debug("publish %s %s", topic, body)
-        self._client.publish(topic, body, qos=1)
+        try:
+            await self._client.publish(topic, body, qos=1)
+        except aiomqtt.MqttError as e:
+            raise RuntimeError(f"MQTT publish failed: {e}") from e

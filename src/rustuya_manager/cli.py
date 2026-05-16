@@ -326,48 +326,6 @@ async def run(args: argparse.Namespace) -> int:
     )
 
     print(f"Connecting to {args.broker}, root={args.root!r} ...")
-    run_task = asyncio.create_task(client.run())
-
-    # --embed-bridge handling — collision detection + spawn (see helper).
-    embedded_bridge = await _resolve_embedded_bridge(state, args)
-    if args.embed_bridge:
-        if embedded_bridge is None:
-            # Refused due to existing external — the helper already logged
-            # + set the state warning; mirror it to stdout for CLI users.
-            warn = state.warnings.get("embedded_bridge_aborted")
-            if warn:
-                print(f"⚠ {warn['message']}")
-        else:
-            print(f"✓ Embedded bridge running on root={args.root!r}")
-
-    # Wait either for bootstrap or 6s — give a bit of slack over the client's 5s.
-    try:
-        await asyncio.wait_for(client._bootstrap_done.wait(), 6.0)
-        print("✓ Bootstrap complete")
-    except asyncio.TimeoutError:
-        # Distinguish "still retrying broker" from "broker OK but no bridge".
-        # state.warnings is the same signal the UI uses, so the CLI matches.
-        if "broker_unreachable" in state.warnings:
-            print(
-                "⚠ Broker still unreachable — manager will keep retrying. "
-                "Watch state warnings for status."
-            )
-        else:
-            print("⚠ Bootstrap timeout — bridge may be offline; using defaults")
-
-    # Wait for the bridge's initial `status` reply to land (which populates
-    # state.bridge). A naive "wait for any state change" wakes up on retained
-    # events that arrive first when mqtt_retain=true is set; here we wait for
-    # the specific semantic condition. Bounded so we still print *something*
-    # if the bridge never replies.
-    await state.wait_for(lambda: bool(state.bridge), timeout=3.0)
-    # Skip the diff dump when there's no cloud — without a reference set,
-    # every bridge device would land in "ORPHANED" which contradicts the
-    # "showing as ungrouped" NOTE printed at startup.
-    if state.cloud:
-        _print_diff(state.diff())
-    else:
-        print(f"\n=== Bridge: {len(state.bridge)} device(s) (no cloud loaded — diff skipped) ===\n")
 
     # Wire SIGINT/SIGTERM into a clean shutdown.
     stop_event = asyncio.Event()
@@ -378,39 +336,84 @@ async def run(args: argparse.Namespace) -> int:
         except NotImplementedError:
             pass  # Windows
 
-    if args.web:
-        from .web import build_app
+    embedded_bridge = None
+    try:
+        async with client:
+            # --embed-bridge handling — collision detection + spawn (see helper).
+            embedded_bridge = await _resolve_embedded_bridge(state, args)
+            if args.embed_bridge:
+                if embedded_bridge is None:
+                    # Refused due to existing external — the helper already
+                    # logged + set the state warning; mirror it to stdout for
+                    # CLI users.
+                    warn = state.warnings.get("embedded_bridge_aborted")
+                    if warn:
+                        print(f"⚠ {warn['message']}")
+                else:
+                    print(f"✓ Embedded bridge running on root={args.root!r}")
 
-        creds_path = args.creds or str(cloud_path.parent / "tuyacreds.json")
-        app = build_app(state, client, creds_path=creds_path, auth=args.auth)
-        for url in _web_urls(args.host, args.port):
-            print(f"Serving web UI on {url}")
-        if args.auth:
-            print(f"  (HTTP Basic auth enabled — user '{args.auth.split(':', 1)[0]}')")
-        web_task = asyncio.create_task(_serve_web(args.host, args.port, app))
-        # When the user hits Ctrl+C, stop both web and MQTT tasks.
-        await stop_event.wait()
-        print("\nShutting down ...")
-        web_task.cancel()
-        await client.stop()
-        await asyncio.gather(web_task, run_task, return_exceptions=True)
-    else:
-        print(
-            f"Watching for events. Press Ctrl+C to exit. (bridge has {len(state.bridge)} devices)"
-        )
-        await stop_event.wait()
-        print("\nShutting down ...")
-        await client.stop()
-        await run_task
+            # Wait for bootstrap with 6s slack over the client's internal 5s
+            # fallback. wait_bootstrap returns silently on timeout; we then
+            # use state.warnings (the same signal the UI uses) to decide
+            # which message to print.
+            await client.wait_bootstrap(timeout=6.0)
+            if client._bootstrap_done.is_set() and "bridge_offline" not in state.warnings:
+                print("✓ Bootstrap complete")
+            elif "broker_unreachable" in state.warnings:
+                print(
+                    "⚠ Broker still unreachable — manager will keep retrying. "
+                    "Watch state warnings for status."
+                )
+            else:
+                print("⚠ Bootstrap timeout — bridge may be offline; using defaults")
 
-    # Embedded bridge tear-down — only reached on clean shutdown of the
-    # manager. Daemon thread would die with the process anyway, but
-    # close() gives the bridge a chance to clear its retained config and
-    # release MQTT cleanly.
-    if embedded_bridge is not None:
-        server, thread = embedded_bridge
-        await _close_embedded_bridge(server)
-        thread.join(timeout=3)
+            # Wait for the bridge's initial `status` reply to land (which
+            # populates state.bridge). Bounded so we still print *something*
+            # if the bridge never replies.
+            await state.wait_for(lambda: bool(state.bridge), timeout=3.0)
+            # Skip the diff dump when there's no cloud — without a reference
+            # set, every bridge device would land in "ORPHANED" which
+            # contradicts the "showing as ungrouped" NOTE printed at startup.
+            if state.cloud:
+                _print_diff(state.diff())
+            else:
+                print(
+                    f"\n=== Bridge: {len(state.bridge)} device(s) "
+                    f"(no cloud loaded — diff skipped) ===\n"
+                )
+
+            if args.web:
+                from .web import build_app
+
+                creds_path = args.creds or str(cloud_path.parent / "tuyacreds.json")
+                app = build_app(state, client, creds_path=creds_path, auth=args.auth)
+                for url in _web_urls(args.host, args.port):
+                    print(f"Serving web UI on {url}")
+                if args.auth:
+                    print(f"  (HTTP Basic auth enabled — user '{args.auth.split(':', 1)[0]}')")
+                web_task = asyncio.create_task(_serve_web(args.host, args.port, app))
+                try:
+                    await stop_event.wait()
+                finally:
+                    print("\nShutting down ...")
+                    web_task.cancel()
+                    await asyncio.gather(web_task, return_exceptions=True)
+            else:
+                print(
+                    f"Watching for events. Press Ctrl+C to exit. "
+                    f"(bridge has {len(state.bridge)} devices)"
+                )
+                await stop_event.wait()
+                print("\nShutting down ...")
+        # `async with client` exited — reconnect task cancelled, aiomqtt
+        # context closed cleanly.
+    finally:
+        # Embedded bridge tear-down — runs even on exception so a manager
+        # crash doesn't leave a retained bridge/config behind.
+        if embedded_bridge is not None:
+            server, thread = embedded_bridge
+            await _close_embedded_bridge(server)
+            thread.join(timeout=3)
 
     return 0
 

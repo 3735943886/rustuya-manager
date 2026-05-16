@@ -149,15 +149,11 @@ def bridge(tmp_path):
 
 
 async def _run_client_briefly(client: BridgeClient, fn) -> None:
-    """Helper: run client.run() as a task, call fn() while it's alive, then stop."""
-    task = asyncio.create_task(client.run())
-    try:
+    """Helper: enter the client's async context, run fn() while alive, then exit."""
+    async with client:
         # Wait for bootstrap; give it more slack than the client's 5s internal timeout.
-        await asyncio.wait_for(client._bootstrap_done.wait(), 7.0)
+        await client.wait_bootstrap(timeout=7.0)
         await fn()
-    finally:
-        await client.stop()
-        await asyncio.wait_for(task, 5.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -445,17 +441,15 @@ async def _run_embed_test(tmp_path, root: str, *, bridge_config: str | None = No
     )
 
     embedded = None
-    run_task = asyncio.create_task(client.run())
     try:
-        embedded = await _resolve_embedded_bridge(state, args)
-        assert embedded is not None, "embed-bridge should have spawned"
-        assert "embedded_bridge_aborted" not in state.warnings
-        await asyncio.wait_for(client._bootstrap_done.wait(), 7.0)
-        return state, args
+        async with client:
+            embedded = await _resolve_embedded_bridge(state, args)
+            assert embedded is not None, "embed-bridge should have spawned"
+            assert "embedded_bridge_aborted" not in state.warnings
+            await client.wait_bootstrap(timeout=7.0)
+            return state, args
     finally:
         # Caller's assertions ran (or raised); shut everything down regardless.
-        await client.stop()
-        await asyncio.wait_for(run_task, 5.0)
         if embedded is not None:
             server, thread = embedded
             await _close_embedded_bridge(server)
@@ -580,16 +574,14 @@ async def test_embed_bridge_inherits_broker_and_root_from_bridge_config(tmp_path
     state = State()
     client = BridgeClient(broker=args.broker, root=args.root, state=state)
     embedded = None
-    run_task = asyncio.create_task(client.run())
     try:
-        embedded = await _resolve_embedded_bridge(state, args)
-        assert embedded is not None
-        await asyncio.wait_for(client._bootstrap_done.wait(), 7.0)
-        assert state.templates is not None
-        assert state.templates.root == root_in_cfg
+        async with client:
+            embedded = await _resolve_embedded_bridge(state, args)
+            assert embedded is not None
+            await client.wait_bootstrap(timeout=7.0)
+            assert state.templates is not None
+            assert state.templates.root == root_in_cfg
     finally:
-        await client.stop()
-        await asyncio.wait_for(run_task, 5.0)
         if embedded is not None:
             server, thread = embedded
             await _close_embedded_bridge(server)

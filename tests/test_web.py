@@ -2,16 +2,16 @@
 
 Uses FastAPI's `TestClient` (no real broker, no real bridge) so we can verify
 the HTTP/WS surface contract independently of the MQTT pipeline. The
-BridgeClient is constructed but its `run()` is never invoked — only
-`publish_command` is reachable, and we test it via a mock paho client.
+BridgeClient is constructed without entering its async context — we wire its
+internal `_client` to an aiomqtt mock and pre-flag `_connected` so
+`publish_command` runs without actually hitting a broker.
 """
 
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
-import paho.mqtt.client as mqtt
 from fastapi.testclient import TestClient
 
 from rustuya_manager.mqtt import BridgeClient
@@ -31,9 +31,12 @@ def _fixture_state() -> tuple[State, BridgeClient]:
         payload="{value}",
     )
     client = BridgeClient(broker="mqtt://localhost:1883", root="rustuya", state=state)
-    paho_mock = MagicMock(spec=mqtt.Client)
-    paho_mock.publish.return_value = MagicMock(rc=mqtt.MQTT_ERR_SUCCESS)
-    client._client = paho_mock
+    aiomqtt_mock = MagicMock()
+    aiomqtt_mock.publish = AsyncMock(return_value=None)
+    aiomqtt_mock.subscribe = AsyncMock(return_value=None)
+    aiomqtt_mock.unsubscribe = AsyncMock(return_value=None)
+    client._client = aiomqtt_mock
+    client._connected.set()
     return state, client
 
 
@@ -103,9 +106,9 @@ class TestHTTP:
             assert r.status_code == 200
             body = r.json()
             assert body["ok"] is True
-            # The mock paho client should have been called
-            client._client.publish.assert_called_once()
-            topic, payload = client._client.publish.call_args.args[:2]
+            # The mock aiomqtt client should have been awaited
+            client._client.publish.assert_awaited_once()
+            topic, payload = client._client.publish.await_args.args[:2]
             assert topic == "rustuya/command"
             assert json.loads(payload) == {"action": "status", "id": "bridge"}
 

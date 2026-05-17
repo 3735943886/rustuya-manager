@@ -196,11 +196,21 @@ export function deviceCard(id, cls, isChild) {
   headerBottom.innerHTML = showSecondaryId
     ? `<span class="font-mono text-[11px] text-slate-400 dark:text-slate-500 truncate">${escapeHtml(id)}</span>`
     : `<span></span>`;
+  // Retained MQTT messages don't carry a publish timestamp, so we can't
+  // honestly show "X ago" for data that arrived as a retain on cold start.
+  // The server flags those ids in `retained_only`; once a live event flows
+  // in we drop the flag and the regular formatAgo takes over.
   if (lastSeen) {
     const ls = document.createElement("span");
     ls.className = "ml-auto text-[10px] text-slate-400 dark:text-slate-500 shrink-0";
     ls.dataset.lastseen = String(lastSeen);
     ls.textContent = formatAgo(lastSeen);
+    headerBottom.appendChild(ls);
+  } else if (snap.retained_only?.includes(id)) {
+    const ls = document.createElement("span");
+    ls.className = "ml-auto text-[10px] italic text-slate-400 dark:text-slate-500 shrink-0";
+    ls.title = "Last value is from a retained MQTT message; freshness unknown until a live event arrives.";
+    ls.textContent = "retained";
     headerBottom.appendChild(ls);
   }
   card.appendChild(headerBottom);

@@ -45,8 +45,18 @@ class State:
     dps: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Last action result keyed by device id ("ok", "error", or message text).
     last_response: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # UNIX seconds of the most recent event/response observed per device id.
+    # UNIX seconds of the most recent **live** event/response observed per
+    # device id. Retained messages don't carry a publish timestamp in MQTT
+    # v3.1.1, so stamping last_seen for them would falsely advertise stale
+    # data as "just now" — instead we leave last_seen untouched and add the
+    # id to `retained_only` (below) so the UI can show "(retained)" until a
+    # fresh event arrives.
     last_seen: dict[str, float] = field(default_factory=dict)
+    # Device ids whose only data so far came from a retained MQTT message
+    # (manager cold-start re-delivering the broker's last-known payload).
+    # An id is added when a retained event/response lands without a prior
+    # live update, and removed the moment a non-retained event arrives.
+    retained_only: set[str] = field(default_factory=set)
     # Live online/offline state, surfaced via the bridge's `error` topic and
     # DPS events. Each entry is {"state": "online"|"offline"|"unknown",
     # "code": int|None, "message": str|None}.
@@ -84,20 +94,42 @@ class State:
             self._bump()
 
     async def merge_dps(
-        self, device_id: str, new_dps: dict[str, Any], at: float | None = None
+        self,
+        device_id: str,
+        new_dps: dict[str, Any],
+        at: float | None = None,
+        *,
+        retained: bool = False,
     ) -> None:
         async with self._changed:
             existing = self.dps.setdefault(device_id, {})
             existing.update(new_dps)
-            self.last_seen[device_id] = at if at is not None else _now()
+            if retained:
+                # Only mark retained_only if we haven't already seen a live
+                # event — otherwise we'd downgrade a known-fresh device.
+                if device_id not in self.last_seen:
+                    self.retained_only.add(device_id)
+            else:
+                self.last_seen[device_id] = at if at is not None else _now()
+                self.retained_only.discard(device_id)
             self._bump()
 
     async def record_response(
-        self, target_id: str, response: dict[str, Any], at: float | None = None
+        self,
+        target_id: str,
+        response: dict[str, Any],
+        at: float | None = None,
+        *,
+        retained: bool = False,
     ) -> None:
         async with self._changed:
             self.last_response[target_id] = response
-            self.last_seen[target_id] = at if at is not None else _now()
+            if retained:
+                if target_id not in self.last_seen:
+                    self.retained_only.add(target_id)
+            else:
+                self.last_seen[target_id] = at if at is not None else _now()
+                self.retained_only.discard(target_id)
             self._bump()
 
     async def remove_device(self, device_id: str) -> None:
@@ -112,10 +144,12 @@ class State:
         """
         async with self._changed:
             buckets = (self.bridge, self.dps, self.live_status, self.last_seen, self.last_response)
-            if not any(device_id in b for b in buckets):
+            present = any(device_id in b for b in buckets) or device_id in self.retained_only
+            if not present:
                 return
             for b in buckets:
                 b.pop(device_id, None)
+            self.retained_only.discard(device_id)
             self._bump()
 
     async def set_cloud_path(self, path: str) -> None:

@@ -409,21 +409,21 @@ class BridgeClient:
                     if rid and rid != "bridge":
                         await self.state.remove_device(rid)
                     else:
-                        await self.state.record_response(target, parsed)
+                        await self.state.record_response(target, parsed, retained=retain)
                 elif action == "add" and status_val == "ok":
                     # The add ack doesn't carry the device fields the bridge
                     # ended up storing; ask for a status refresh so state.bridge
                     # picks up the new/updated entry authoritatively.
-                    await self.state.record_response(target, parsed)
+                    await self.state.record_response(target, parsed, retained=retain)
                     asyncio.create_task(self.publish_command("status", target_id="bridge"))
                 else:
-                    await self.state.record_response(target, parsed)
+                    await self.state.record_response(target, parsed, retained=retain)
         elif matched_as == "event":
             if isinstance(parsed, dict):
                 key = self._resolve_device_key(vars_, parsed)
                 dps = await self._extract_dps_from_event(vars_, parsed, payload_str)
                 if key and dps:
-                    await self.state.merge_dps(key, dps)
+                    await self.state.merge_dps(key, dps, retained=retain)
                     # Data flowing means the device is alive — mark online.
                     # Leave message empty: the bridge's error-channel sends
                     # human-readable strings like "Connection Successful",

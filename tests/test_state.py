@@ -107,3 +107,57 @@ class TestRemoveDevice:
         await state.remove_device("never-existed")
         assert state.version == v0  # no bump
         assert "keep" in state.bridge
+
+
+class TestRetainedOnly:
+    """Retained MQTT events arrive without a publish timestamp, so `last_seen`
+    must NOT be stamped — that would falsely show "just now" for stale data
+    that's been sitting on the broker for hours. The id goes into
+    `retained_only` instead; UI surfaces this as a "(retained)" label. The
+    moment a live event arrives, last_seen takes over and the flag drops."""
+
+    async def test_retained_merge_dps_skips_last_seen(self):
+        state = State()
+        await state.merge_dps("x", {"1": True}, retained=True)
+        assert state.dps["x"] == {"1": True}
+        assert "x" not in state.last_seen
+        assert "x" in state.retained_only
+
+    async def test_live_event_after_retained_promotes(self):
+        # Cold-start path: retained event lands first, then a live one. The
+        # live event must clear retained_only and set last_seen so the UI
+        # switches from "(retained)" to "X ago".
+        state = State()
+        await state.merge_dps("x", {"1": True}, retained=True)
+        assert "x" in state.retained_only
+
+        await state.merge_dps("x", {"1": False})
+        assert "x" not in state.retained_only
+        assert "x" in state.last_seen
+
+    async def test_retained_after_live_does_not_downgrade(self):
+        # Once a device is "fresh", a later retained event (e.g. broker
+        # re-delivering after a reconnect) must not push it back into
+        # retained_only and must not clobber the existing last_seen.
+        state = State()
+        await state.merge_dps("x", {"1": True})  # live first
+        live_seen = state.last_seen["x"]
+
+        await state.merge_dps("x", {"1": True}, retained=True)
+        assert "x" not in state.retained_only
+        assert state.last_seen["x"] == live_seen
+
+    async def test_retained_record_response_skips_last_seen(self):
+        state = State()
+        await state.record_response("x", {"action": "get", "status": "ok"}, retained=True)
+        assert "x" not in state.last_seen
+        assert "x" in state.retained_only
+
+    async def test_remove_clears_retained_flag(self):
+        # remove_device must drop the retained_only flag too — otherwise a
+        # re-added device would still be tagged "retained" indefinitely.
+        state = State()
+        await state.merge_dps("x", {"1": True}, retained=True)
+        assert "x" in state.retained_only
+        await state.remove_device("x")
+        assert "x" not in state.retained_only

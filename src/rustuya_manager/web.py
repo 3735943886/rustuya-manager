@@ -89,6 +89,7 @@ def serialize_state(state: State) -> dict[str, Any]:
         "dps": state.dps,
         "last_response": state.last_response,
         "last_seen": state.last_seen,
+        "retained_only": sorted(state.retained_only),
         "live_status": state.live_status,
         "warnings": state.warnings,
         "cloud_path": state.cloud_path,

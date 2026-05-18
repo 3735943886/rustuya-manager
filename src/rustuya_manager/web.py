@@ -145,7 +145,7 @@ def build_app(
     creds_path: str | None = None,
     auth: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version="0.1.0rc12")
+    app = FastAPI(title="rustuya-manager", version="0.1.0rc13")
     if auth:
         if ":" not in auth:
             raise ValueError("--auth must be in 'user:password' form")
@@ -177,7 +177,11 @@ def build_app(
                 logger.warning("wizard fetched devices but persist failed: %s", e)
 
     wizard_creds = creds_path or "tuyacreds.json"
-    wizard = WizardManager(creds_path=wizard_creds, on_devices=_on_wizard_devices)
+    wizard = WizardManager(
+        creds_path=wizard_creds,
+        on_devices=_on_wizard_devices,
+        bridge_client=client,
+    )
     app.state.wizard = wizard
 
     @app.get("/api/state")

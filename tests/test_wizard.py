@@ -167,10 +167,20 @@ class TestWizardManager:
         pp.assert_called_once()
         assert pp.call_args.args[1] == "parent"
 
-    async def test_scan_on_uses_all_mode(self, tmp_path: Path):
-        """start(scan=True) must postprocess with `all` — parent linking
-        plus the UDP scan that bakes a current LAN IP into each device."""
-        wm = WizardManager(creds_path=str(tmp_path / "creds.json"))
+    async def test_scan_on_with_bridge_uses_all_mode(self, tmp_path: Path):
+        """start(scan=True) with a connected BridgeClient must postprocess
+        with `all` and inject the bridge-collected scan_results into
+        tuyawizard so it skips its own (rustuya-based) UDP scan."""
+
+        class _MockBridge:
+            scan_called = False
+
+            async def scan_collect(self, timeout=20.0):
+                _MockBridge.scan_called = True
+                return [{"id": "bf-aaaa", "ip": "192.168.1.99"}]
+
+        bridge = _MockBridge()
+        wm = WizardManager(creds_path=str(tmp_path / "creds.json"), bridge_client=bridge)
         mock_wizard = _make_mock_wizard()
         with (
             patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard),
@@ -180,6 +190,53 @@ class TestWizardManager:
             await wm._task
         pp.assert_called_once()
         assert pp.call_args.args[1] == "all"
+        # The scan_results kwarg lets tuyawizard skip its rustuya-Scanner
+        # fallback — so the manager can drop the rustuya direct dep.
+        assert pp.call_args.args[2] == [{"id": "bf-aaaa", "ip": "192.168.1.99"}]
+        assert _MockBridge.scan_called is True
+        assert wm.session.warning is None
+
+    async def test_scan_on_without_bridge_warns_and_falls_back(self, tmp_path: Path):
+        """If scan=True but no BridgeClient is wired (cold boot, bridge
+        offline, embed-bridge crashed, etc.), the wizard must still finish
+        — degrade to parent-only and surface a session.warning so the UI
+        can toast "Bridge not connected — scan skipped"."""
+        wm = WizardManager(creds_path=str(tmp_path / "creds.json"))  # no bridge_client
+        mock_wizard = _make_mock_wizard()
+        with (
+            patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard),
+            patch("rustuya_manager.wizard.postprocess_devices") as pp,
+        ):
+            await wm.start(scan=True)
+            await wm._task
+        pp.assert_called_once()
+        assert pp.call_args.args[1] == "parent"
+        assert pp.call_args.args[2] is None
+        assert wm.session.state == WizardState.DONE
+        assert wm.session.warning is not None
+        assert "bridge" in wm.session.warning.lower()
+
+    async def test_scan_on_with_bridge_failure_falls_back(self, tmp_path: Path):
+        """If scan_collect() raises (broker disconnect mid-scan,
+        unexpected MQTT error), the wizard must still finish on parent
+        mode with a warning, not crash the whole session."""
+
+        class _BrokenBridge:
+            async def scan_collect(self, timeout=20.0):
+                raise RuntimeError("MQTT broker not connected")
+
+        wm = WizardManager(creds_path=str(tmp_path / "creds.json"), bridge_client=_BrokenBridge())
+        mock_wizard = _make_mock_wizard()
+        with (
+            patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard),
+            patch("rustuya_manager.wizard.postprocess_devices") as pp,
+        ):
+            await wm.start(scan=True)
+            await wm._task
+        assert wm.session.state == WizardState.DONE
+        assert pp.call_args.args[1] == "parent"
+        assert wm.session.warning is not None
+        assert "scan failed" in wm.session.warning.lower()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -244,14 +301,26 @@ class TestWizardEndpoints:
 
     def test_start_propagates_scan_flag(self, tmp_path: Path):
         """The `scan` field in POST /api/wizard/start must reach the
-        WizardManager and select `all` vs `parent` postprocess mode."""
+        WizardManager, trigger a bridge scan, and feed those results into
+        postprocess_devices as the third positional arg."""
         state, client, creds = _build_app_fixture(tmp_path)
         mock_wizard = _make_mock_wizard()
+
+        class _MockBridge:
+            async def scan_collect(self, timeout=20.0):
+                return [{"id": "scanner-saw-me", "ip": "192.168.1.42"}]
+
         with (
             patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard),
             patch("rustuya_manager.wizard.postprocess_devices") as pp,
             TestClient(build_app(state, client, creds_path=creds)) as tc,
         ):
+            # Replace the wizard's bridge_client with a controllable mock so
+            # scan_collect doesn't have to publish over an unconnected
+            # aiomqtt client — we just want to verify the POST body's
+            # scan=true reaches postprocess_devices with scan_results.
+            tc.app.state.wizard._bridge_client = _MockBridge()
+
             r = tc.post("/api/wizard/start", json={"user_code": "T", "scan": True})
             assert r.status_code == 200
             import time
@@ -262,3 +331,4 @@ class TestWizardEndpoints:
                 time.sleep(0.1)
         pp.assert_called_once()
         assert pp.call_args.args[1] == "all"
+        assert pp.call_args.args[2] == [{"id": "scanner-saw-me", "ip": "192.168.1.42"}]

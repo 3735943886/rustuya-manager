@@ -1,8 +1,10 @@
 // Tuya Cloud login flow. State machine mirrors the backend's WizardState
 // enum. The backend response on any wizard endpoint is
-//   { state, qr_image_data_url, message, error, devices_count, ... }
+//   { state, qr_image_data_url, message, error, warning, devices_count, ... }
 // We render the matching pane and poll while the flow is in progress.
 // Cached user_code lives in localStorage so repeat runs are one click.
+
+import { toast } from "./dom.js";
 
 const $wizardOpen = document.getElementById("wizard-open-btn");
 const $wizardModal = document.getElementById("wizard-modal");
@@ -21,6 +23,9 @@ const $wizardScanInfo = document.getElementById("wizard-scan-info");
 const $wizardScanPopover = document.getElementById("wizard-scan-popover");
 
 let wizardPollTimer = null;
+// Done-state polls happen ~1.5s apart and we don't want the same warning
+// toast firing on every tick until auto-close. Reset on each startWizard().
+let wizardWarningShown = false;
 
 async function openWizardModal() {
   showWizardPane("idle");
@@ -88,6 +93,14 @@ function applyWizardSession(s) {
       $wizardStart.textContent = "Close";
       $wizardStart.disabled = false;
       stopWizardPoll();
+      // Surface any non-fatal warning the backend attached (e.g. "Bridge
+      // not connected — scan skipped, parent linking only"). The modal
+      // auto-closes shortly after `done`, so the message has to live
+      // outside the modal — a toast is the right channel.
+      if (s.warning && !wizardWarningShown) {
+        toast(s.warning, "warning");
+        wizardWarningShown = true;
+      }
       // Auto-close after a brief moment so the user sees the success state
       setTimeout(() => {
         if (wizardCurrentState() === "done") closeWizardModal();
@@ -120,6 +133,7 @@ async function startWizard() {
   const cur = wizardCurrentState();
   if (cur === "done") { closeWizardModal(); return; }
   if (cur === "idle" || cur === "error") {
+    wizardWarningShown = false;
     try {
       const res = await fetch("/api/wizard/start", {
         method: "POST",

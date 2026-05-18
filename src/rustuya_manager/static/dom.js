@@ -120,8 +120,9 @@ export function statusPill(cls) {
 const $toasts = document.getElementById("toast-container");
 export function toast(msg, kind = "ok") {
   const styles = {
-    ok:    "bg-slate-900 dark:bg-slate-200 text-white dark:text-slate-900",
-    error: "bg-rose-600 dark:bg-rose-500 text-white",
+    ok:      "bg-slate-900 dark:bg-slate-200 text-white dark:text-slate-900",
+    error:   "bg-rose-600 dark:bg-rose-500 text-white",
+    warning: "bg-amber-600 dark:bg-amber-500 text-white dark:text-slate-900",
   }[kind];
   const t = document.createElement("div");
   t.className = `pointer-events-auto text-xs px-3 py-2 rounded shadow ${styles}`;

@@ -31,12 +31,15 @@ import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import qrcode
 import qrcode.image.svg
 from tuyawizard import TuyaWizard
 from tuyawizard.wizard import postprocess_devices
+
+if TYPE_CHECKING:
+    from .mqtt import BridgeClient
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,10 @@ class WizardSession:
     devices_count: int = 0
     message: str = ""
     error: str | None = None
+    # Non-fatal info to surface as a toast at completion — used when the
+    # session ran to DONE but degraded somewhere (e.g. scan was requested
+    # but the bridge wasn't connected so we fell back to parent-only).
+    warning: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +80,7 @@ class WizardSession:
             "devices_count": self.devices_count,
             "message": self.message,
             "error": self.error,
+            "warning": self.warning,
         }
 
 
@@ -91,9 +99,15 @@ class WizardManager:
         self,
         creds_path: str,
         on_devices: DevicesCallback | None = None,
+        bridge_client: BridgeClient | None = None,
     ):
         self.creds_path = creds_path
         self._on_devices = on_devices
+        # Optional handle on the MQTT bridge so the wizard can ask the
+        # bridge to UDP-scan the LAN in parallel with the (slow) Tuya
+        # Cloud fetch. When absent, scan=True degrades to parent-only
+        # with a session.warning the UI can toast.
+        self._bridge_client = bridge_client
         self.session = WizardSession()
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
@@ -173,6 +187,7 @@ class WizardManager:
             self.session.state = WizardState.AWAITING_SCAN
             self.session.message = "Scan the QR code with Smart Life or Tuya Smart app"
 
+        scan_task: asyncio.Task[list[dict[str, Any]]] | None = None
         try:
             self.session.message = "Connecting to Tuya…"
             # login_auto signature: (user_code, creds, qr_callback)
@@ -198,21 +213,53 @@ class WizardManager:
             self.session.state = WizardState.LOGGED_IN
             self.session.message = "Logged in. Fetching devices..."
 
+            # Kick off the bridge LAN scan in parallel with fetch_devices —
+            # cloud fetch is the slow part (multi-second round-trip to
+            # Tuya's API), the scanner runs in the bridge with its own 18s
+            # timeout, and we'll await it once fetch returns. Without the
+            # bridge handle we fall through to mode="parent" and surface a
+            # warning so the UI can toast "scan skipped" at done.
+            if scan:
+                if self._bridge_client is not None:
+                    scan_task = asyncio.create_task(self._bridge_client.scan_collect())
+                else:
+                    logger.warning(
+                        "scan requested but no BridgeClient available — "
+                        "falling back to parent-only postprocess"
+                    )
+                    self.session.warning = (
+                        "Bridge not connected — scan skipped, parent linking only."
+                    )
+
             self.session.state = WizardState.FETCHING
             devices = await loop.run_in_executor(None, wizard.fetch_devices)
             self.session.devices_count = len(devices)
             self.session.message = f"Fetched {len(devices)} devices"
 
+            # Resolve the parallel scan. On any scan failure we degrade to
+            # parent-only with a session.warning rather than failing the
+            # whole flow — the user still gets their devices, just without
+            # baked-in IPs.
+            scan_results: list[dict[str, Any]] | None = None
+            if scan_task is not None:
+                self.session.message = "Waiting for LAN scan to finish…"
+                try:
+                    scan_results = await scan_task
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Bridge scan failed: %s", e)
+                    self.session.warning = (
+                        f"Bridge scan failed ({type(e).__name__}); used parent linking only."
+                    )
+
             # Postprocess: "parent" links sub-devices to their gateway —
-            # always needed so the bridge can route them. "all" adds a UDP
-            # scan that enriches each device with its current LAN IP and
-            # firmware version (~2-5s). The scan is off by default because
-            # baking an IP into the record means DHCP changes won't be
-            # caught — the bridge can scan on demand at runtime when no IP
-            # is present, which survives router DHCP renewals.
-            mode = "all" if scan else "parent"
+            # always needed so the bridge can route them. "all" additionally
+            # bakes the bridge-scanned IP/version into each device. We pass
+            # scan_results explicitly so tuyawizard skips its own
+            # rustuya.Scanner fallback path (manager doesn't depend on the
+            # rustuya Python crate anymore).
+            mode = "all" if scan_results else "parent"
             self.session.message = f"Postprocessing ({mode})…"
-            await loop.run_in_executor(None, postprocess_devices, devices, mode)
+            await loop.run_in_executor(None, postprocess_devices, devices, mode, scan_results)
 
             if self._on_devices is not None:
                 await self._on_devices(devices)
@@ -220,10 +267,14 @@ class WizardManager:
             self.session.state = WizardState.DONE
             self.session.message = f"Done — {len(devices)} devices loaded"
         except asyncio.CancelledError:
+            if scan_task is not None and not scan_task.done():
+                scan_task.cancel()
             self.session.state = WizardState.ERROR
             self.session.error = "cancelled"
             raise
         except Exception as e:  # noqa: BLE001 - any failure ends in ERROR with message
+            if scan_task is not None and not scan_task.done():
+                scan_task.cancel()
             logger.exception("Wizard flow failed")
             self.session.state = WizardState.ERROR
             self.session.error = f"{type(e).__name__}: {e}"

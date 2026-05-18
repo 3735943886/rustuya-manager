@@ -253,9 +253,9 @@ _ANNOTATE_JS = r"""
         [findCardByName('legacy-device'),
          '<b>Orphan</b> — only in bridge. Click <b>🗑</b> to remove.'],
         [findCardByName('Floor Lamp'),
-         '<b>Missing</b> — only in cloud. Click <b>Add</b> to publish.'],
+         '<b>Missing</b> — only in cloud. Click <b>Add</b> to register on the bridge.'],
         [findCardByName('RF Hub'),
-         '<b>Mismatch</b> — click <b>Update</b> to push cloud → bridge.'],
+         '<b>Mismatch</b> — fields differ. Click <b>Update</b> to copy cloud values to bridge.'],
         [findCardByName('Heavy Duty Outlet'),
          '<b>Synced</b> — in both, fields match. Click row to expand · live DPs.'],
     ];

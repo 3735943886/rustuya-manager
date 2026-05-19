@@ -69,6 +69,84 @@ def test_wizard_modal_opens_and_closes_on_escape(page: Page, server_url: str) ->
     expect(modal).to_be_hidden()
 
 
+def test_expanded_card_shows_full_key_and_escapes_special_chars(
+    page: Page, server_url: str
+) -> None:
+    """KEY is shown in full (no shortening) and any HTML metacharacters in
+    the key value land as text, not interpreted markup.
+
+    The dom helpers' `escapeHtml` should HTML-escape `<`, `>`, `&`, `"` before
+    they go into innerHTML. We assert two things:
+      1. the rendered KEY span's textContent equals the raw key (no
+         truncation, no entity-mangling)
+      2. no <script> child was injected by the renderer (would mean
+         the key bypassed escaping)
+    """
+    # If escaping ever regresses, a literal <script>alert(...)</script> would
+    # try to fire — pre-register a dialog dismisser so the test reports the
+    # escape failure cleanly rather than hanging on a modal.
+    page.on("dialog", lambda d: d.dismiss())
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(server_url)
+    # Wait for the initial WS frame so /static/state.js has already been
+    # imported by app.js — our subsequent `import('/static/state.js')`
+    # then gets the same module instance (singleton state object).
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+
+    raw_key = '<script>alert("xss")</script>&"x'
+    snap = {
+        "cloud": {
+            "dev-pwn": {
+                "id": "dev-pwn",
+                "name": "test-device",
+                "type": "WiFi",
+                "key": raw_key,
+                "ip": "Auto",
+                "version": "3.4",
+            }
+        },
+        "bridge": {},
+        "templates": None,
+        "dps": {},
+        "last_response": {},
+        "last_seen": {},
+        "retained_only": [],
+        "live_status": {},
+        "warnings": {},
+        "cloud_loaded": True,
+        "diff": {"synced": [], "mismatched": [], "missing": ["dev-pwn"], "orphaned": []},
+    }
+    page.evaluate(
+        """async (snap) => {
+            const s = await import('/static/state.js');
+            const r = await import('/static/render.js');
+            s.expandedIds.add('dev-pwn');
+            s.state.snapshot = snap;
+            r.render();
+        }""",
+        snap,
+    )
+    assert not errors, f"page errors during render: {errors}"
+
+    # Missing-class card should have the sky edge stripe (cards.js
+    # computeEdgeColor). This also exercises the missing → expand path —
+    # the same expand UI as paired devices, surfacing IP/KEY/VER.
+    card = page.locator("#device-list > div").first
+    expect(card).to_have_class(re.compile(r"border-l-sky-"))
+
+    # The grid renders KEY in a labeled cell. Locate the value span via its
+    # label sibling — keeps the test resilient to layout class churn.
+    key_cell = page.locator("#device-list div").filter(has_text="KEY").last
+    # The full 32-char-style key should appear verbatim as text, NOT as
+    # an interpreted <script> element.
+    expect(key_cell).to_contain_text(raw_key)
+    # If escaping had failed, a <script> child would exist inside the cell.
+    assert key_cell.locator("script").count() == 0, (
+        "key value was injected as markup, not escaped"
+    )
+
+
 def test_scan_button_publishes_bridge_scan(page: Page, server_url: str) -> None:
     """The header's 📡 Scan button posts a `scan` command to the bridge so
     fixed-IP devices currently in reconnect backoff get a fresh scanner

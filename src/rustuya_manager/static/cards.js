@@ -210,7 +210,7 @@ export function deviceCard(id, cls, isChild) {
     const ls = document.createElement("span");
     ls.className = "ml-auto text-[10px] italic text-slate-400 dark:text-slate-500 shrink-0";
     ls.title = "Last value is from a retained MQTT message; freshness unknown until a live event arrives.";
-    ls.textContent = "retained";
+    ls.textContent = "cached";
     headerBottom.appendChild(ls);
   }
   card.appendChild(headerBottom);

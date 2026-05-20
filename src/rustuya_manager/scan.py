@@ -111,7 +111,11 @@ class LanScanCoordinator:
                     break
                 try:
                     item = await asyncio.wait_for(q.get(), timeout=remaining)
-                except TimeoutError:
+                except asyncio.TimeoutError:
+                    # py3.10 keeps asyncio.TimeoutError distinct from the
+                    # builtin TimeoutError (the two were unified in 3.11),
+                    # so catching the builtin alone lets the asyncio one
+                    # escape on the older interpreter we still target.
                     break
                 if not item:
                     # Empty dict is the bridge's explicit scan-end

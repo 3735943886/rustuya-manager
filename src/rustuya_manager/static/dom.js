@@ -58,6 +58,32 @@ export function liveDot(live) {
   return wrap;
 }
 
+// Same slot as liveDot but tuned for missing-class cards, where MQTT live
+// status is meaningless (the bridge doesn't know the device) but LAN-scan
+// visibility carries the equivalent "is it reachable right now?" signal.
+// Filled sky dot when the latest scan saw the device, dim ring otherwise.
+// The class-color (sky) mirrors the missing edge stripe / wash, so the dot
+// reads as part of the same category cue rather than a new color to decode.
+export function scanDot(sighting) {
+  const wrap = document.createElement("span");
+  wrap.className = ICON_BASE;
+  const dot = document.createElement("span");
+  if (!sighting) {
+    dot.className = "w-2 h-2 rounded-full border-2 border-slate-300 dark:border-slate-600";
+    // Honest about ambiguity — without a backend "scan ever ran" flag we
+    // can't tell "no scan yet" apart from "scan ran, didn't see it".
+    wrap.title = "not in last LAN scan (or scan has not run yet)";
+    wrap.appendChild(dot);
+    return wrap;
+  }
+  dot.className = "w-2 h-2 rounded-full bg-sky-500";
+  const ip = sighting.ip ? ` at ${sighting.ip}` : "";
+  const ago = sighting.observed_at ? `, ${formatAgo(sighting.observed_at)}` : "";
+  wrap.title = `LAN scan saw this device${ip}${ago}`;
+  wrap.appendChild(dot);
+  return wrap;
+}
+
 export function iconButton(glyph, onClick, title, variant = "default") {
   // `danger` tints the icon rose so destructive actions read as risky at a
   // glance; the confirm dialog is still the actual guard.

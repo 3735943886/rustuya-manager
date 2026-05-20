@@ -260,6 +260,86 @@ def test_missing_card_omits_scan_row_when_no_sighting(page: Page, server_url: st
     assert page.locator("#device-list div").filter(has_text="SCAN VER").count() == 0
 
 
+def test_collapsed_missing_card_scan_dot_reflects_visibility(page: Page, server_url: str) -> None:
+    """Collapsed missing cards reuse the live-status dot slot to telegraph
+    whether the LAN scan currently sees the device — filled sky when a
+    sighting exists, dim ring otherwise. Both cards live in the same
+    snapshot so we exercise the per-card branch in deviceCard, not just a
+    global state."""
+    page.goto(server_url)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+
+    snap = {
+        "cloud": {
+            "dev-seen": {
+                "id": "dev-seen",
+                "name": "seen-by-scan",
+                "type": "WiFi",
+                "key": "k" * 32,
+                "ip": "Auto",
+                "version": "Auto",
+            },
+            "dev-unseen": {
+                "id": "dev-unseen",
+                "name": "not-seen-by-scan",
+                "type": "WiFi",
+                "key": "k" * 32,
+                "ip": "Auto",
+                "version": "Auto",
+            },
+        },
+        "bridge": {},
+        "templates": None,
+        "dps": {},
+        "last_response": {},
+        "last_seen": {},
+        "retained_only": [],
+        "live_status": {},
+        "warnings": {},
+        "cloud_loaded": True,
+        "diff": {
+            "synced": [],
+            "mismatched": [],
+            "missing": ["dev-seen", "dev-unseen"],
+            "orphaned": [],
+        },
+        "scan_results": {
+            "dev-seen": {
+                "id": "dev-seen",
+                "ip": "192.168.1.42",
+                "version": "3.4",
+                "observed_at": 1700000000.0,
+            },
+        },
+    }
+    page.evaluate(
+        """async (snap) => {
+            const s = await import('/static/state.js');
+            const r = await import('/static/render.js');
+            s.state.snapshot = snap;
+            r.render();
+        }""",
+        snap,
+    )
+
+    # Seen-by-scan card: filled sky dot exists, and the wrap's title
+    # carries the observed IP so a hover explains the signal.
+    seen_card = page.locator("#device-list > div").filter(has_text="seen-by-scan").first
+    expect(seen_card.locator("span.bg-sky-500")).to_have_count(1)
+    seen_title = seen_card.locator('span[title*="LAN scan"]').first.get_attribute("title")
+    assert "192.168.1.42" in (seen_title or "")
+
+    # Unseen card: no colored fill on any dot in this card, dim slate
+    # ring, and the wrap title flags the ambiguity (scan-didn't-see vs
+    # no-scan-yet) instead of pretending to know which.
+    unseen_card = page.locator("#device-list > div").filter(has_text="not-seen-by-scan").first
+    assert unseen_card.locator("span.bg-sky-500").count() == 0
+    assert unseen_card.locator("span.bg-emerald-500").count() == 0
+    expect(unseen_card.locator("span.border-slate-300")).to_have_count(1)
+    unseen_title = unseen_card.locator('span[title*="LAN scan"]').first.get_attribute("title")
+    assert "not in last LAN scan" in (unseen_title or "")
+
+
 def test_scan_button_posts_to_api_scan(page: Page, server_url: str) -> None:
     """The header's 📡 Scan button drives the server-side
     LanScanCoordinator via POST /api/scan. Stub-app territory: the stub

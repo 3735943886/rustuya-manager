@@ -4,7 +4,7 @@
 import { state, expandedIds, saveExpanded } from "./state.js";
 import {
   ICON_BASE, escapeHtml, formatDpsValue, formatAgo,
-  liveDot, iconButton, button, statusPill,
+  liveDot, scanDot, iconButton, button, statusPill,
 } from "./dom.js";
 import { sync, publishCommand } from "./api.js";
 import { openEditModal } from "./modal-device.js";
@@ -202,7 +202,13 @@ export function deviceCard(id, cls, isChild) {
   `;
   const rightCluster = document.createElement("span");
   rightCluster.className = "ml-auto flex items-center gap-1.5 shrink-0";
-  rightCluster.appendChild(liveDot(live));
+  // Missing cards have no MQTT live status to show (the bridge doesn't
+  // know the device), so the same slot carries LAN-scan visibility
+  // instead. Same color grammar as liveDot's filled-vs-ring pair, just
+  // tinted sky to match the missing class.
+  rightCluster.appendChild(
+    cls === "missing" ? scanDot(snap.scan_results?.[id]) : liveDot(live),
+  );
   // No type badge — sub-devices are visually distinguished by their tree
   // indentation under the parent gateway, so a "W"/"S" letter is redundant.
   appendInlineActions(rightCluster, id, cls, cloud, bridge, primary);

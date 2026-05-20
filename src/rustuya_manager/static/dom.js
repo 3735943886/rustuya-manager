@@ -12,12 +12,6 @@ export function escapeHtml(s) {
     .replaceAll('"', "&quot;");
 }
 
-export function shorten(s, len = 12) {
-  if (!s) return "";
-  if (s.length <= len) return s;
-  return `${s.slice(0, 4)}…${s.slice(-4)}`;
-}
-
 export function formatDpsValue(v) {
   if (v === null || v === undefined) return "—";
   if (typeof v === "boolean") return v ? "on" : "off";

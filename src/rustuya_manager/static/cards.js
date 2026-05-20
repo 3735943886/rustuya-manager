@@ -3,7 +3,7 @@
 
 import { state, expandedIds, saveExpanded } from "./state.js";
 import {
-  ICON_BASE, escapeHtml, shorten, formatDpsValue, formatAgo,
+  ICON_BASE, escapeHtml, formatDpsValue, formatAgo,
   liveDot, iconButton, button, statusPill,
 } from "./dom.js";
 import { sync, publishCommand } from "./api.js";
@@ -237,29 +237,33 @@ export function deviceCard(id, cls, isChild) {
   // Sub-devices live behind a gateway, so IP and KEY are meaningless for
   // them — only the CID and parent relationship matter. WiFi devices show
   // IP/KEY/VER + any live error message from the bridge.
+  //
+  // IP/KEY/VER are shown in full (no shorten/truncate). KEY is 32 hex chars
+  // and gets its own full-width row so it can wrap with `break-all` without
+  // forcing the IP/VER cells to grow. Tooltip is reserved for cells that
+  // carry an explanatory note (mismatch IP, retained-only freshness, etc).
   const grid = document.createElement("div");
   grid.className = "mt-2 grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-0.5 text-xs text-slate-600 dark:text-slate-400";
   let fields;
   if (primary.type === "SubDevice") {
     fields = [
-      ["CID", primary.cid || "—"],
-      ["PARENT", shorten(primary.parent_id) || "—"],
+      ["CID", primary.cid || "—", "", "md:col-span-2"],
+      ["PARENT", primary.parent_id || "—", "", "md:col-span-2"],
     ];
   } else {
     fields = [
-      ["IP", ipInfo.value, ipInfo.tooltip],
-      ["KEY", primary.key ? shorten(primary.key) : "—"],
-      ["VER", primary.version],
+      ["IP", ipInfo.value, ipInfo.tooltip, "md:col-span-2"],
+      ["VER", primary.version, "", "md:col-span-2"],
+      ["KEY", primary.key || "—", "", "col-span-2 md:col-span-4"],
     ];
-    if (live?.message) fields.push(["MSG", live.message]);
+    if (live?.message) fields.push(["MSG", live.message, "", "col-span-2 md:col-span-4"]);
   }
   for (const entry of fields) {
-    const [k, v, tooltip] = entry;
+    const [k, v, tooltip, span] = entry;
     const f = document.createElement("div");
-    f.className = "flex gap-1 min-w-0";
-    const titleAttr = tooltip || String(v).length > 16
-      ? ` title="${escapeHtml(tooltip || String(v))}"` : "";
-    f.innerHTML = `<span class="text-slate-400 dark:text-slate-500 shrink-0">${k}</span><span class="font-mono truncate min-w-0"${titleAttr}>${escapeHtml(String(v))}</span>`;
+    f.className = `flex gap-1 min-w-0 ${span || ""}`;
+    const titleAttr = tooltip ? ` title="${escapeHtml(tooltip)}"` : "";
+    f.innerHTML = `<span class="text-slate-400 dark:text-slate-500 shrink-0">${k}</span><span class="font-mono break-all min-w-0"${titleAttr}>${escapeHtml(String(v))}</span>`;
     grid.appendChild(f);
   }
   card.appendChild(grid);

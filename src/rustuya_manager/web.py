@@ -25,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
 from .models import Device
 from .mqtt import BridgeClient
+from .scan import LanScanCoordinator
 from .state import State
 from .wizard import WizardManager
 
@@ -94,6 +95,19 @@ def serialize_state(state: State) -> dict[str, Any]:
         "warnings": state.warnings,
         "cloud_path": state.cloud_path,
         "cloud_loaded": bool(state.cloud),
+        # Wholesale dict (id → sighting) from the last LAN scan. Empty
+        # until the first scan completes. Dataclass → dict here keeps
+        # the WS frame schema-stable for the UI (no datetime/None
+        # surprises from dataclasses.asdict).
+        "scan_results": {
+            sid: {
+                "id": s.id,
+                "ip": s.ip,
+                "version": s.version,
+                "observed_at": s.observed_at,
+            }
+            for sid, s in state.scan_results.items()
+        },
     }
 
 
@@ -176,11 +190,17 @@ def build_app(
             except OSError as e:
                 logger.warning("wizard fetched devices but persist failed: %s", e)
 
+    # Single coordinator shared between the wizard (bakes scan results into
+    # cloud devices) and the Scan button (surfaces sightings to the UI).
+    # See scan.py for the single-flight rationale.
+    scan_coordinator = LanScanCoordinator(client, state)
+    app.state.scan_coordinator = scan_coordinator
+
     wizard_creds = creds_path or "tuyacreds.json"
     wizard = WizardManager(
         creds_path=wizard_creds,
         on_devices=_on_wizard_devices,
-        bridge_client=client,
+        scan_coordinator=scan_coordinator,
     )
     app.state.wizard = wizard
 
@@ -268,6 +288,23 @@ def build_app(
         except RuntimeError as e:
             raise HTTPException(503, str(e)) from None
         return {"ok": True, "published": {"action": action, "id": target_id}}
+
+    @app.post("/api/scan")
+    async def post_scan() -> dict[str, Any]:
+        """Run a bridge LAN scan and cache the sightings on state.
+
+        Returns `{ok, count}`; the per-device sighting data lands on the
+        WebSocket snapshot (`scan_results`) once the run completes, so
+        the UI auto-refreshes without needing the response body. A 503
+        is returned when the broker is disconnected — `publish_command`
+        is the surface that distinguishes that from a "scan ran but no
+        device replied" (which is a healthy `count == 0`).
+        """
+        try:
+            sightings = await scan_coordinator.run()
+        except RuntimeError as e:
+            raise HTTPException(503, str(e)) from None
+        return {"ok": True, "count": len(sightings)}
 
     @app.websocket("/ws")
     async def ws_state(ws: WebSocket) -> None:

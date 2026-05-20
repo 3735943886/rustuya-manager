@@ -49,6 +49,20 @@ export async function sync(action, dev) {
   await publishCommand(buildCommandBody(action, dev));
 }
 
+export async function postScan() {
+  // Trigger the shared LanScanCoordinator on the server. The actual
+  // sighting list rides the next WS snapshot (state.scan_results), so
+  // this returns just `{ok, count}` to drive the header button's
+  // toast. 503 indicates the bridge isn't connected.
+  try {
+    const res = await fetch("/api/scan", { method: "POST" });
+    if (!res.ok) return { ok: false, error: await res.text() };
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 export async function uploadCloud(file) {
   try {
     const text = await file.text();

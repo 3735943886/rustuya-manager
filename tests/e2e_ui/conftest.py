@@ -8,6 +8,7 @@ browser at the same long-lived server, which keeps the suite fast
 
 from __future__ import annotations
 
+import asyncio
 import socket
 import threading
 import time
@@ -23,11 +24,15 @@ from rustuya_manager.web import build_app
 class _StubBridgeClient:
     """Minimum BridgeClient surface the web app touches.
 
-    `/api/command` calls publish_command — we just record the call so a
-    test can assert "this button publishes this action" without needing
-    a broker. The WS loop never sees state change because State stays
-    untouched, so the initial snapshot is the only frame the page gets;
-    that's the right shape for static UI checks.
+    Covers the two server-side entry points the UI exercises:
+      - `publish_command` for `/api/command` (per-card actions)
+      - `subscribe_scanner`/`unsubscribe_scanner` for the LAN scan
+        coordinator that backs the header's Scan button
+    Calls are recorded so a test can assert "this button publishes
+    this action" without needing a real broker. The WS loop never sees
+    state change because State stays untouched, so the initial snapshot
+    is the only frame the page gets; that's the right shape for static
+    UI checks.
     """
 
     def __init__(self) -> None:
@@ -43,6 +48,17 @@ class _StubBridgeClient:
         self.published.append(
             {"action": action, "id": target_id, "name": target_name, "extra": extra}
         )
+
+    def subscribe_scanner(self) -> asyncio.Queue[dict[str, Any]]:
+        # Queue the end-marker eagerly so the coordinator's drain loop
+        # exits immediately — the e2e suite cares about wiring, not
+        # about timing the bridge's UDP scanner.
+        q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        q.put_nowait({})
+        return q
+
+    def unsubscribe_scanner(self, q: asyncio.Queue[dict[str, Any]]) -> None:
+        return
 
 
 def _free_port() -> int:

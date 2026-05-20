@@ -16,7 +16,7 @@
 
 import { state, ALL_CATEGORIES, saveFilters } from "./state.js";
 import { formatAgo, toast } from "./dom.js";
-import { uploadCloud, postCommand } from "./api.js";
+import { uploadCloud, postCommand, postScan } from "./api.js";
 import { connect } from "./ws.js";
 import { render, renderDevices, renderFilterCounts } from "./render.js";
 import { initSyncModal } from "./modal-sync.js";
@@ -145,29 +145,29 @@ $refreshBtn.addEventListener("click", async () => {
   }
 });
 
-// Scan — asks the bridge to UDP-broadcast across the LAN. Devices that
-// were registered with a pinned IP but currently sit in reconnect backoff
-// (e.g. the user enabled `Scan device IPs after fetch` in the wizard but a
-// few addresses turned out not to be reserved on the router) get a fresh
-// scanner sighting that mismatches the stored IP and the bridge emits
-// ERR_STATE 906 for them. The error surfaces in the card's MSG field and,
-// when the card is `synced` and collapsed, the rose row-3 warning.
+// Scan — runs the bridge LAN scan through the server-side coordinator
+// (POST /api/scan). The endpoint awaits the full drain (~18s typical, 20s
+// max) and returns once sightings land on state.scan_results, so the WS
+// snapshot the UI receives next already reflects what the bridge saw.
+//
+// Two effects:
+//   - Devices registered with a pinned IP whose sighting drifted get an
+//     ERR_STATE 906 on the bridge side, surfaced in MSG / row-3 warning.
+//   - Missing-class devices (cloud-only) that answered the broadcast
+//     appear in scan_results so the card renderer can highlight them
+//     (PR C).
 const $scanBtn = document.getElementById("scan-btn");
 $scanBtn?.addEventListener("click", async () => {
   $scanBtn.disabled = true;
   try {
-    const result = await postCommand({ action: "scan", id: "bridge" });
+    const result = await postScan();
     if (result.ok) {
-      toast("Scan started — IP-mismatched devices surface within a few seconds", "ok");
+      toast(`Scan complete — ${result.count} device${result.count === 1 ? "" : "s"} seen on LAN`, "ok");
     } else {
       toast(`Scan failed: ${result.error || "unknown"}`, "error");
     }
   } finally {
-    // 5s lockout matches the bridge's typical scan duration so a frustrated
-    // user doesn't spam the broker with concurrent scan requests.
-    setTimeout(() => {
-      $scanBtn.disabled = false;
-    }, 5000);
+    $scanBtn.disabled = false;
   }
 });
 

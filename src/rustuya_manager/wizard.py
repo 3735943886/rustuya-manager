@@ -39,7 +39,7 @@ from tuyawizard import TuyaWizard
 from tuyawizard.wizard import postprocess_devices
 
 if TYPE_CHECKING:
-    from .mqtt import BridgeClient
+    from .scan import LanScanCoordinator
 
 logger = logging.getLogger(__name__)
 
@@ -99,15 +99,15 @@ class WizardManager:
         self,
         creds_path: str,
         on_devices: DevicesCallback | None = None,
-        bridge_client: BridgeClient | None = None,
+        scan_coordinator: LanScanCoordinator | None = None,
     ):
         self.creds_path = creds_path
         self._on_devices = on_devices
-        # Optional handle on the MQTT bridge so the wizard can ask the
-        # bridge to UDP-scan the LAN in parallel with the (slow) Tuya
-        # Cloud fetch. When absent, scan=True degrades to parent-only
-        # with a session.warning the UI can toast.
-        self._bridge_client = bridge_client
+        # Single entry point for "ask the bridge to UDP-scan the LAN";
+        # shared with the Scan button so the two paths can't double-
+        # broadcast. When absent (no bridge wired at all), scan=True
+        # degrades to parent-only with a session.warning the UI can toast.
+        self._scan_coordinator = scan_coordinator
         self.session = WizardSession()
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
@@ -217,14 +217,14 @@ class WizardManager:
             # cloud fetch is the slow part (multi-second round-trip to
             # Tuya's API), the scanner runs in the bridge with its own 18s
             # timeout, and we'll await it once fetch returns. Without the
-            # bridge handle we fall through to mode="parent" and surface a
+            # coordinator we fall through to mode="parent" and surface a
             # warning so the UI can toast "scan skipped" at done.
             if scan:
-                if self._bridge_client is not None:
-                    scan_task = asyncio.create_task(self._bridge_client.scan_collect())
+                if self._scan_coordinator is not None:
+                    scan_task = asyncio.create_task(self._scan_coordinator.run())
                 else:
                     logger.warning(
-                        "scan requested but no BridgeClient available — "
+                        "scan requested but no LanScanCoordinator available — "
                         "falling back to parent-only postprocess"
                     )
                     self.session.warning = (

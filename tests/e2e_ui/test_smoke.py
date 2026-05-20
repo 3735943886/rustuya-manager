@@ -69,22 +69,17 @@ def test_wizard_modal_opens_and_closes_on_escape(page: Page, server_url: str) ->
     expect(modal).to_be_hidden()
 
 
-def test_scan_button_publishes_bridge_scan(page: Page, server_url: str) -> None:
-    """The header's 📡 Scan button posts a `scan` command to the bridge so
-    fixed-IP devices currently in reconnect backoff get a fresh scanner
-    sighting and surface ERR_STATE 906 if their IP drifted.
-
-    Stub-app territory: there's no live bridge to actually run the scan, but
-    we can still assert that the button is wired up to POST /api/command
-    with the right payload — that's the bit the manager owns."""
+def test_scan_button_posts_to_api_scan(page: Page, server_url: str) -> None:
+    """The header's 📡 Scan button drives the server-side
+    LanScanCoordinator via POST /api/scan. Stub-app territory: the stub
+    BridgeClient has no `subscribe_scanner`, so the request will fail at
+    the server — we only assert the *client* sends the right request, the
+    coordinator's behavior is exercised in tests/test_scan.py."""
     page.goto(server_url)
     button = page.locator("#scan-btn")
     expect(button).to_be_visible()
 
     with page.expect_request_finished(
-        lambda req: req.url.endswith("/api/command") and req.method == "POST"
-    ) as info:
+        lambda req: req.url.endswith("/api/scan") and req.method == "POST"
+    ):
         button.click()
-    body = info.value.post_data_json or {}
-    assert body.get("action") == "scan"
-    assert body.get("id") == "bridge"

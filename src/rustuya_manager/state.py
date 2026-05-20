@@ -36,6 +36,23 @@ class BridgeTemplates:
     payload: str = "{value}"  # the bridge's user payload template
 
 
+@dataclass(frozen=True)
+class ScanSighting:
+    """One bridge-side LAN scan observation for a device.
+
+    Frozen so cached results can't be mutated after a coordinator stores
+    them on state — the snapshot serializer reads the dict directly.
+    `ip`/`version` are optional because the bridge's sighting payload
+    only guarantees `id` (LAN-broadcasted device id); the rest depends
+    on what the device returned to the scan probe.
+    """
+
+    id: str
+    ip: str | None
+    version: str | None
+    observed_at: float  # unix seconds; same epoch as State.last_seen
+
+
 @dataclass
 class State:
     cloud: dict[str, Device] = field(default_factory=dict)
@@ -66,6 +83,13 @@ class State:
     warnings: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Where the cloud devices JSON was last loaded from (None until set).
     cloud_path: str | None = None
+    # Latest bridge LAN-scan sightings keyed by device id. Replaced wholesale
+    # by `LanScanCoordinator` on every scan; not merged with prior results so
+    # the UI always reflects the most recent broadcast (a device that didn't
+    # answer this round genuinely isn't visible right now). Empty until the
+    # first scan runs — distinct from "scan ran and found nothing" only by
+    # the presence of an `_scan_ran_at` timestamp on the coordinator side.
+    scan_results: dict[str, ScanSighting] = field(default_factory=dict)
 
     _version: int = 0
     _changed: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
@@ -150,6 +174,14 @@ class State:
             for b in buckets:
                 b.pop(device_id, None)
             self.retained_only.discard(device_id)
+            self._bump()
+
+    async def replace_scan_results(self, sightings: dict[str, ScanSighting]) -> None:
+        """Replace cached scan results with a fresh map. Wholesale replace
+        (not merge) so stale entries from a previous scan don't outlive
+        their scan generation — see the field's docstring."""
+        async with self._changed:
+            self.scan_results = dict(sightings)
             self._bump()
 
     async def set_cloud_path(self, path: str) -> None:

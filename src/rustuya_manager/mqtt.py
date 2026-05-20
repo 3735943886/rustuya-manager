@@ -46,14 +46,6 @@ logger = logging.getLogger(__name__)
 BRIDGE_CONFIG_TOPIC_TPL = "{root}/bridge/config"
 BOOTSTRAP_TIMEOUT_SEC = 5.0
 
-# Fallback ceiling for `scan_collect()`: rustuya's `DEFAULT_SCAN_TIMEOUT`
-# is 18s (the scanner stops emitting sightings after that and publishes
-# the terminal empty `{}`), so we wait 18s plus a 2s grace for that
-# end-marker to traverse the broker. Almost every healthy scan terminates
-# on the empty payload well before this deadline; the timeout only
-# matters if the marker is lost (broker hiccup, dropped retain, etc.).
-SCAN_COLLECT_TIMEOUT_SEC = 20.0
-
 # Wrapper/envelope keys the bridge's error_helper always emits — they belong
 # to the error frame itself, not the per-error detail. Anything else in the
 # payload is treated as structured detail and surfaced after errorMsg.
@@ -152,11 +144,12 @@ class BridgeClient:
         # every (re)connect so subscriptions survive broker hiccups even with
         # aiomqtt's default clean session.
         self._runtime_wildcards: list[str] = []
-        # Queues subscribed to scanner-topic sightings. `scan_collect()`
-        # registers a queue, issues the bridge's `scan` command, and drains
-        # until either an empty payload (the bridge's scan-end marker) or
-        # the supplied timeout. Multiple subscribers are supported in case
-        # the CLI listener and a wizard scan ever overlap.
+        # Queues subscribed to scanner-topic sightings. Callers register via
+        # `subscribe_scanner()` (and must unsubscribe in a `finally`) to
+        # receive every sighting the bridge publishes plus the bridge's
+        # empty-dict scan-end marker. The `LanScanCoordinator` in scan.py
+        # is currently the only subscriber, but the list shape is preserved
+        # so a future debug/CLI tap could attach without disturbing it.
         self._scanner_subscribers: list[asyncio.Queue[dict[str, Any]]] = []
 
     # ── async context manager ────────────────────────────────────────────
@@ -671,47 +664,26 @@ class BridgeClient:
         except aiomqtt.MqttError as e:
             raise RuntimeError(f"MQTT publish failed: {e}") from e
 
-    async def scan_collect(self, timeout: float = SCAN_COLLECT_TIMEOUT_SEC) -> list[dict[str, Any]]:
-        """Issue the bridge's `scan` command and collect every sighting it
-        publishes on the scanner topic. Returns as soon as the bridge's
-        terminal empty payload arrives — even if there's plenty of timeout
-        left — and otherwise falls through cleanly when `timeout` elapses
-        (no exception, just returns whatever was collected).
+    def subscribe_scanner(self) -> asyncio.Queue[dict[str, Any]]:
+        """Returns a fresh queue that will receive every scanner-topic
+        payload from now until `unsubscribe_scanner(q)` is called.
 
-        Default timeout is `SCAN_COLLECT_TIMEOUT_SEC` (20s), keyed to
-        rustuya's 18s scanner deadline plus a 2s grace for the end-marker
-        to traverse the broker. See that constant for the full rationale.
-
-        Each yielded dict is `{id, ip, version?, product_key?}` ready to
-        hand to `tuyawizard.postprocess_devices(..., scan_results=...)`.
-
-        Raises `RuntimeError` if the broker is disconnected (same surface
-        as `publish_command`) so the wizard's warning path can take over
-        without crashing the session.
+        Synchronous (no I/O) so callers can pair it with `finally:` in a
+        `try`/`finally` block — the bridge's publish dispatch already
+        runs `q.put_nowait()` against whatever's in the list at message
+        time. Leaking a subscriber would grow per-scan memory because
+        every sighting fans out to every queue.
         """
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._scanner_subscribers.append(q)
-        results: list[dict[str, Any]] = []
+        return q
+
+    def unsubscribe_scanner(self, q: asyncio.Queue[dict[str, Any]]) -> None:
+        """Remove a queue previously returned by `subscribe_scanner()`.
+        Idempotent: calling twice (or against a queue that was never
+        registered) is a no-op so cleanup paths don't have to guard
+        against re-entry."""
         try:
-            await self.publish_command("scan", target_id="bridge")
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + timeout
-            while True:
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    break
-                try:
-                    item = await asyncio.wait_for(q.get(), timeout=remaining)
-                except TimeoutError:
-                    break
-                if not item:
-                    # Empty dict is the bridge's explicit scan-end marker;
-                    # return immediately regardless of remaining timeout.
-                    break
-                results.append(item)
-        finally:
-            try:
-                self._scanner_subscribers.remove(q)
-            except ValueError:
-                pass
-        return results
+            self._scanner_subscribers.remove(q)
+        except ValueError:
+            pass

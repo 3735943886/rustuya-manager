@@ -113,6 +113,48 @@ class TestHTTP:
             assert json.loads(payload) == {"action": "status", "id": "bridge"}
 
 
+class TestScanEndpoint:
+    """The header's Scan button posts to /api/scan, which delegates to the
+    shared LanScanCoordinator. The wire contract:
+      - 200 with {ok, count} on success
+      - 503 when the broker is down (publish_command raises RuntimeError)
+      - exactly one `scan` command published per call (single-flight is
+        the coordinator's job; we just verify the endpoint hands off to
+        it cleanly)
+    """
+
+    def test_api_scan_returns_count_and_publishes_once(self):
+        state, client = _fixture_state()
+        with TestClient(build_app(state, client)) as tc:
+            # Drive the drain to completion immediately by feeding the
+            # bridge's empty end-marker the moment the coordinator
+            # subscribes. We hook the BridgeClient's scanner subscriber
+            # list directly — the coordinator owns the queue.
+            orig = client.subscribe_scanner
+
+            def hook():
+                q = orig()
+                q.put_nowait({"id": "lan-dev", "ip": "10.0.0.5"})
+                q.put_nowait({})  # end-marker
+                return q
+
+            client.subscribe_scanner = hook  # type: ignore[method-assign]
+            r = tc.post("/api/scan")
+            assert r.status_code == 200
+            assert r.json() == {"ok": True, "count": 1}
+            client._client.publish.assert_awaited_once()
+            topic, _ = client._client.publish.await_args.args[:2]
+            assert topic == "rustuya/command"
+
+    def test_api_scan_returns_503_when_broker_disconnected(self):
+        state, client = _fixture_state()
+        # publish_command refuses when not connected
+        client._connected.clear()
+        with TestClient(build_app(state, client)) as tc:
+            r = tc.post("/api/scan")
+            assert r.status_code == 503
+
+
 class TestWebSocket:
     def test_ws_sends_initial_snapshot_on_connect(self):
         state, client = _fixture_state()

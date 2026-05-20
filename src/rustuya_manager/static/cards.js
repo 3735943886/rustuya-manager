@@ -58,6 +58,28 @@ function computeCardBg(cls) {
   return "bg-white dark:bg-slate-800";
 }
 
+// Color-class for a scan-result cell, picked by comparing what the cloud
+// JSON says the field should be against what the LAN scan actually saw.
+//
+//   amber — cloud has no value to compare ("Auto" or empty); scan is
+//           purely informational. Common case for fresh wizard imports.
+//   rose  — cloud has a concrete value and it disagrees with scan;
+//           something drifted (DHCP, manual reassign, swapped device).
+//   ""    — values match, no color needed.
+//
+// Tailwind utility tokens, not full classes — appended to the value
+// span's existing utility list in the renderer.
+function scanFieldClass(cloudValue, scanValue) {
+  const cloudEmpty = !cloudValue || cloudValue === "Auto";
+  if (cloudEmpty) {
+    if (!scanValue) return "";  // nothing useful either side, keep neutral
+    return "text-amber-700 dark:text-amber-300";
+  }
+  if (!scanValue) return "";  // scan didn't carry this field — no claim to compare against
+  if (String(cloudValue) === String(scanValue)) return "";
+  return "text-rose-700 dark:text-rose-300";
+}
+
 function resolveIp(bridge, cloud) {
   const cloudIp = cloud?.ip;
   if (bridge) {
@@ -253,13 +275,27 @@ export function deviceCard(id, cls, isChild) {
     ];
     if (live?.message) fields.push(["MSG", live.message]);
   }
+  // For missing-class cards (cloud-only — bridge doesn't know them), if
+  // the latest LAN scan saw the device, surface the observed IP/VER in
+  // a second pair of cells so the user can compare cloud config against
+  // what's actually on the wire. Add (the per-card action) still reads
+  // from cloud only — these cells are display-only, never an input to
+  // the publish path.
+  const sighting = snap.scan_results?.[id];
+  if (cls === "missing" && sighting) {
+    fields.push(
+      ["SCAN IP", sighting.ip || "—", "Bridge LAN scan result", scanFieldClass(primary.ip, sighting.ip)],
+      ["SCAN VER", sighting.version || "—", "Bridge LAN scan result", scanFieldClass(primary.version, sighting.version)],
+    );
+  }
   for (const entry of fields) {
-    const [k, v, tooltip] = entry;
+    const [k, v, tooltip, valueClass] = entry;
     const f = document.createElement("div");
     f.className = "flex gap-1 min-w-0";
     const titleAttr = tooltip || String(v).length > 16
       ? ` title="${escapeHtml(tooltip || String(v))}"` : "";
-    f.innerHTML = `<span class="text-slate-400 dark:text-slate-500 shrink-0">${k}</span><span class="font-mono truncate min-w-0"${titleAttr}>${escapeHtml(String(v))}</span>`;
+    const extra = valueClass ? ` ${valueClass}` : "";
+    f.innerHTML = `<span class="text-slate-400 dark:text-slate-500 shrink-0">${k}</span><span class="font-mono truncate min-w-0${extra}"${titleAttr}>${escapeHtml(String(v))}</span>`;
     grid.appendChild(f);
   }
   card.appendChild(grid);

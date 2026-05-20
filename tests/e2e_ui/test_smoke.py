@@ -69,6 +69,125 @@ def test_wizard_modal_opens_and_closes_on_escape(page: Page, server_url: str) ->
     expect(modal).to_be_hidden()
 
 
+def test_missing_card_renders_scan_row_with_diff_colors(
+    page: Page, server_url: str
+) -> None:
+    """When the bridge LAN scan has seen a missing-class device, the
+    expanded card grows a SCAN IP / SCAN VER pair. Cells color-code:
+
+      - amber when cloud is Auto/unset (informational)
+      - rose when cloud has a value that disagrees with scan
+      - plain when they match
+
+    This is the only path that surfaces scan_results in the UI — Add
+    still reads from cloud (api.js buildCommandBody), so the colored
+    cells are display-only.
+    """
+    page.goto(server_url)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+
+    snap = {
+        "cloud": {
+            # Cloud says Auto → amber SCAN IP, rose SCAN VER (cloud claims
+            # 3.3 but the LAN device answered 3.4)
+            "dev-auto-ip": {
+                "id": "dev-auto-ip",
+                "name": "auto-ip",
+                "type": "WiFi",
+                "key": "k" * 32,
+                "ip": "Auto",
+                "version": "3.3",
+            },
+        },
+        "bridge": {},
+        "templates": None,
+        "dps": {},
+        "last_response": {},
+        "last_seen": {},
+        "retained_only": [],
+        "live_status": {},
+        "warnings": {},
+        "cloud_loaded": True,
+        "diff": {"synced": [], "mismatched": [], "missing": ["dev-auto-ip"], "orphaned": []},
+        "scan_results": {
+            "dev-auto-ip": {
+                "id": "dev-auto-ip",
+                "ip": "192.168.1.42",
+                "version": "3.4",
+                "observed_at": 1700000000.0,
+            },
+        },
+    }
+    page.evaluate(
+        """async (snap) => {
+            const s = await import('/static/state.js');
+            const r = await import('/static/render.js');
+            s.expandedIds.add('dev-auto-ip');
+            s.state.snapshot = snap;
+            r.render();
+        }""",
+        snap,
+    )
+
+    # SCAN IP cell — cloud is "Auto" → amber color class
+    scan_ip = page.locator("#device-list div").filter(has_text="SCAN IP").last
+    expect(scan_ip).to_contain_text("192.168.1.42")
+    expect(scan_ip.locator(".font-mono")).to_have_class(re.compile(r"text-amber-"))
+
+    # SCAN VER cell — cloud has 3.3, scan saw 3.4 → rose color class
+    scan_ver = page.locator("#device-list div").filter(has_text="SCAN VER").last
+    expect(scan_ver).to_contain_text("3.4")
+    expect(scan_ver.locator(".font-mono")).to_have_class(re.compile(r"text-rose-"))
+
+
+def test_missing_card_omits_scan_row_when_no_sighting(
+    page: Page, server_url: str
+) -> None:
+    """Missing card with no scan_results entry for its id stays clean —
+    we don't render an empty SCAN row, otherwise every cold-start UI
+    would carry placeholder cells for nothing."""
+    page.goto(server_url)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+
+    snap = {
+        "cloud": {
+            "dev-no-scan": {
+                "id": "dev-no-scan",
+                "name": "no-scan",
+                "type": "WiFi",
+                "key": "k" * 32,
+                "ip": "Auto",
+                "version": "Auto",
+            },
+        },
+        "bridge": {},
+        "templates": None,
+        "dps": {},
+        "last_response": {},
+        "last_seen": {},
+        "retained_only": [],
+        "live_status": {},
+        "warnings": {},
+        "cloud_loaded": True,
+        "diff": {"synced": [], "mismatched": [], "missing": ["dev-no-scan"], "orphaned": []},
+        "scan_results": {},
+    }
+    page.evaluate(
+        """async (snap) => {
+            const s = await import('/static/state.js');
+            const r = await import('/static/render.js');
+            s.expandedIds.add('dev-no-scan');
+            s.state.snapshot = snap;
+            r.render();
+        }""",
+        snap,
+    )
+
+    # No SCAN IP / SCAN VER rows when scan_results is empty
+    assert page.locator("#device-list div").filter(has_text="SCAN IP").count() == 0
+    assert page.locator("#device-list div").filter(has_text="SCAN VER").count() == 0
+
+
 def test_scan_button_posts_to_api_scan(page: Page, server_url: str) -> None:
     """The header's 📡 Scan button drives the server-side
     LanScanCoordinator via POST /api/scan. Stub-app territory: the stub

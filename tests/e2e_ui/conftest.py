@@ -20,6 +20,22 @@ import uvicorn
 from rustuya_manager.state import State
 from rustuya_manager.web import build_app
 
+# Auto-tag every test collected under this directory with `e2e` so the
+# project-wide `addopts = -m 'not e2e'` in pyproject.toml excludes them
+# from a bare `pytest` run. CI re-enables them via `pytest -m e2e`.
+#
+# pytest passes the full items list to every conftest's hook regardless
+# of where the hook is defined, so we filter by path ourselves — only
+# items physically under this directory get the marker.
+_E2E_DIR = "e2e_ui"
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    e2e = pytest.mark.e2e
+    for item in items:
+        if _E2E_DIR in item.path.parts:
+            item.add_marker(e2e)
+
 
 class _StubBridgeClient:
     """Minimum BridgeClient surface the web app touches.

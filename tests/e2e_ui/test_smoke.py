@@ -142,14 +142,10 @@ def test_expanded_card_shows_full_key_and_escapes_special_chars(
     # an interpreted <script> element.
     expect(key_cell).to_contain_text(raw_key)
     # If escaping had failed, a <script> child would exist inside the cell.
-    assert key_cell.locator("script").count() == 0, (
-        "key value was injected as markup, not escaped"
-    )
+    assert key_cell.locator("script").count() == 0, "key value was injected as markup, not escaped"
 
 
-def test_missing_card_renders_scan_row_with_diff_colors(
-    page: Page, server_url: str
-) -> None:
+def test_missing_card_renders_scan_row_with_diff_colors(page: Page, server_url: str) -> None:
     """When the bridge LAN scan has seen a missing-class device, the
     expanded card grows a SCAN IP / SCAN VER pair. Cells color-code:
 
@@ -218,9 +214,7 @@ def test_missing_card_renders_scan_row_with_diff_colors(
     expect(scan_ver.locator(".font-mono")).to_have_class(re.compile(r"text-rose-"))
 
 
-def test_missing_card_omits_scan_row_when_no_sighting(
-    page: Page, server_url: str
-) -> None:
+def test_missing_card_omits_scan_row_when_no_sighting(page: Page, server_url: str) -> None:
     """Missing card with no scan_results entry for its id stays clean —
     we don't render an empty SCAN row, otherwise every cold-start UI
     would carry placeholder cells for nothing."""
@@ -264,7 +258,6 @@ def test_missing_card_omits_scan_row_when_no_sighting(
     # No SCAN IP / SCAN VER rows when scan_results is empty
     assert page.locator("#device-list div").filter(has_text="SCAN IP").count() == 0
     assert page.locator("#device-list div").filter(has_text="SCAN VER").count() == 0
-
 
 
 def test_scan_button_posts_to_api_scan(page: Page, server_url: str) -> None:

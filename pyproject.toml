@@ -39,6 +39,16 @@ rustuya_manager = ["templates/*.html", "static/*.js", "static/*.css"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# e2e_ui boots uvicorn in a session-scoped daemon thread and drives the page
+# via Playwright's sync API (greenlet bridge). Both leak event-loop state into
+# the main thread, which then collides with pytest-asyncio's per-test Runner
+# when async unit tests run in the same session. Default to excluding e2e here
+# so a bare `pytest` is fast and conflict-free; CI runs `pytest -m e2e` in a
+# separate step.
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: browser-driven UI smoke tests (Playwright + uvicorn); run separately",
+]
 
 [tool.ruff]
 line-length = 100

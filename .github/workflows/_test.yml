@@ -76,11 +76,13 @@ jobs:
       - name: pytest (unit + mqtt e2e)
         # The mqtt e2e suite is the slow one (~30s). Run it separately
         # from the UI smoke so a flaky browser test doesn't get blamed
-        # on a backend regression and vice versa.
-        run: pytest -q --ignore=tests/e2e_ui
+        # on a backend regression and vice versa. `addopts` in pyproject
+        # already excludes `-m e2e`, so a bare `pytest` skips ui smoke.
+        run: pytest -q
 
       - name: pytest (ui smoke)
         # Browser-driven smoke. Boots uvicorn in-thread with a stub
         # BridgeClient, navigates Playwright through the page, asserts
-        # against the rendered DOM.
-        run: pytest -q tests/e2e_ui --browser chromium
+        # against the rendered DOM. `-m e2e` overrides the project-wide
+        # default exclusion.
+        run: pytest -q -m e2e --browser chromium

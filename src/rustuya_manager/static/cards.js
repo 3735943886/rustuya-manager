@@ -186,9 +186,17 @@ export function deviceCard(id, cls, isChild) {
   card.className = `${computeCardBg(cls)} rounded-lg border border-slate-200 dark:border-slate-700 border-l-4 dark:border-l-[6px] ${edgeColor} p-3 ${indent} cursor-pointer`;
   card.title = `${cls}${primary.type ? ` · ${primary.type}` : ""}${live?.state ? ` · ${live.state}` : ""}`;
   // Tap anywhere on the card to expand/collapse. Buttons inside stop the
-  // event from propagating up so they don't accidentally toggle.
+  // event from propagating up so they don't accidentally toggle. We also
+  // skip the toggle if the user is finishing a drag-to-select inside the
+  // card — without this, dragging across IP/KEY/VER text fires a click on
+  // mouseup, the card collapses, and the selection is lost before they
+  // can Ctrl/Cmd-C it. The browser sets the selection on mouseup *before*
+  // the click event, so a non-collapsed selection anchored in this card
+  // is a reliable "they were selecting, not tapping" signal.
   card.addEventListener("click", (ev) => {
     if (ev.target.closest("button, input, a, [contenteditable]")) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && card.contains(sel.anchorNode)) return;
     toggleExpand(id);
   });
 
@@ -274,15 +282,25 @@ export function deviceCard(id, cls, isChild) {
   grid.className = "mt-2 grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-0.5 text-xs text-slate-600 dark:text-slate-400";
   let fields;
   if (primary.type === "SubDevice") {
+    // Mobile: CID and PARENT each take a full row. Without the explicit
+    // col-span-2, mobile's grid-cols-2 puts them side-by-side and PARENT
+    // (a 22-char device id) wraps to two lines inside half a row, while
+    // CID stays a single line — visually unbalanced. Force one-per-row
+    // on mobile; desktop keeps them paired in a single row.
     fields = [
-      ["CID", primary.cid || "—", "", "md:col-span-2"],
-      ["PARENT", primary.parent_id || "—", "", "md:col-span-2"],
+      ["CID", primary.cid || "—", "", "col-span-2 md:col-span-2"],
+      ["PARENT", primary.parent_id || "—", "", "col-span-2 md:col-span-2"],
     ];
   } else {
+    // Desktop: IP (1/4) + VER (1/4) + KEY (1/2) fit on one row. The KEY
+    // is 32 hex chars in mono — comfortably fits half a desktop card
+    // width, and IP/VER values (max ~15 / ~3 chars) don't need 1/2 each.
+    // Mobile keeps the existing 2-row layout (IP|VER on row 1, KEY on
+    // row 2) because col-span without an md: prefix applies everywhere.
     fields = [
-      ["IP", ipInfo.value, ipInfo.tooltip, "md:col-span-2"],
-      ["VER", primary.version, "", "md:col-span-2"],
-      ["KEY", primary.key || "—", "", "col-span-2 md:col-span-4"],
+      ["IP", ipInfo.value, ipInfo.tooltip, "md:col-span-1"],
+      ["VER", primary.version, "", "md:col-span-1"],
+      ["KEY", primary.key || "—", "", "col-span-2 md:col-span-2"],
     ];
     if (live?.message) fields.push(["MSG", live.message, "", "col-span-2 md:col-span-4"]);
   }

@@ -340,6 +340,81 @@ def test_collapsed_missing_card_scan_dot_reflects_visibility(page: Page, server_
     assert "not in last LAN scan" in (unseen_title or "")
 
 
+def test_drag_select_inside_expanded_card_does_not_collapse(page: Page, server_url: str) -> None:
+    """An expanded card stays expanded when the user finishes a
+    drag-to-select inside it — without this, dragging across IP/KEY/VER
+    text would collapse the card on mouseup and the selection would
+    vanish before Ctrl/Cmd-C could fire. Pin a snapshot, expand the
+    card, programmatically set a text selection inside the KEY span,
+    then synthesize a click on the card; the expanded state must
+    survive."""
+    page.goto(server_url)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+
+    snap = {
+        "cloud": {
+            "dev-drag": {
+                "id": "dev-drag",
+                "name": "drag-target",
+                "type": "WiFi",
+                "key": "k" * 32,
+                "ip": "192.168.1.42",
+                "version": "3.4",
+            },
+        },
+        "bridge": {},
+        "templates": None,
+        "dps": {},
+        "last_response": {},
+        "last_seen": {},
+        "retained_only": [],
+        "live_status": {},
+        "warnings": {},
+        "cloud_loaded": True,
+        "diff": {"synced": [], "mismatched": [], "missing": ["dev-drag"], "orphaned": []},
+        "scan_results": {},
+    }
+    page.evaluate(
+        """async (snap) => {
+            const s = await import('/static/state.js');
+            const r = await import('/static/render.js');
+            s.expandedIds.add('dev-drag');
+            s.state.snapshot = snap;
+            r.render();
+        }""",
+        snap,
+    )
+
+    card = page.locator("#device-list > div").first
+    key_value = card.locator("div").filter(has_text="KEY").last.locator("span.font-mono")
+    expect(key_value).to_be_visible()
+
+    # Simulate the end state of a drag-to-select: a non-collapsed Range
+    # anchored inside the KEY span. The click that follows mouseup must
+    # not collapse the card.
+    page.evaluate(
+        """() => {
+            const el = document.querySelector('#device-list > div span.font-mono');
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+        }"""
+    )
+    card.dispatch_event("click")
+
+    # Card stayed expanded — KEY span is still visible.
+    expect(key_value).to_be_visible()
+
+    # Sanity: clearing the selection and clicking does still collapse
+    # the card. Otherwise the test would pass even if the click handler
+    # had been removed entirely.
+    page.evaluate("() => window.getSelection().removeAllRanges()")
+    card.dispatch_event("click")
+    assert card.locator("div").filter(has_text="KEY").count() == 0
+
+
 def test_scan_button_posts_to_api_scan(page: Page, server_url: str) -> None:
     """The header's 📡 Scan button drives the server-side
     LanScanCoordinator via POST /api/scan. Stub-app territory: the stub

@@ -184,7 +184,10 @@ docker run -d \
 
 The image runs `rustuya-manager --web --embed-bridge` — manager and
 bridge live in the same process, so the only external dependency is an
-MQTT broker.
+MQTT broker. If you're already running rustuya-bridge separately
+(systemd service or a sibling container) and pointing both at the
+same broker, pass `-e EMBED_BRIDGE=0` so the container doesn't spawn
+a second bridge that would double-publish on the same MQTT topics.
 
 `--network host` is **required**: the embedded `rustuya-bridge` scans
 the LAN with UDP broadcasts on ports 6666/6667 to discover Tuya
@@ -206,6 +209,7 @@ Environment variables (defaults shown; all optional unless noted):
 | `BRIDGE_STATE` | `/data/rustuya.json` | `--bridge-state` |
 | `PUID` | `1000` | UID the app runs as |
 | `PGID` | `1000` | GID the app runs as |
+| `EMBED_BRIDGE` | `1` | `--embed-bridge` (set `0` to skip when an external bridge is already on the broker) |
 
 Every persistent artifact — cloud cache (`tuyadevices.json`), wizard
 credentials (`tuyacreds.json`), embedded bridge config (`config.json`,

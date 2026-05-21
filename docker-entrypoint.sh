@@ -34,9 +34,17 @@ fi
 
 # Non-root path. Either we just re-exec'd ourselves via gosu, or the
 # caller passed `docker run --user`. Either way, run the app.
+#
+# EMBED_BRIDGE defaults to 1 (intended persona for this image — single
+# process holding both manager and bridge). Override with `-e EMBED_BRIDGE=0`
+# when an external rustuya-bridge is already on the broker, so we don't
+# end up with two bridges publishing to the same MQTT topics.
+EMBED_FLAG=""
+[ "${EMBED_BRIDGE:-1}" = "1" ] && EMBED_FLAG="--embed-bridge"
+
 exec rustuya-manager \
     --web \
-    --embed-bridge \
+    $EMBED_FLAG \
     --host "$HOST" \
     --port "$PORT" \
     --broker "$BROKER" \

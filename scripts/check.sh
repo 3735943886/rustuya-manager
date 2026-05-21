@@ -263,6 +263,20 @@ check_port() {
 }
 
 # ── Recommendation ─────────────────────────────────────────────────────────────
+# Inject `-e EMBED_BRIDGE=0` into the recommended docker command only when
+# an external bridge is already running (so the image's default-on embed
+# doesn't double-publish on the broker). Two flavors:
+#   docker_embed_env       — inline form, for the single-line alt suggestion
+#   docker_embed_env_cont  — continuation form, for the multi-line `\` block
+# Both render empty when no external bridge was detected (image default is
+# correct as-is).
+docker_embed_env() {
+    [ "$HAS_BRIDGE_RUNNING" -eq 1 ] && printf ' -e EMBED_BRIDGE=0' || true
+}
+docker_embed_env_cont() {
+    [ "$HAS_BRIDGE_RUNNING" -eq 1 ] && printf '\n    -e EMBED_BRIDGE=0 \\' || true
+}
+
 print_recommendation() {
     printf '\n%sSummary%s  %d ok, %d warn, %d err\n' \
         "$C_BOLD" "$C_RESET" "$OK_COUNT" "$WARN_COUNT" "$ERR_COUNT"
@@ -289,7 +303,8 @@ print_recommendation() {
         printf '\n%sRecommended install%s\n' "$C_BOLD" "$C_RESET"
         printf '  pipx install rustuya-manager\n'
         if [ "$HAS_DOCKER" -eq 1 ]; then
-            printf '  %sAlternatively (docker): docker run -d --network host -v /var/lib/rustuya-manager:/data 3735943886/rustuya-manager:latest%s\n' "$C_DIM" "$C_RESET"
+            printf '  %sAlternatively (docker): docker run -d --network host -v /var/lib/rustuya-manager:/data%s%s 3735943886/rustuya-manager:latest%s\n' \
+                "$C_DIM" "$(docker_embed_env)" "$C_DIM" "$C_RESET"
         fi
     elif [ "$HAS_PYTHON_OK" -eq 1 ] && [ "$HAS_PIP" -eq 1 ]; then
         printf '\n%sRecommended install%s\n' "$C_BOLD" "$C_RESET"
@@ -297,7 +312,8 @@ print_recommendation() {
         printf '  pipx install rustuya-manager\n'
         printf '  %s(pipx is the cleanest install — pip-managed apps in isolated venvs)%s\n' "$C_DIM" "$C_RESET"
         if [ "$HAS_DOCKER" -eq 1 ]; then
-            printf '  %sAlternatively (docker): docker run -d --network host -v /var/lib/rustuya-manager:/data 3735943886/rustuya-manager:latest%s\n' "$C_DIM" "$C_RESET"
+            printf '  %sAlternatively (docker): docker run -d --network host -v /var/lib/rustuya-manager:/data%s%s 3735943886/rustuya-manager:latest%s\n' \
+                "$C_DIM" "$(docker_embed_env)" "$C_DIM" "$C_RESET"
         fi
     elif [ "$HAS_PYTHON_OK" -eq 1 ] && [ "$HAS_DOCKER" -eq 0 ]; then
         # Bug #1 fix: Python is here but no pip/pipx → bootstrap branch.
@@ -314,19 +330,24 @@ print_recommendation() {
     elif [ "$HAS_DOCKER" -eq 1 ]; then
         printf '\n%sRecommended install%s\n' "$C_BOLD" "$C_RESET"
         printf '  docker run -d --name rustuya-manager --network host \\\n'
-        printf '    -v /var/lib/rustuya-manager:/data \\\n'
+        printf '    -v /var/lib/rustuya-manager:/data \\%s\n' "$(docker_embed_env_cont)"
         printf '    3735943886/rustuya-manager:latest\n'
         printf '  %s(no Python on this host; docker is the only available path)%s\n' "$C_DIM" "$C_RESET"
     fi
 
     printf '\n%sFlags to consider%s\n' "$C_BOLD" "$C_RESET"
     if [ "$HAS_BRIDGE_RUNNING" -eq 1 ]; then
-        printf '  • Bridge already managed externally — do NOT use --embed-bridge.\n'
+        # The "how to opt out of embed" depends on which install path the
+        # user picked, so spell both out — pipx omits the flag, docker
+        # passes the env var (which the image's entrypoint reads).
+        printf '  • Bridge already managed externally — avoid double-publishing:\n'
+        printf '      pipx path:    omit --embed-bridge from the manager command\n'
+        printf '      docker path:  add %s-e EMBED_BRIDGE=0%s to docker run\n' "$C_BOLD" "$C_RESET"
     elif [ "$HAS_BRIDGE_BINARY" -eq 1 ]; then
         printf '  • rustuya-bridge binary present but idle — start it as a service, OR\n'
-        printf '    let the manager embed it with --embed-bridge.\n'
+        printf '    let the manager embed it with --embed-bridge (docker: default is on).\n'
     else
-        printf '  • No bridge found — pass --embed-bridge so the manager spawns one.\n'
+        printf '  • No bridge found — pass --embed-bridge (docker: default is on).\n'
     fi
     if [ "$HAS_BROKER" -eq 0 ]; then
         printf '  • No broker at %s:%s — install a local one (Debian/Ubuntu: %ssudo apt install mosquitto%s)\n' \

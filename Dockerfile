@@ -57,6 +57,11 @@ WORKDIR /data
 #     on most desktop / Pi / Armbian installs. Override with
 #     `-e PUID=$(id -u) -e PGID=$(id -g)` for hosts where the data
 #     directory is owned by a different UID (NAS, HA OS, etc.).
+#   * EMBED_BRIDGE=1 keeps the single-process default that defines this
+#     image's persona; set `-e EMBED_BRIDGE=0` when an external
+#     rustuya-bridge (separate systemd service / sibling container) is
+#     already broadcasting on the same MQTT broker, so the container
+#     doesn't double-publish.
 ENV HOST=0.0.0.0 \
     PORT=8373 \
     BROKER=mqtt://localhost:1883 \
@@ -65,7 +70,8 @@ ENV HOST=0.0.0.0 \
     BRIDGE_CONFIG=/data/config.json \
     BRIDGE_STATE=/data/rustuya.json \
     PUID=1000 \
-    PGID=1000
+    PGID=1000 \
+    EMBED_BRIDGE=1
 
 EXPOSE 8373
 

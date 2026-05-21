@@ -1,0 +1,406 @@
+#!/usr/bin/env bash
+# check.sh — pre-install environment doctor for rustuya-manager.
+#
+# Pure read-only diagnostic: probes the host for the things rustuya-manager
+# needs (Python, an install path, a broker, optionally a bridge) and prints
+# a recommendation for how to deploy. Never modifies the system, never
+# prompts, always exits 0 — designed to be safe under `curl | bash` so a
+# new user can decide whether to `pipx install`, `docker run`, or something
+# else *before* committing to any of them.
+#
+# Usage:
+#   ./check.sh                              # full report
+#   ./check.sh --quiet                      # only summary + recommendation
+#   ./check.sh --broker mqtt://host:1883    # probe a non-localhost broker
+#   ./check.sh --port 8080                  # probe a non-default web port
+#   ./check.sh --help
+#
+# Remote one-liner (no install required):
+#   curl -fsSL https://raw.githubusercontent.com/3735943886/rustuya-manager/master/scripts/check.sh | bash
+
+set -uo pipefail
+# Intentionally no `set -e` — every probe is allowed to "fail" (that's a
+# signal, not an error). The script's contract is "always exit 0 with a
+# verdict", which only holds if individual probe failures don't abort.
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+DEFAULT_BROKER_HOST="127.0.0.1"
+DEFAULT_BROKER_PORT="1883"
+DEFAULT_WEB_PORT="8373"
+MIN_PYTHON_MAJOR=3
+MIN_PYTHON_MINOR=10
+
+BROKER_HOST="$DEFAULT_BROKER_HOST"
+BROKER_PORT="$DEFAULT_BROKER_PORT"
+WEB_PORT="$DEFAULT_WEB_PORT"
+QUIET=0
+
+# ── Logging helpers ────────────────────────────────────────────────────────────
+# TTY-conditional color so `curl | bash` (no TTY on stdout) gets plain text
+# that pipes cleanly into terminals, log files, and CI captures alike.
+if [ -t 1 ]; then
+    C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'
+    C_DIM=$'\033[2m'; C_BOLD=$'\033[1m'; C_RESET=$'\033[0m'
+else
+    C_RED=""; C_GREEN=""; C_YELLOW=""; C_DIM=""; C_BOLD=""; C_RESET=""
+fi
+
+# Track verdict counts so the summary can lead with "X warnings, Y errors".
+OK_COUNT=0
+WARN_COUNT=0
+ERR_COUNT=0
+
+# Recommendation inputs — set by individual probes, consumed by the summary.
+HAS_PIPX=0
+HAS_PIP=0
+HAS_DOCKER=0
+HAS_SYSTEMD=0
+HAS_PYTHON_OK=0
+HAS_BROKER=0
+HAS_BRIDGE_RUNNING=0   # systemd or docker
+HAS_BRIDGE_BINARY=0    # `which rustuya-bridge` only
+HAS_MANAGER_INSTALLED=0
+PORT_FREE=1
+
+# row() formats a single check as "  STATUS  message".
+# STATUS = ✓ (ok), ⚠ (warn), ✗ (err). Plain ASCII fallback is "OK/WARN/ERR"
+# when stdout isn't a TTY so log files / CI captures stay grep-friendly.
+row() {
+    local kind="$1" msg="$2" detail="${3:-}"
+    [ "$QUIET" -eq 1 ] && return 0
+    local marker
+    if [ -t 1 ]; then
+        case "$kind" in
+            ok)   marker="${C_GREEN}✓${C_RESET}" ;;
+            warn) marker="${C_YELLOW}⚠${C_RESET}" ;;
+            err)  marker="${C_RED}✗${C_RESET}" ;;
+            *)    marker=" " ;;
+        esac
+    else
+        case "$kind" in
+            ok)   marker="OK  " ;;
+            warn) marker="WARN" ;;
+            err)  marker="ERR " ;;
+            *)    marker="    " ;;
+        esac
+    fi
+    if [ -n "$detail" ]; then
+        printf '  %s  %s  %s%s%s\n' "$marker" "$msg" "$C_DIM" "$detail" "$C_RESET"
+    else
+        printf '  %s  %s\n' "$marker" "$msg"
+    fi
+}
+
+# Wrappers around row() that also tally for the summary.
+ok()   { OK_COUNT=$((OK_COUNT+1));   row ok   "$@"; }
+warn() { WARN_COUNT=$((WARN_COUNT+1)); row warn "$@"; }
+err()  { ERR_COUNT=$((ERR_COUNT+1));  row err  "$@"; }
+
+section() {
+    [ "$QUIET" -eq 1 ] && return 0
+    printf '\n%s%s%s\n' "$C_BOLD" "$1" "$C_RESET"
+}
+
+# ── TCP probe (no external dep — uses bash's built-in /dev/tcp) ────────────────
+# bash opens /dev/tcp/host/port as a network socket; closing it immediately
+# is enough to answer "is anything listening here?" without sending bytes.
+# Falls back to `nc -z` if /dev/tcp isn't supported (rare — only some
+# minimal alpine images strip it).
+tcp_reachable() {
+    local host="$1" port="$2"
+    if (exec 3<>"/dev/tcp/${host}/${port}") 2>/dev/null; then
+        exec 3<&-; exec 3>&-
+        return 0
+    fi
+    if command -v nc >/dev/null 2>&1; then
+        nc -z -w 1 "$host" "$port" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+# ── Probes ─────────────────────────────────────────────────────────────────────
+check_runtime() {
+    section "Runtime"
+    local os arch
+    os="$(uname -s 2>/dev/null || echo unknown)"
+    arch="$(uname -m 2>/dev/null || echo unknown)"
+    case "$os" in
+        Linux)  ok "OS: Linux ($arch)" ;;
+        Darwin) warn "OS: macOS ($arch)" "rustuya-manager runs but systemd suggestions won't apply" ;;
+        *)      warn "OS: $os ($arch)" "untested platform" ;;
+    esac
+
+    if command -v systemctl >/dev/null 2>&1; then
+        HAS_SYSTEMD=1
+        ok "systemd available" "for optional service unit"
+    else
+        warn "systemd not available" "auto-start at boot won't be a one-step option"
+    fi
+}
+
+check_python() {
+    section "Python"
+    if ! command -v python3 >/dev/null 2>&1; then
+        err "python3 not found" "rustuya-manager requires Python ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}+"
+        return
+    fi
+    local pyver major minor
+    pyver="$(python3 -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null || echo unknown)"
+    major="$(python3 -c 'import sys; print(sys.version_info[0])' 2>/dev/null || echo 0)"
+    minor="$(python3 -c 'import sys; print(sys.version_info[1])' 2>/dev/null || echo 0)"
+    if [ "$major" -gt "$MIN_PYTHON_MAJOR" ] || \
+       { [ "$major" -eq "$MIN_PYTHON_MAJOR" ] && [ "$minor" -ge "$MIN_PYTHON_MINOR" ]; }; then
+        HAS_PYTHON_OK=1
+        ok "Python $pyver" "≥ ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR} required"
+    else
+        err "Python $pyver too old" "need ≥ ${MIN_PYTHON_MAJOR}.${MIN_PYTHON_MINOR}"
+    fi
+
+    if command -v pipx >/dev/null 2>&1; then
+        HAS_PIPX=1
+        ok "pipx installed" "$(pipx --version 2>/dev/null | head -n1)"
+    else
+        warn "pipx not installed" "recommended install method on most distros"
+    fi
+
+    if command -v pip3 >/dev/null 2>&1 || command -v pip >/dev/null 2>&1; then
+        HAS_PIP=1
+        ok "pip available" "fallback if pipx not installed"
+    else
+        warn "pip not found" ""
+    fi
+
+    # Already-installed signal. Useful when re-running check.sh on a host
+    # that already has the manager — confirms which version is active.
+    # The CLI has no --version flag (intentionally — adding one would mean
+    # touching the package), so we read __version__ via the interpreter
+    # the entry point's shebang already points at. With pipx the manager
+    # lives in its own venv, so system python3 may not have it importable —
+    # going through the shebang gets us the right interpreter in all cases.
+    if command -v rustuya-manager >/dev/null 2>&1; then
+        HAS_MANAGER_INSTALLED=1
+        local mver entry_py
+        entry_py="$(head -n1 "$(command -v rustuya-manager)" 2>/dev/null | sed -e 's|^#!||' -e 's| .*||')"
+        if [ -x "$entry_py" ]; then
+            mver="$("$entry_py" -c 'import rustuya_manager; print(rustuya_manager.__version__)' 2>/dev/null || echo unknown)"
+        else
+            mver="unknown"
+        fi
+        ok "rustuya-manager already installed" "$mver"
+    fi
+}
+
+check_docker() {
+    section "Container tooling"
+    if ! command -v docker >/dev/null 2>&1; then
+        warn "docker not installed" "alternative install path unavailable"
+        return
+    fi
+    if docker info >/dev/null 2>&1; then
+        HAS_DOCKER=1
+        ok "docker installed and reachable" "$(docker --version 2>/dev/null)"
+    else
+        warn "docker installed but daemon unreachable" "may need 'sudo systemctl start docker' or group membership"
+    fi
+}
+
+check_broker() {
+    section "MQTT broker"
+    if tcp_reachable "$BROKER_HOST" "$BROKER_PORT"; then
+        HAS_BROKER=1
+        ok "broker reachable" "${BROKER_HOST}:${BROKER_PORT}"
+    else
+        warn "no broker at ${BROKER_HOST}:${BROKER_PORT}" "install mosquitto, or point manager at a remote broker via config.json"
+    fi
+}
+
+check_bridge() {
+    section "rustuya-bridge"
+    local found=""
+
+    # systemd-managed bridge takes priority — the user clearly intends an
+    # external bridge service and the manager should NOT embed.
+    if [ "$HAS_SYSTEMD" -eq 1 ] && systemctl is-active --quiet rustuya-bridge 2>/dev/null; then
+        HAS_BRIDGE_RUNNING=1
+        found="systemd"
+        ok "rustuya-bridge active via systemd" "external mode — don't pass --embed-bridge"
+    fi
+
+    # Docker-managed bridge: same intent as systemd, second priority. We
+    # match on image name rather than container name because users rename
+    # containers freely.
+    if [ -z "$found" ] && [ "$HAS_DOCKER" -eq 1 ]; then
+        if docker ps --format '{{.Image}}' 2>/dev/null | grep -q -E '(^|/)rustuya-bridge(:|$)'; then
+            HAS_BRIDGE_RUNNING=1
+            found="docker"
+            ok "rustuya-bridge running in docker" "external mode — don't pass --embed-bridge"
+        fi
+    fi
+
+    # Bare binary present but not actively managed — could go either way,
+    # so we report it without making a strong recommendation.
+    if [ -z "$found" ] && command -v rustuya-bridge >/dev/null 2>&1; then
+        HAS_BRIDGE_BINARY=1
+        found="binary"
+        local bver
+        bver="$(rustuya-bridge --version 2>/dev/null | head -n1 || echo unknown)"
+        warn "rustuya-bridge binary present but not running" "$bver — embed via --embed-bridge, or start it separately"
+    fi
+
+    if [ -z "$found" ]; then
+        ok "no external bridge detected" "manager can run with --embed-bridge"
+    fi
+}
+
+check_port() {
+    section "Networking"
+    if tcp_reachable "127.0.0.1" "$WEB_PORT"; then
+        PORT_FREE=0
+        warn "port ${WEB_PORT} is in use" "pass --port to rustuya-manager (default ${DEFAULT_WEB_PORT})"
+    else
+        ok "port ${WEB_PORT} is free" "default web UI port"
+    fi
+}
+
+# ── Recommendation ─────────────────────────────────────────────────────────────
+print_recommendation() {
+    printf '\n%sSummary%s  %d ok, %d warn, %d err\n' \
+        "$C_BOLD" "$C_RESET" "$OK_COUNT" "$WARN_COUNT" "$ERR_COUNT"
+
+    if [ "$HAS_PYTHON_OK" -eq 0 ] && [ "$HAS_DOCKER" -eq 0 ]; then
+        printf '\n%sCannot install yet.%s Install one of:\n' "$C_RED" "$C_RESET"
+        printf '  • Python ≥ %d.%d (preferred for pipx install)\n' "$MIN_PYTHON_MAJOR" "$MIN_PYTHON_MINOR"
+        printf '  • Docker (run as a container instead)\n'
+        return
+    fi
+
+    # Already-installed branch first — for re-runs we want to tell the user
+    # "you have it; upgrade like this" rather than re-recommend a fresh
+    # pipx install that would just be a no-op (or worse, look confusing).
+    if [ "$HAS_MANAGER_INSTALLED" -eq 1 ]; then
+        printf '\n%sAlready installed%s — to update:\n' "$C_BOLD" "$C_RESET"
+        if [ "$HAS_PIPX" -eq 1 ]; then
+            printf '  pipx upgrade rustuya-manager\n'
+            printf '  %s(or: pipx reinstall rustuya-manager — rebuilds the venv from scratch)%s\n' "$C_DIM" "$C_RESET"
+        else
+            printf '  Update with whichever tool you originally used (pip, system pkg mgr, docker).\n'
+        fi
+    elif [ "$HAS_PIPX" -eq 1 ]; then
+        printf '\n%sRecommended install%s\n' "$C_BOLD" "$C_RESET"
+        printf '  pipx install rustuya-manager\n'
+        if [ "$HAS_DOCKER" -eq 1 ]; then
+            printf '  %sAlternatively (docker): docker run -d --network host -v /var/lib/rustuya-manager:/data 3735943886/rustuya-manager:latest%s\n' "$C_DIM" "$C_RESET"
+        fi
+    elif [ "$HAS_PYTHON_OK" -eq 1 ] && [ "$HAS_PIP" -eq 1 ]; then
+        printf '\n%sRecommended install%s\n' "$C_BOLD" "$C_RESET"
+        printf '  python3 -m pip install --user pipx && python3 -m pipx ensurepath\n'
+        printf '  pipx install rustuya-manager\n'
+        printf '  %s(pipx is the cleanest install — pip-managed apps in isolated venvs)%s\n' "$C_DIM" "$C_RESET"
+        if [ "$HAS_DOCKER" -eq 1 ]; then
+            printf '  %sAlternatively (docker): docker run -d --network host -v /var/lib/rustuya-manager:/data 3735943886/rustuya-manager:latest%s\n' "$C_DIM" "$C_RESET"
+        fi
+    elif [ "$HAS_PYTHON_OK" -eq 1 ] && [ "$HAS_DOCKER" -eq 0 ]; then
+        # Bug #1 fix: Python is here but no pip/pipx → bootstrap branch.
+        # Common on a fresh Ubuntu where python3 ships but pip/pipx are
+        # separate packages. Don't try to guess the distro definitively;
+        # list the three most common package managers and let the user
+        # pick the line that matches their box.
+        printf '\n%sBootstrap your install path first%s\n' "$C_BOLD" "$C_RESET"
+        printf '  Python is here but neither pipx nor pip is installed.\n'
+        printf '  Install one of them with your package manager, then re-run this check:\n'
+        printf '    Debian/Ubuntu:  %ssudo apt install pipx%s\n' "$C_BOLD" "$C_RESET"
+        printf '    Fedora/RHEL:    %ssudo dnf install pipx%s\n' "$C_BOLD" "$C_RESET"
+        printf '    Arch:           %ssudo pacman -S python-pipx%s\n' "$C_BOLD" "$C_RESET"
+    elif [ "$HAS_DOCKER" -eq 1 ]; then
+        printf '\n%sRecommended install%s\n' "$C_BOLD" "$C_RESET"
+        printf '  docker run -d --name rustuya-manager --network host \\\n'
+        printf '    -v /var/lib/rustuya-manager:/data \\\n'
+        printf '    3735943886/rustuya-manager:latest\n'
+        printf '  %s(no Python on this host; docker is the only available path)%s\n' "$C_DIM" "$C_RESET"
+    fi
+
+    printf '\n%sFlags to consider%s\n' "$C_BOLD" "$C_RESET"
+    if [ "$HAS_BRIDGE_RUNNING" -eq 1 ]; then
+        printf '  • Bridge already managed externally — do NOT use --embed-bridge.\n'
+    elif [ "$HAS_BRIDGE_BINARY" -eq 1 ]; then
+        printf '  • rustuya-bridge binary present but idle — start it as a service, OR\n'
+        printf '    let the manager embed it with --embed-bridge.\n'
+    else
+        printf '  • No bridge found — pass --embed-bridge so the manager spawns one.\n'
+    fi
+    if [ "$HAS_BROKER" -eq 0 ]; then
+        printf '  • No broker at %s:%s — install a local one (Debian/Ubuntu: %ssudo apt install mosquitto%s)\n' \
+            "$BROKER_HOST" "$BROKER_PORT" "$C_BOLD" "$C_RESET"
+        printf '    or point the manager at a remote broker via config.json.\n'
+    fi
+    if [ "$PORT_FREE" -eq 0 ]; then
+        printf '  • Port %s is taken — start the manager with --port <free_port>.\n' "$WEB_PORT"
+    fi
+    if [ "$HAS_SYSTEMD" -eq 1 ] && [ "$HAS_MANAGER_INSTALLED" -eq 0 ]; then
+        printf '\n%sOptional systemd unit (after install)%s — see the README for a template.\n' "$C_DIM" "$C_RESET"
+    fi
+}
+
+# ── Help ───────────────────────────────────────────────────────────────────────
+cmd_help() {
+    cat <<EOF
+check.sh — pre-install environment doctor for rustuya-manager
+
+Usage:
+  $(basename "$0") [options]
+
+Options:
+  --broker HOST:PORT   Probe this broker instead of ${DEFAULT_BROKER_HOST}:${DEFAULT_BROKER_PORT}.
+  --port N             Check whether this port is free (default ${DEFAULT_WEB_PORT}).
+  --quiet              Suppress per-check rows; print only the summary + recommendation.
+  -h, --help           Show this message.
+
+Pure read-only — never modifies the system. Always exits 0.
+EOF
+}
+
+# ── Argument parsing ───────────────────────────────────────────────────────────
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --broker)
+                [ $# -lt 2 ] && { err "--broker needs HOST:PORT" ""; exit 0; }
+                shift
+                BROKER_HOST="${1%:*}"
+                BROKER_PORT="${1##*:}"
+                # `host` and `host:1883` both legal — fall back to default
+                # port when the user didn't supply one (no `:` in the arg).
+                if [ "$BROKER_HOST" = "$BROKER_PORT" ]; then
+                    BROKER_PORT="$DEFAULT_BROKER_PORT"
+                fi
+                ;;
+            --port)
+                [ $# -lt 2 ] && { err "--port needs a number" ""; exit 0; }
+                shift
+                WEB_PORT="$1"
+                ;;
+            --quiet|-q) QUIET=1 ;;
+            -h|--help)  cmd_help; exit 0 ;;
+            *)          err "Unknown option: $1" "use --help"; exit 0 ;;
+        esac
+        shift
+    done
+}
+
+main() {
+    parse_args "$@"
+    if [ "$QUIET" -eq 0 ]; then
+        printf '%srustuya-manager environment check%s\n' "$C_BOLD" "$C_RESET"
+        printf '%s(read-only diagnostic — nothing on this host will be modified)%s\n' "$C_DIM" "$C_RESET"
+    fi
+    check_runtime
+    check_python
+    check_docker
+    check_broker
+    check_bridge
+    check_port
+    print_recommendation
+    exit 0
+}
+
+main "$@"

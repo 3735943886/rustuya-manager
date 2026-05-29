@@ -75,6 +75,33 @@ loop. `start_async()` would couple the two: the same hiccup would delay
 bridge publishing. We trade the cleaner asyncio lifecycle for runtime
 isolation, on purpose.
 
+**The one genuine edge `start_async()` has** is failure observability: a
+daemon thread that dies (an unexpected `run()` exception) does so silently —
+the manager's loop never sees it. With `start_async()` the exception would
+surface on the awaited task, so the manager could detect and react to bridge
+death directly. We don't consider this decisive, because (a) the manager
+already notices a dead bridge through its MQTT bootstrap / presence
+signalling (the `bridge_offline` warning path), so detection isn't exclusive
+to the async route, and (b) it doesn't outweigh the isolation above.
+
+**When `start_async()` *would* win** — noted so the trade-off is honest, not
+dogma: if you embedded *many* bridges in one process (the thread route spins
+up a full multi-threaded tokio runtime per server; the async route shares
+one `pyo3-async-runtimes` runtime), or ran short-lived bridges that start and
+stop frequently inside the loop (the awaitable lifecycle is cleaner there),
+or simply didn't rank MQTT isolation first. The manager hits none of these:
+it embeds exactly one bridge for the whole process lifetime.
+
+**Why the thread fits the manager's model anyway.** The embedded bridge is
+the *secondary* mode. The manager's primary, default job is to manage a
+`rustuya-bridge` running as a **separate process**, talking to it only over
+MQTT — fully isolated, no shared memory, no shared runtime. The embedded
+thread is just that same arrangement folded into one process: a bridge on
+its own runtime that the manager reaches over the broker, never via shared
+Python state. So the thread route isn't an exception to the manager's design
+— it mirrors it. `start_async()` would be the odd one out, fusing two things
+the manager otherwise keeps deliberately at arm's length.
+
 ### 1.3 Shutdown: `no_signals=True` + `stop()`
 
 The flip side of running the bridge on its own thread is that shutdown has

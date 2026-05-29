@@ -179,7 +179,7 @@ def _spawn_embedded_bridge(args: argparse.Namespace) -> tuple[Any, threading.Thr
 
     Used when `--embed-bridge` is set AND no external bridge has claimed the
     root topic yet (collision check happens in `run()` before this is called).
-    Returns (server, thread) so the caller can `server.close()` + join on
+    Returns (server, thread) so the caller can `server.stop()` + join on
     shutdown. The thread is daemon so a manager crash never leaves the
     embedded bridge orphaned.
     """
@@ -194,11 +194,18 @@ def _spawn_embedded_bridge(args: argparse.Namespace) -> tuple[Any, threading.Thr
     # bridge's domain and is read from `--bridge-config` when provided.
     # pyrustuyabridge >= 0.1.1 reads + auto-creates that file in PyBridgeServer
     # the same way the binary's `--config` flag does.
+    #
+    # no_signals=True: the manager already installs SIGINT/SIGTERM handlers
+    # (see run()), so the embedded bridge must NOT install its own — two
+    # signal handlers in one process is the race we want to avoid. The
+    # manager translates a signal into `server.stop()` instead, which trips
+    # the bridge's cancellation token for a clean, deterministic shutdown.
     kwargs: dict[str, Any] = {
         "mqtt_broker": args.broker,
         "mqtt_root_topic": args.root,
         "state_file": state_file,
         "log_level": args.log_level,
+        "no_signals": True,
     }
     if getattr(args, "bridge_config", None):
         kwargs["config_path"] = args.bridge_config
@@ -210,12 +217,22 @@ def _spawn_embedded_bridge(args: argparse.Namespace) -> tuple[Any, threading.Thr
 
 
 async def _close_embedded_bridge(server: Any) -> None:
-    """Wrap `server.close()` in an asyncio loop — the bridge's tokio runtime
-    expects to schedule cleanup work on one before shutting down."""
-    server.close()
-    # Tiny grace period so the bridge's cleanup futures can complete before
-    # the calling loop tears down underneath them.
-    await asyncio.sleep(0.1)
+    """Signal the embedded bridge to shut down.
+
+    `stop()` is pyrustuyabridge's sync, lock-free cancel (>= 0.2.0rc5): it
+    trips the bridge's internal CancellationToken so `run()` returns and
+    performs graceful MQTT cleanup (retained-config clear + state flush) on
+    the way out — on BOTH the signal and non-signal shutdown paths. The
+    caller's `thread.join()` is the barrier that waits for that cleanup to
+    finish, so there's no magic sleep here.
+
+    This replaces an earlier `server.close()` (an unawaited coroutine) +
+    fixed `asyncio.sleep`: close() needed the BridgeServer mutex that the
+    running `start()` holds for the whole of `run()`, so without an OS
+    signal it could never acquire the lock and cleanup was skipped. stop()
+    needs no lock and no asyncio runtime.
+    """
+    server.stop()
 
 
 async def _resolve_embedded_bridge(
@@ -413,7 +430,11 @@ async def run(args: argparse.Namespace) -> int:
         if embedded_bridge is not None:
             server, thread = embedded_bridge
             await _close_embedded_bridge(server)
-            thread.join(timeout=3)
+            # 5s headroom over the bridge's graceful MQTT cleanup (broker
+            # disconnect + retained-config clear) which runs inside run()
+            # once stop() trips the token. Local cleanup is ~ms; the slack
+            # is for a slow/remote broker.
+            thread.join(timeout=5)
 
     return 0
 

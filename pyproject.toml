@@ -13,7 +13,7 @@ dependencies = [
     "rich>=13.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
-    "pyrustuyabridge>=0.1.4,<0.2",  # 0.1.4 picks up rustuya 0.2.8 listener-resilience + silent-death fixes
+    "pyrustuyabridge>=0.2.0rc5,<0.3",  # 0.2.0rc5: out-of-mutex shutdown token → stop() works without a signal (rustuya 0.3.0-rc.5)
     "tuyawizard>=0.1.7",  # 0.1.7 preserves cached user_code + accepts injected scan_results
     "cryptography>=41",   # missing dep of tuya-sharing-sdk
 ]

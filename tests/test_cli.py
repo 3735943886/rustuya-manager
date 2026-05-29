@@ -82,6 +82,21 @@ class TestSpawnEmbeddedBridgeKwargs:
         assert seen["mqtt_root_topic"] == "test_root"
         assert seen["log_level"] == "warn"
 
+    def test_no_signals_always_set(self, tmp_path, monkeypatch):
+        # The manager owns SIGINT/SIGTERM (run() installs loop handlers),
+        # so the embedded bridge must be told NOT to install its own —
+        # otherwise two handlers race in one process. Shutdown goes
+        # through server.stop() instead.
+        import pyrustuyabridge as pb
+
+        from rustuya_manager.cli import _spawn_embedded_bridge
+
+        seen: dict = {}
+        monkeypatch.setattr(pb, "PyBridgeServer", lambda **kw: seen.update(kw) or MagicMock())
+
+        _spawn_embedded_bridge(_make_args(tmp_path))
+        assert seen["no_signals"] is True
+
 
 class TestPeekBridgeConfig:
     """`_peek_bridge_config` is a best-effort JSON read. Any failure mode

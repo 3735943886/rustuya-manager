@@ -278,6 +278,21 @@ class WizardManager:
             logger.exception("Wizard flow failed")
             self.session.state = WizardState.ERROR
             self.session.error = f"{type(e).__name__}: {e}"
+        finally:
+            # Tear down tuyawizard's internals — closes the requests.Sessions
+            # inside CustomerApi / LoginControl, stops the MQ thread if one
+            # was spawned, calls Manager.unload() (HTTP terminal revoke),
+            # and breaks the wizard ↔ manager ↔ token_listener reference
+            # cycle. Without this, each TuyaWizard() leaked the underlying
+            # urllib3 PoolManager + SSL context per wizard run — observed
+            # ~750-950 KB/cycle on the Pi, identical magnitude to a stuck
+            # paho-mqtt thread but actually requests-pool retention (which
+            # was my first wrong guess). tuyawizard>=0.1.8 exposes close()
+            # for exactly this; runs on signal / error / success paths.
+            try:
+                wizard.close()
+            except Exception:  # noqa: BLE001
+                logger.exception("tuyawizard.close() failed")
 
 
 def _qr_to_data_url(text: str) -> str:

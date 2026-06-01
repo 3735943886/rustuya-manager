@@ -336,7 +336,15 @@ def build_app(
                     t.cancel()
                 # Drain cancellations so their CancelledError doesn't leak
                 # into the event loop as an unhandled-exception warning.
-                await asyncio.gather(*pending, return_exceptions=True)
+                # Shield so a teardown-time cancellation of the handler
+                # itself doesn't interrupt the gather mid-flight, which
+                # surfaced as flaky `concurrent.futures.CancelledError`
+                # in TestClient runs (the threadpool future the test
+                # harness awaits saw an unhandled cancellation chain).
+                try:
+                    await asyncio.shield(asyncio.gather(*pending, return_exceptions=True))
+                except asyncio.CancelledError:
+                    pass
                 if recv_task in done:
                     # The JS client never sends messages on this socket, so
                     # any completion here means disconnect (or a stray frame

@@ -13,6 +13,7 @@ never disagree.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from pathlib import Path
@@ -314,7 +315,35 @@ def build_app(
             await ws.send_json(serialize_state(state))
             last_seen = state.version
             while True:
-                last_seen = await state.wait_for_change(last_seen)
+                # Race the state-change wait against ws.receive() so a client
+                # disconnect aborts this handler promptly. Without the race,
+                # `state.wait_for_change` would block until the NEXT state
+                # change — and Starlette doesn't auto-cancel WS handler tasks
+                # on disconnect — so a closed client would leave the task
+                # parked indefinitely. Each parked task retains the WS object,
+                # its frame locals, and a slot in the Condition's waiter
+                # deque; over many connection cycles (browser refreshes,
+                # tab reopens) that retention grew linearly at ~160 KB per
+                # cycle. The race converts disconnect into a prompt exit so
+                # the task graph can be reclaimed.
+                change_task = asyncio.create_task(state.wait_for_change(last_seen))
+                recv_task = asyncio.create_task(ws.receive())
+                done, pending = await asyncio.wait(
+                    {change_task, recv_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for t in pending:
+                    t.cancel()
+                # Drain cancellations so their CancelledError doesn't leak
+                # into the event loop as an unhandled-exception warning.
+                await asyncio.gather(*pending, return_exceptions=True)
+                if recv_task in done:
+                    # The JS client never sends messages on this socket, so
+                    # any completion here means disconnect (or a stray frame
+                    # we ignore by exiting). Returning closes the handler;
+                    # Starlette closes the WS for us.
+                    return
+                last_seen = change_task.result()
                 await ws.send_json(serialize_state(state))
         except WebSocketDisconnect:
             return

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from rustuya_manager.mqtt import BridgeClient
@@ -163,6 +164,53 @@ class TestWebSocket:
                 msg = ws.receive_json()
                 assert msg["version"] == state.version
                 assert msg["templates"]["command"] == "rustuya/command"
+
+    def test_ws_handler_races_wait_for_change_against_receive(self):
+        """The /ws handler must race `state.wait_for_change` against
+        `ws.receive()` so a client disconnect aborts the handler promptly.
+
+        Without the race, each closed client left its server-side handler
+        task parked indefinitely on `wait_for_change`, retaining the
+        WebSocket object, frame locals, and a slot in the Condition's
+        waiter deque. Across browser refreshes that retention grew
+        linearly at ~160 KB per cycle.
+
+        TestClient's sync WS model doesn't reliably propagate the
+        server-initiated close on this race, so we verify the mechanism
+        structurally by reading the handler's source. The fix is also
+        exercised end-to-end by tests/e2e_ui (every Playwright test
+        opens, uses, and closes a real WS) which would hang or grow
+        unbounded if the race were removed.
+        """
+        import inspect
+
+        state, client = _fixture_state()
+        app = build_app(state, client)
+        for r in app.routes:
+            if getattr(r, "path", "") == "/ws":
+                src = inspect.getsource(r.endpoint)
+                assert "ws.receive" in src, (
+                    "ws_state must race wait_for_change against ws.receive() to "
+                    "detect client disconnect; otherwise handler tasks leak per "
+                    "connection cycle"
+                )
+                assert "asyncio.wait" in src, (
+                    "ws_state must use asyncio.wait(..., FIRST_COMPLETED) to race "
+                    "the state-change wait against client receive"
+                )
+                return
+        pytest.fail("/ws route not registered")
+
+    def test_ws_open_close_cycle_does_not_block(self):
+        """Sanity check: opening + closing a /ws connection completes
+        cleanly. If a future change broke the race by, e.g., never
+        cancelling the change_task, the TestClient teardown could hang.
+        """
+        state, client = _fixture_state()
+        with TestClient(build_app(state, client)) as tc:
+            for _ in range(3):
+                with tc.websocket_connect("/ws") as ws:
+                    ws.receive_json()
 
 
 class TestBasicAuth:

@@ -60,9 +60,13 @@ HAS_BROKER=0
 HAS_BRIDGE_RUNNING=0   # systemd or docker
 HAS_BRIDGE_BINARY=0    # `which rustuya-bridge` only
 HAS_MANAGER_INSTALLED=0
+MANAGER_INSTALLED_VER=""
 HAS_MANAGER_RUNNING_DOCKER=0
 MANAGER_DOCKER_NAME=""
 MANAGER_DOCKER_IMAGE=""
+UP_TO_DATE=0       # 1 once check_version confirms the local version is current
+LATEST_VERSION=""  # GitHub tag basename (no leading v); empty when unreachable
+LATEST_LABEL=""    # LATEST_VERSION + " (rc)" when applicable
 PORT_FREE=1
 
 # row() formats a single check as "  STATUS  message".
@@ -182,14 +186,14 @@ check_python() {
     # going through the shebang gets us the right interpreter in all cases.
     if command -v rustuya-manager >/dev/null 2>&1; then
         HAS_MANAGER_INSTALLED=1
-        local mver entry_py
+        local entry_py
         entry_py="$(head -n1 "$(command -v rustuya-manager)" 2>/dev/null | sed -e 's|^#!||' -e 's| .*||')"
         if [ -x "$entry_py" ]; then
-            mver="$("$entry_py" -c 'import rustuya_manager; print(rustuya_manager.__version__)' 2>/dev/null || echo unknown)"
+            MANAGER_INSTALLED_VER="$("$entry_py" -c 'import rustuya_manager; print(rustuya_manager.__version__)' 2>/dev/null || echo unknown)"
         else
-            mver="unknown"
+            MANAGER_INSTALLED_VER="unknown"
         fi
-        ok "rustuya-manager already installed" "$mver"
+        ok "rustuya-manager already installed" "$MANAGER_INSTALLED_VER"
     fi
 }
 
@@ -227,6 +231,103 @@ check_manager_running() {
     MANAGER_DOCKER_IMAGE="$image"
     section "rustuya-manager"
     ok "rustuya-manager running in docker" "$image — container: $name ($status)"
+}
+
+# Compare two PEP 440-style versions and echo whichever is newer.
+#
+# Plain `sort -V` is NOT sufficient: it puts "0.1.0" BEFORE "0.1.0rc20"
+# (treating rc as a suffix extension), but PEP 440 says the stable
+# release outranks its own pre-releases. So:
+#   0.1.0   > 0.1.0rc20  > 0.1.0rc19  > ... > 0.1.0rc1
+# We split into (base, rc number); use sort -V on the base when bases
+# differ; otherwise the empty-rc side wins; otherwise compare rc numbers.
+# Only handles the `rcN` suffix that this project actually emits — extend
+# the case-statement if future tags introduce a/b/dev.
+_version_newer() {
+    local a="$1" b="$2"
+    [ "$a" = "$b" ] && { printf '%s\n' "$a"; return; }
+    local a_base a_rc="" b_base b_rc=""
+    case "$a" in
+        *rc*) a_rc="${a##*rc}"; a_base="${a%rc*}" ;;
+        *)    a_base="$a" ;;
+    esac
+    case "$b" in
+        *rc*) b_rc="${b##*rc}"; b_base="${b%rc*}" ;;
+        *)    b_base="$b" ;;
+    esac
+    if [ "$a_base" != "$b_base" ]; then
+        # Different base versions — sort -V is correct here (no rc suffix
+        # confusion since both sides are now pure X.Y.Z).
+        local newer
+        newer="$(printf '%s\n%s\n' "$a_base" "$b_base" | sort -V | tail -n1)"
+        if [ "$newer" = "$a_base" ]; then printf '%s\n' "$a"; else printf '%s\n' "$b"; fi
+        return
+    fi
+    # Equal base versions — stable (empty rc) wins over any rc.
+    if [ -z "$a_rc" ]; then printf '%s\n' "$a"; return; fi
+    if [ -z "$b_rc" ]; then printf '%s\n' "$b"; return; fi
+    # Both are rc — numeric compare on rc number (rc9 < rc10 < rc20).
+    if [ "$a_rc" -gt "$b_rc" ]; then printf '%s\n' "$a"; else printf '%s\n' "$b"; fi
+}
+
+check_version() {
+    # Compare the locally-running rustuya-manager (pipx-installed or
+    # docker-tagged) against the latest tag on GitHub. Skips silently when
+    # nothing is installed/running, when curl is missing, or when GitHub
+    # can't be reached — this is informational, never a blocker.
+    local current=""
+    if [ -n "$MANAGER_INSTALLED_VER" ] && [ "$MANAGER_INSTALLED_VER" != "unknown" ]; then
+        current="$MANAGER_INSTALLED_VER"
+    fi
+    if [ "$HAS_MANAGER_RUNNING_DOCKER" -eq 1 ]; then
+        local tag="${MANAGER_DOCKER_IMAGE##*:}"
+        # Skip `:latest` and tag-less images — they carry no version info
+        # we can compare. `tag == MANAGER_DOCKER_IMAGE` means there was no
+        # ':' at all.
+        if [ "$tag" != "$MANAGER_DOCKER_IMAGE" ] && [ "$tag" != "latest" ]; then
+            # Docker tag wins over pipx version when both are present —
+            # the container is the active service the user can see.
+            current="$tag"
+        fi
+    fi
+    [ -z "$current" ] && return 0
+    command -v curl >/dev/null 2>&1 || return 0
+
+    section "Updates"
+    local resp
+    resp="$(curl -fsSL --connect-timeout 3 --max-time 5 \
+        'https://api.github.com/repos/3735943886/rustuya-manager/tags?per_page=1' \
+        2>/dev/null)" || resp=""
+    LATEST_VERSION="$(printf '%s' "$resp" | sed -n 's/.*"name": *"v\([^"]*\)".*/\1/p' | head -n1)"
+    if [ -z "$LATEST_VERSION" ]; then
+        warn "couldn't reach GitHub" "version check skipped — network down or rate-limited"
+        return 0
+    fi
+
+    # Surface rc/pre-release status so the user knows whether upstream
+    # itself is in a release-candidate cycle rather than blessed stable.
+    LATEST_LABEL="$LATEST_VERSION"
+    case "$LATEST_VERSION" in
+        *rc[0-9]*) LATEST_LABEL="$LATEST_VERSION (rc)" ;;
+    esac
+
+    if [ "$current" = "$LATEST_VERSION" ]; then
+        UP_TO_DATE=1
+        ok "up to date" "$LATEST_LABEL"
+        return 0
+    fi
+    # Use the PEP 440-aware comparator (above) instead of bare `sort -V`
+    # — the latter would call 0.1.0rc20 newer than 0.1.0, which is wrong.
+    local newer
+    newer="$(_version_newer "$current" "$LATEST_VERSION")"
+    if [ "$newer" = "$current" ]; then
+        # Local build is ahead — typical for a dev checkout pointing at
+        # master past the latest tag. No upgrade action needed.
+        UP_TO_DATE=1
+        ok "ahead of GitHub" "you: $current  ·  GitHub: $LATEST_LABEL"
+    else
+        warn "upgrade available" "GitHub: $LATEST_LABEL  ·  you: $current"
+    fi
 }
 
 check_broker() {
@@ -340,10 +441,15 @@ print_recommendation() {
         printf '\n%sAlready running in docker%s — %s\n' \
             "$C_BOLD" "$C_RESET" "$MANAGER_DOCKER_IMAGE"
         printf '  Container: %s\n' "$MANAGER_DOCKER_NAME"
-        printf '  To upgrade — pull a newer image, then recreate with your original flags:\n'
-        printf '    docker pull %s:latest\n' "$image_base"
-        printf '    %s# then re-create (docker compose up -d, or your stop+rm+run script).%s\n' \
-            "$C_DIM" "$C_RESET"
+        if [ "$UP_TO_DATE" -eq 0 ]; then
+            # Show the upgrade path when we know we're behind, or when we
+            # couldn't determine (network down / :latest tag) — the
+            # conservative default is to surface the command.
+            printf '  To upgrade — pull a newer image, then recreate with your original flags:\n'
+            printf '    docker pull %s:latest\n' "$image_base"
+            printf '    %s# then re-create (docker compose up -d, or your stop+rm+run script).%s\n' \
+                "$C_DIM" "$C_RESET"
+        fi
         printf '  %sCurrently pinned to: %s%s\n' "$C_DIM" "$image_tag" "$C_RESET"
         if [ "$HAS_MANAGER_INSTALLED" -eq 1 ]; then
             # Rare both-paths case (migration in progress, debug install,
@@ -353,12 +459,15 @@ print_recommendation() {
                 "$C_DIM" "$C_RESET"
         fi
     elif [ "$HAS_MANAGER_INSTALLED" -eq 1 ]; then
-        printf '\n%sAlready installed%s — to update:\n' "$C_BOLD" "$C_RESET"
-        if [ "$HAS_PIPX" -eq 1 ]; then
-            printf '  pipx upgrade rustuya-manager\n'
-            printf '  %s(or: pipx reinstall rustuya-manager — rebuilds the venv from scratch)%s\n' "$C_DIM" "$C_RESET"
-        else
-            printf '  Update with whichever tool you originally used (pip, system pkg mgr, docker).\n'
+        printf '\n%sAlready installed%s — %s\n' "$C_BOLD" "$C_RESET" "${MANAGER_INSTALLED_VER:-version unknown}"
+        if [ "$UP_TO_DATE" -eq 0 ]; then
+            printf '  To update:\n'
+            if [ "$HAS_PIPX" -eq 1 ]; then
+                printf '    pipx upgrade rustuya-manager\n'
+                printf '    %s(or: pipx reinstall rustuya-manager — rebuilds the venv from scratch)%s\n' "$C_DIM" "$C_RESET"
+            else
+                printf '    Update with whichever tool you originally used (pip, system pkg mgr, docker).\n'
+            fi
         fi
     elif [ "$HAS_PIPX" -eq 1 ]; then
         printf '\n%sRecommended install%s\n' "$C_BOLD" "$C_RESET"
@@ -498,6 +607,7 @@ main() {
     check_python
     check_docker
     check_manager_running
+    check_version
     check_broker
     check_bridge
     check_port

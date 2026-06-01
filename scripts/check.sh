@@ -60,6 +60,9 @@ HAS_BROKER=0
 HAS_BRIDGE_RUNNING=0   # systemd or docker
 HAS_BRIDGE_BINARY=0    # `which rustuya-bridge` only
 HAS_MANAGER_INSTALLED=0
+HAS_MANAGER_RUNNING_DOCKER=0
+MANAGER_DOCKER_NAME=""
+MANAGER_DOCKER_IMAGE=""
 PORT_FREE=1
 
 # row() formats a single check as "  STATUS  message".
@@ -204,6 +207,28 @@ check_docker() {
     fi
 }
 
+check_manager_running() {
+    # Detect a rustuya-manager container already up so subsequent checks /
+    # recommendations don't treat the host as a fresh install. Symmetric to
+    # the rustuya-bridge docker probe below; image-name match so renamed
+    # containers still get caught.
+    [ "$HAS_DOCKER" -eq 1 ] || return 0
+    local line name image status rest
+    line="$(docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null \
+        | awk -F'|' '$2 ~ /(^|\/)rustuya-manager(:|$)/' \
+        | head -n1)"
+    [ -z "$line" ] && return 0
+    HAS_MANAGER_RUNNING_DOCKER=1
+    name="${line%%|*}"
+    rest="${line#*|}"
+    image="${rest%%|*}"
+    status="${rest#*|}"
+    MANAGER_DOCKER_NAME="$name"
+    MANAGER_DOCKER_IMAGE="$image"
+    section "rustuya-manager"
+    ok "rustuya-manager running in docker" "$image — container: $name ($status)"
+}
+
 check_broker() {
     section "MQTT broker"
     if tcp_reachable "$BROKER_HOST" "$BROKER_PORT"; then
@@ -248,15 +273,29 @@ check_bridge() {
     fi
 
     if [ -z "$found" ]; then
-        ok "no external bridge detected" "manager can run with --embed-bridge"
+        if [ "$HAS_MANAGER_RUNNING_DOCKER" -eq 1 ]; then
+            # Can't see inside the container; the image's EMBED_BRIDGE
+            # default is on, so the bridge is likely embedded there.
+            ok "no external bridge visible" "running manager likely has --embed-bridge on (image default)"
+        else
+            ok "no external bridge detected" "manager can run with --embed-bridge"
+        fi
     fi
 }
 
 check_port() {
     section "Networking"
     if tcp_reachable "127.0.0.1" "$WEB_PORT"; then
-        PORT_FREE=0
-        warn "port ${WEB_PORT} is in use" "pass --port to rustuya-manager (default ${DEFAULT_WEB_PORT})"
+        if [ "$HAS_MANAGER_RUNNING_DOCKER" -eq 1 ]; then
+            # The running manager container almost certainly holds this
+            # port (host-networking is the documented setup). Don't flag
+            # it as a problem — that would scare a user into changing
+            # --port for a phantom conflict.
+            ok "port ${WEB_PORT} in use" "expected — rustuya-manager container detected above"
+        else
+            PORT_FREE=0
+            warn "port ${WEB_PORT} is in use" "pass --port to rustuya-manager (default ${DEFAULT_WEB_PORT})"
+        fi
     else
         ok "port ${WEB_PORT} is free" "default web UI port"
     fi
@@ -288,10 +327,32 @@ print_recommendation() {
         return
     fi
 
-    # Already-installed branch first — for re-runs we want to tell the user
-    # "you have it; upgrade like this" rather than re-recommend a fresh
-    # pipx install that would just be a no-op (or worse, look confusing).
-    if [ "$HAS_MANAGER_INSTALLED" -eq 1 ]; then
+    # Already-running-in-docker branch wins over every install path —
+    # recommending a fresh install while the manager is up would lead the
+    # user into a duplicate deploy (port collision, broker contention).
+    # Lead with the upgrade pattern: pull + recreate with original flags.
+    if [ "$HAS_MANAGER_RUNNING_DOCKER" -eq 1 ]; then
+        local image_base="${MANAGER_DOCKER_IMAGE%:*}"
+        local image_tag="${MANAGER_DOCKER_IMAGE##*:}"
+        # No-tag case ("image" without ":tag") leaves image_base == image_tag;
+        # surface that explicitly rather than printing the image twice.
+        [ "$image_base" = "$MANAGER_DOCKER_IMAGE" ] && image_tag="latest"
+        printf '\n%sAlready running in docker%s — %s\n' \
+            "$C_BOLD" "$C_RESET" "$MANAGER_DOCKER_IMAGE"
+        printf '  Container: %s\n' "$MANAGER_DOCKER_NAME"
+        printf '  To upgrade — pull a newer image, then recreate with your original flags:\n'
+        printf '    docker pull %s:latest\n' "$image_base"
+        printf '    %s# then re-create (docker compose up -d, or your stop+rm+run script).%s\n' \
+            "$C_DIM" "$C_RESET"
+        printf '  %sCurrently pinned to: %s%s\n' "$C_DIM" "$image_tag" "$C_RESET"
+        if [ "$HAS_MANAGER_INSTALLED" -eq 1 ]; then
+            # Rare both-paths case (migration in progress, debug install,
+            # etc.). The docker container is the live service; mention the
+            # pipx side so the user can decide whether to clean it up.
+            printf '  %s(Also installed via pipx — `pipx upgrade rustuya-manager` if you keep that path.)%s\n' \
+                "$C_DIM" "$C_RESET"
+        fi
+    elif [ "$HAS_MANAGER_INSTALLED" -eq 1 ]; then
         printf '\n%sAlready installed%s — to update:\n' "$C_BOLD" "$C_RESET"
         if [ "$HAS_PIPX" -eq 1 ]; then
             printf '  pipx upgrade rustuya-manager\n'
@@ -336,28 +397,47 @@ print_recommendation() {
     fi
 
     printf '\n%sFlags to consider%s\n' "$C_BOLD" "$C_RESET"
-    if [ "$HAS_BRIDGE_RUNNING" -eq 1 ]; then
-        # The "how to opt out of embed" depends on which install path the
-        # user picked, so spell both out — pipx omits the flag, docker
-        # passes the env var (which the image's entrypoint reads).
-        printf '  • Bridge already managed externally — avoid double-publishing:\n'
-        printf '      pipx path:    omit --embed-bridge from the manager command\n'
-        printf '      docker path:  add %s-e EMBED_BRIDGE=0%s to docker run\n' "$C_BOLD" "$C_RESET"
-    elif [ "$HAS_BRIDGE_BINARY" -eq 1 ]; then
-        printf '  • rustuya-bridge binary present but idle — start it as a service, OR\n'
-        printf '    let the manager embed it with --embed-bridge (docker: default is on).\n'
+    if [ "$HAS_MANAGER_RUNNING_DOCKER" -eq 1 ]; then
+        # The new-install flag suggestions don't apply when there's already
+        # a manager up — the running container has its own flag set and we
+        # can't see inside. Point the user at logs instead so they can
+        # verify what's actually configured.
+        printf '  • Manager already running — install/upgrade flags apply to a re-deploy only.\n'
+        printf '    Inspect: %sdocker logs %s%s\n' "$C_BOLD" "$MANAGER_DOCKER_NAME" "$C_RESET"
+        if [ "$HAS_BROKER" -eq 0 ]; then
+            # Broker still matters: the running container may already be
+            # disconnected, which is a real-world problem worth surfacing.
+            printf '  • No broker at %s:%s — the running container may already be disconnected;\n' \
+                "$BROKER_HOST" "$BROKER_PORT"
+            printf '    install a local one (%ssudo apt install mosquitto%s) or fix the network path.\n' \
+                "$C_BOLD" "$C_RESET"
+        fi
     else
-        printf '  • No bridge found — pass --embed-bridge (docker: default is on).\n'
+        if [ "$HAS_BRIDGE_RUNNING" -eq 1 ]; then
+            # The "how to opt out of embed" depends on which install path
+            # the user picked, so spell both out — pipx omits the flag,
+            # docker passes the env var (image entrypoint reads it).
+            printf '  • Bridge already managed externally — avoid double-publishing:\n'
+            printf '      pipx path:    omit --embed-bridge from the manager command\n'
+            printf '      docker path:  add %s-e EMBED_BRIDGE=0%s to docker run\n' "$C_BOLD" "$C_RESET"
+        elif [ "$HAS_BRIDGE_BINARY" -eq 1 ]; then
+            printf '  • rustuya-bridge binary present but idle — start it as a service, OR\n'
+            printf '    let the manager embed it with --embed-bridge (docker: default is on).\n'
+        else
+            printf '  • No bridge found — pass --embed-bridge (docker: default is on).\n'
+        fi
+        if [ "$HAS_BROKER" -eq 0 ]; then
+            printf '  • No broker at %s:%s — install a local one (Debian/Ubuntu: %ssudo apt install mosquitto%s)\n' \
+                "$BROKER_HOST" "$BROKER_PORT" "$C_BOLD" "$C_RESET"
+            printf '    or point the manager at a remote broker via config.json.\n'
+        fi
+        if [ "$PORT_FREE" -eq 0 ]; then
+            printf '  • Port %s is taken — start the manager with --port <free_port>.\n' "$WEB_PORT"
+        fi
     fi
-    if [ "$HAS_BROKER" -eq 0 ]; then
-        printf '  • No broker at %s:%s — install a local one (Debian/Ubuntu: %ssudo apt install mosquitto%s)\n' \
-            "$BROKER_HOST" "$BROKER_PORT" "$C_BOLD" "$C_RESET"
-        printf '    or point the manager at a remote broker via config.json.\n'
-    fi
-    if [ "$PORT_FREE" -eq 0 ]; then
-        printf '  • Port %s is taken — start the manager with --port <free_port>.\n' "$WEB_PORT"
-    fi
-    if [ "$HAS_SYSTEMD" -eq 1 ] && [ "$HAS_MANAGER_INSTALLED" -eq 0 ]; then
+    if [ "$HAS_SYSTEMD" -eq 1 ] \
+       && [ "$HAS_MANAGER_INSTALLED" -eq 0 ] \
+       && [ "$HAS_MANAGER_RUNNING_DOCKER" -eq 0 ]; then
         printf '\n%sOptional systemd unit (after install)%s — see the README for a template.\n' "$C_DIM" "$C_RESET"
     fi
 }
@@ -417,6 +497,7 @@ main() {
     check_runtime
     check_python
     check_docker
+    check_manager_running
     check_broker
     check_bridge
     check_port

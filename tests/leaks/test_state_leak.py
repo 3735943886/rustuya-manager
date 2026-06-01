@@ -70,10 +70,14 @@ async def test_wait_for_concurrent_cancel_no_leak():
         await one_cycle()
     async with assert_no_leak_async(
         max_kb=60,
-        max_objects=300,
+        max_objects=800,
         max_tasks=0,
         label="State.wait_for concurrent cancel",
     ):
+        # max_objects=800 absorbs py3.10 asyncio free-list residue (py3.12
+        # sits at ~150, py3.10 at ~406). Real leak detection rides on
+        # max_kb=60 + max_tasks=0 (real waiter accumulation would push
+        # tracemalloc into the hundreds of KB, not 12 KB).
         for _ in range(30):
             await one_cycle()
     waiters = getattr(state._changed, "_waiters", None)

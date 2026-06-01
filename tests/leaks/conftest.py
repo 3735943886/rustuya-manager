@@ -90,9 +90,7 @@ def _take_snapshot() -> _Snapshot:
     return _Snapshot(snap=snap, gc_count=gc_count, task_count=task_count)
 
 
-def _format_diagnostic(
-    label: str, before: _Snapshot, after: _Snapshot, budget: _LeakBudget
-) -> str:
+def _format_diagnostic(label: str, before: _Snapshot, after: _Snapshot, budget: _LeakBudget) -> str:
     diff = after.snap.compare_to(before.snap, "lineno")
     total_kb = sum(s.size_diff for s in diff) / 1024.0
     gc_delta = after.gc_count - before.gc_count
@@ -108,25 +106,19 @@ def _format_diagnostic(
     for s in diff:
         if s.size_diff <= 0:
             continue
-        lines.append(f"    +{s.size_diff/1024:.1f} KB  {s.traceback}")
+        lines.append(f"    +{s.size_diff / 1024:.1f} KB  {s.traceback}")
         shown += 1
         if shown >= _TOP_N:
             break
     return "\n".join(lines)
 
 
-def _check_budget(
-    label: str, before: _Snapshot, after: _Snapshot, budget: _LeakBudget
-) -> None:
+def _check_budget(label: str, before: _Snapshot, after: _Snapshot, budget: _LeakBudget) -> None:
     diff = after.snap.compare_to(before.snap, "lineno")
     total_kb = sum(s.size_diff for s in diff) / 1024.0
     gc_delta = after.gc_count - before.gc_count
     task_delta = after.task_count - before.task_count
-    if (
-        total_kb > budget.max_kb
-        or gc_delta > budget.max_objects
-        or task_delta > budget.max_tasks
-    ):
+    if total_kb > budget.max_kb or gc_delta > budget.max_objects or task_delta > budget.max_tasks:
         pytest.fail(_format_diagnostic(label, before, after, budget))
 
 
@@ -248,9 +240,13 @@ def make_mock_wizard(
     happy path) so cycles run fast. `close()` is auto-mocked so leak tests can
     assert `mock_wizard.close.call_count == N` as a strict regression pin for
     rc20 43dd389 (finally block removal would break the count immediately)."""
-    fetch_returns = fetch_returns if fetch_returns is not None else [
-        {"id": "bf-x", "name": "lamp", "local_key": "k1", "ip": "192.168.1.10"},
-    ]
+    fetch_returns = (
+        fetch_returns
+        if fetch_returns is not None
+        else [
+            {"id": "bf-x", "name": "lamp", "local_key": "k1", "ip": "192.168.1.10"},
+        ]
+    )
     mock = MagicMock()
     mock.info = {}
 

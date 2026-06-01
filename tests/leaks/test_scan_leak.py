@@ -38,6 +38,5 @@ async def test_scan_run_timeout_no_leak():
         for _ in range(20):
             await coord.run(timeout=0.05)
     assert len(client._scanner_subscribers) == 0, (
-        f"scanner subscribers leaked through coord.run: "
-        f"{len(client._scanner_subscribers)}"
+        f"scanner subscribers leaked through coord.run: {len(client._scanner_subscribers)}"
     )

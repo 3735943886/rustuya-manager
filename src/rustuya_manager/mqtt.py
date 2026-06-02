@@ -38,8 +38,14 @@ import aiomqtt
 import pyrustuyabridge as pb
 
 from .models import Device
-from .payload import parse_payload_with_template, validate_payload_template
 from .state import BridgeTemplates, State
+
+# Reverse payload parsing lives in the bridge crate (`rustuyabridge::payload`)
+# and is re-exposed through pyrustuyabridge so the manager's seed-phase logic
+# stays byte-identical to the bridge's own retained-snapshot reader. The
+# algorithm was previously duplicated here as rustuya_manager.payload; the
+# bridge author tagged that copy as canonical-to-delete in
+# rustuya-bridge c7264aa (0.2.0rc8).
 
 logger = logging.getLogger(__name__)
 
@@ -472,7 +478,7 @@ class BridgeClient:
         bootstrap to nudge them to fix it."""
         tpls = self.state.templates
         if tpls and payload_str:
-            captures = parse_payload_with_template(payload_str, tpls.payload)
+            captures = pb.parse_payload_with_template(payload_str, tpls.payload)
             if captures:
                 if isinstance(captures.get("dps"), dict):
                     return captures["dps"]
@@ -537,8 +543,16 @@ class BridgeClient:
     async def _validate_payload_template(self, template: str | None) -> None:
         """Surface a UI warning when the bridge's payload template isn't a
         shape the manager can extract from. The fix is at the bridge config
-        level (mqtt_payload_template), not in the manager."""
-        ok, message = validate_payload_template(template)
+        level (mqtt_payload_template), not in the manager.
+
+        The actual structural validation lives in the bridge's
+        validate_payload_template binding — only the "no template at all"
+        case is special-cased here, since the binding takes &str and can't
+        represent None directly."""
+        if not template:
+            ok, message = False, "No payload template received from bridge."
+        else:
+            ok, message = pb.validate_payload_template(template)
         if ok:
             await self.state.clear_warning("payload_template")
         else:

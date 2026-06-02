@@ -21,8 +21,14 @@ talking to a separate bridge over MQTT. The spawn happens in
 `threading.Thread(daemon=True)`. At first glance this design appears
 questionable: the manager is otherwise pure asyncio (FastAPI + uvicorn +
 aiomqtt), and mixing threads into an asyncio application is generally
-indicative of a structural problem. That is not the case here. This
-section records why.
+indicative of a structural problem. The hazard underlying that heuristic —
+concurrent access to shared mutable Python state from both the loop and
+the thread — does not arise here: the embedded bridge shares no Python
+state with the manager. The only channel between them is the MQTT broker,
+the same one used when the bridge runs in a separate process. §1.2
+develops the point; the rest of this section explains why the bridge
+runs as a blocking call on a thread rather than as an awaited
+`start_async()` task on the loop.
 
 ### 1.1 Two runtimes in one process
 
@@ -102,12 +108,20 @@ these conditions: it embeds exactly one bridge for the whole process lifetime.
 the *secondary* mode. The manager's primary, default role is to manage a
 `rustuya-bridge` running as a **separate process**, communicating with it
 only over MQTT — fully isolated, with no shared memory and no shared
-runtime. The embedded thread is the same arrangement folded into a single
-process: a bridge on its own runtime that the manager reaches over the
-broker, never via shared Python state. The thread route is therefore not
-an exception to the manager's design but a mirror of it. `start_async()`
-would be the anomalous choice, fusing two layers that the manager
-otherwise deliberately keeps decoupled.
+runtime. The embedded thread is the same arrangement folded into one
+process: a daemon that conceptually should be a subprocess, hosted on a
+thread purely as a deployment convenience (one fewer process to
+supervise, no separate binary on disk). The manager reaches it through
+the broker, never via shared Python state.
+
+This is also what makes the asyncio-plus-thread mixing safe here. The
+hazard the heuristic guards against — concurrent access to shared mutable
+Python state from the asyncio loop and a worker thread — depends on
+shared state existing. None does: the only channel between the two sides
+is the MQTT broker, which is process-external and serialises every
+exchange. The thread route is therefore not an exception to the manager's
+design but a mirror of it; `start_async()` would be the anomalous choice,
+fusing two layers that the manager otherwise deliberately keeps decoupled.
 
 ### 1.3 Shutdown: `no_signals=True` + `stop()`
 

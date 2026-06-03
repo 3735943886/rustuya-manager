@@ -45,14 +45,17 @@ WORKDIR /data
 # Defaults tuned for the container-first persona:
 #   * `0.0.0.0` because reaching the UI from the host requires a
 #     published port — loopback inside the container is useless.
-#   * `mqtt://localhost:1883` is a placeholder; almost every real
-#     deploy will override BROKER to point at a sibling container.
-#   * Three persistent-state paths all land in `/data` so every artifact
-#     the running stack produces — cloud cache, wizard creds, bridge
-#     config, bridge state — is in the same volume and discoverable via
-#     `docker exec`. `rustuya.json` matches the standalone bridge's
-#     own DEFAULT_STATE_FILE so the on-disk layout is identical to a
-#     manual install.
+#   * BROKER / ROOT / BRIDGE_STATE intentionally have NO Dockerfile ENV
+#     default. The entrypoint passes the corresponding CLI flag only
+#     when the env var is set, so an unset env lets manager's own
+#     default (or, when --bridge-config is in play, the value from that
+#     bridge-config file) become the source of truth. The alternative —
+#     baking the manager default into the Dockerfile ENV — masks user
+#     edits to /data/config.json because the resulting always-present
+#     CLI flag would always look "user-set" to the manager (CLI > config).
+#   * CLOUD / BRIDGE_CONFIG / HOST keep their Dockerfile ENV defaults
+#     because the docker persona wants paths under /data and a non-
+#     loopback bind, which differ from manager defaults.
 #   * PUID/PGID default to 1000 which matches the first non-root user
 #     on most desktop / Pi / Armbian installs. Override with
 #     `-e PUID=$(id -u) -e PGID=$(id -g)` for hosts where the data
@@ -64,11 +67,8 @@ WORKDIR /data
 #     doesn't double-publish.
 ENV HOST=0.0.0.0 \
     PORT=8373 \
-    BROKER=mqtt://localhost:1883 \
-    ROOT=rustuya \
     CLOUD=/data/tuyadevices.json \
     BRIDGE_CONFIG=/data/config.json \
-    BRIDGE_STATE=/data/rustuya.json \
     PUID=1000 \
     PGID=1000 \
     EMBED_BRIDGE=1

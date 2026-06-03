@@ -211,15 +211,24 @@ Environment variables (defaults shown; all optional unless noted):
 |---|---|---|
 | `HOST` | `0.0.0.0` | `--host` |
 | `PORT` | `8373` | `--port` |
-| `BROKER` | `mqtt://localhost:1883` | `--broker` |
-| `ROOT` | `rustuya` | `--root` |
+| `BROKER` | *(unset — manager falls back to bridge-config, then `mqtt://localhost:1883`)* | `--broker` |
+| `ROOT` | *(unset — manager falls back to bridge-config, then `rustuya`)* | `--root` |
 | `AUTH` | *(off)* | `--auth USER:PASS` |
 | `CLOUD` | `/data/tuyadevices.json` | `--cloud` |
 | `BRIDGE_CONFIG` | `/data/config.json` | `--bridge-config` |
-| `BRIDGE_STATE` | `/data/rustuya.json` | `--bridge-state` |
+| `BRIDGE_STATE` | *(unset — manager falls back to bridge-config `state_file`, then `/data/rustuya.json`)* | `--bridge-state` |
 | `PUID` | `1000` | UID the app runs as |
 | `PGID` | `1000` | GID the app runs as |
 | `EMBED_BRIDGE` | `1` | `--embed-bridge` (set `0` to skip when an external bridge is already on the broker) |
+
+`BROKER` / `ROOT` / `BRIDGE_STATE` are deliberately left **unset** in the
+image — the entrypoint only adds the corresponding `--broker` / `--root`
+/ `--bridge-state` flag when the env var is set. Leaving them unset
+means edits to `/data/config.json` (`mqtt_broker`, `mqtt_root_topic`,
+`state_file`) win on their own, with no second source of truth in the
+container env to silently override them. Setting the env var still
+overrides bridge-config (with a startup warning if they disagree) for
+the case where the env IS the canonical place.
 
 Every persistent artifact — cloud cache (`tuyadevices.json`), wizard
 credentials (`tuyacreds.json`), embedded bridge config (`config.json`,

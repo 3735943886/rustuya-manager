@@ -42,13 +42,18 @@ fi
 EMBED_FLAG=""
 [ "${EMBED_BRIDGE:-1}" = "1" ] && EMBED_FLAG="--embed-bridge"
 
+# BROKER / ROOT / BRIDGE_STATE are conditionally passed (no flag when env is
+# unset) so the manager's own default — or the bridge-config file's value
+# when --bridge-config is in play — can win. Always-passing these from a
+# Dockerfile ENV default would mask user edits to /data/config.json (the
+# CLI flag would always look "user-set" to the manager, and CLI > config).
 exec rustuya-manager \
     --web \
     $EMBED_FLAG \
     --host "$HOST" \
     --port "$PORT" \
-    --broker "$BROKER" \
-    --root "$ROOT" \
+    ${BROKER:+--broker "$BROKER"} \
+    ${ROOT:+--root "$ROOT"} \
     ${AUTH:+--auth "$AUTH"} \
     ${CLOUD:+--cloud "$CLOUD"} \
     ${BRIDGE_CONFIG:+--bridge-config "$BRIDGE_CONFIG"} \

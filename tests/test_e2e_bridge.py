@@ -535,8 +535,6 @@ async def test_embed_bridge_inherits_broker_and_root_from_bridge_config(tmp_path
     from types import SimpleNamespace
 
     from rustuya_manager.cli import (
-        DEFAULT_BROKER,
-        DEFAULT_ROOT,
         _apply_bridge_config_defaults,
         _close_embedded_bridge,
         _resolve_embedded_bridge,
@@ -554,12 +552,14 @@ async def test_embed_bridge_inherits_broker_and_root_from_bridge_config(tmp_path
         _json.dumps({"mqtt_broker": "mqtt://localhost:1883", "mqtt_root_topic": root_in_cfg})
     )
 
-    # Manager-side CLI flags are left at default — the bridge-config is the
-    # only place broker/root are specified.
+    # Manager-side CLI flags are left UNSET (None sentinel — the same state
+    # argparse would leave the namespace in if the user didn't pass
+    # --broker / --root). The bridge-config is the only place broker/root
+    # are specified, so the fallback must pick them up.
     args = SimpleNamespace(
         embed_bridge=True,
-        broker=DEFAULT_BROKER,
-        root=DEFAULT_ROOT,
+        broker=None,
+        root=None,
         cloud=str(tmp_path / "tuyadevices.json"),
         bridge_state=str(tmp_path / "bridge-state.json"),
         log_level="warn",

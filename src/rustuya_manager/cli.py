@@ -61,16 +61,22 @@ def _peek_bridge_config(path: str | None) -> dict:
 
 def _apply_bridge_config_defaults(args: argparse.Namespace) -> None:
     """If `--bridge-config` carries `mqtt_broker` / `mqtt_root_topic` /
-    `state_file`, treat them as the manager's defaults too — so the user
-    only has to specify them in one place when embedding the bridge.
+    `state_file`, fill those into args when the user did NOT pass the
+    corresponding CLI flag — so the user only has to specify them in one
+    place when embedding the bridge.
 
-    Precedence: CLI flag > bridge-config field > manager default. A CLI
-    flag at the manager-default value (or unset for `--bridge-state`) is
-    treated as "not set" for this fallback. If the user explicitly set the
-    CLI flag AND it disagrees with the bridge-config value, a warning is
-    logged because the embedded bridge will end up with the kwarg value
-    (manager's CLI) while the bridge-config file says something else —
-    confusing on disk-diff.
+    Precedence: CLI flag > bridge-config field > manager default. The
+    three flags involved here (`--broker`, `--root`, `--bridge-state`) all
+    use `default=None` on the parser side so that "user passed the flag"
+    can be distinguished from "argparse filled in the default" — without
+    that sentinel, a user who explicitly typed `--broker mqtt://localhost:1883`
+    (the same string as the manager default) would silently lose to the
+    bridge-config value.
+
+    If the user explicitly set a CLI flag AND it disagrees with the
+    bridge-config value, a warning is logged because the embedded bridge
+    will end up with the kwarg value (manager's CLI) while the
+    bridge-config file says something else — confusing on disk-diff.
     """
     if not args.embed_bridge or not args.bridge_config:
         return
@@ -80,7 +86,7 @@ def _apply_bridge_config_defaults(args: argparse.Namespace) -> None:
     cfg_state = cfg.get("state_file")
 
     if cfg_broker:
-        if args.broker == DEFAULT_BROKER:
+        if args.broker is None:
             args.broker = cfg_broker
             logger.info("Using broker %r from --bridge-config", cfg_broker)
         elif args.broker != cfg_broker:
@@ -92,7 +98,7 @@ def _apply_bridge_config_defaults(args: argparse.Namespace) -> None:
             )
 
     if cfg_root:
-        if args.root == DEFAULT_ROOT:
+        if args.root is None:
             args.root = cfg_root
             logger.info("Using root %r from --bridge-config", cfg_root)
         elif args.root != cfg_root:
@@ -103,10 +109,6 @@ def _apply_bridge_config_defaults(args: argparse.Namespace) -> None:
                 cfg_root,
             )
 
-    # `--bridge-state` has no manager-side default constant — `args.bridge_state`
-    # is None unless the user passed the flag. Treat None as "not set" for the
-    # fallback; non-None means the CLI value wins, and a disagreement still gets
-    # warned about so the on-disk config does not silently lie.
     if cfg_state:
         if args.bridge_state is None:
             args.bridge_state = cfg_state
@@ -118,6 +120,17 @@ def _apply_bridge_config_defaults(args: argparse.Namespace) -> None:
                 args.bridge_state,
                 cfg_state,
             )
+
+
+def _apply_manager_defaults(args: argparse.Namespace) -> None:
+    """Fill any still-`None` sentinel values with the manager's own
+    defaults. Runs AFTER `_apply_bridge_config_defaults` so the precedence
+    chain `CLI > bridge-config > manager default` resolves bottom-up
+    without losing the "user provided?" signal."""
+    if args.broker is None:
+        args.broker = DEFAULT_BROKER
+    if args.root is None:
+        args.root = DEFAULT_ROOT
 
 
 async def _on_event(
@@ -335,6 +348,7 @@ async def run(args: argparse.Namespace) -> int:
     # since that fixes the broker/root for the manager's own MQTT
     # connection. CLI-given values always win.
     _apply_bridge_config_defaults(args)
+    _apply_manager_defaults(args)
 
     state = State()
     cloud_path = Path(args.cloud)
@@ -463,14 +477,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-b",
         "--broker",
-        default=DEFAULT_BROKER,
-        help="MQTT broker URL (mqtt://host:port)",
+        default=None,
+        help=(
+            f"MQTT broker URL (mqtt://host:port). Default {DEFAULT_BROKER!r} is "
+            "applied when the flag is absent AND no bridge-config supplies one — "
+            "leaving the flag off is how the bridge-config fallback (--bridge-config) "
+            "is allowed to win."
+        ),
     )
     parser.add_argument(
         "-r",
         "--root",
-        default=DEFAULT_ROOT,
-        help="MQTT root topic (must match the running bridge)",
+        default=None,
+        help=(
+            f"MQTT root topic (must match the running bridge). Default {DEFAULT_ROOT!r} "
+            "is applied when the flag is absent AND no bridge-config supplies one."
+        ),
     )
     parser.add_argument("--client-id", default="rustuya-manager")
     parser.add_argument(

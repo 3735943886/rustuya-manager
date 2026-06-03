@@ -167,21 +167,46 @@ class TestApplyBridgeConfigDefaults:
         _apply_bridge_config_defaults(args)
         assert args.broker == DEFAULT_BROKER  # nothing to fall back to
 
-    def test_fills_broker_when_cli_left_at_default(self, tmp_path):
-        from rustuya_manager.cli import DEFAULT_BROKER, _apply_bridge_config_defaults
+    def test_fills_broker_when_cli_not_passed(self, tmp_path):
+        from rustuya_manager.cli import _apply_bridge_config_defaults
 
         cfg = self._write_cfg(tmp_path, mqtt_broker="mqtt://from-cfg:1883")
-        args = _make_args(tmp_path, embed_bridge=True, bridge_config=cfg, broker=DEFAULT_BROKER)
+        # None is the parser default — distinguishes "flag absent" from
+        # "user passed a value that happens to equal manager's default".
+        args = _make_args(tmp_path, embed_bridge=True, bridge_config=cfg, broker=None)
         _apply_bridge_config_defaults(args)
         assert args.broker == "mqtt://from-cfg:1883"
 
-    def test_fills_root_when_cli_left_at_default(self, tmp_path):
-        from rustuya_manager.cli import DEFAULT_ROOT, _apply_bridge_config_defaults
+    def test_fills_root_when_cli_not_passed(self, tmp_path):
+        from rustuya_manager.cli import _apply_bridge_config_defaults
 
         cfg = self._write_cfg(tmp_path, mqtt_root_topic="root-from-cfg")
-        args = _make_args(tmp_path, embed_bridge=True, bridge_config=cfg, root=DEFAULT_ROOT)
+        args = _make_args(tmp_path, embed_bridge=True, bridge_config=cfg, root=None)
         _apply_bridge_config_defaults(args)
         assert args.root == "root-from-cfg"
+
+    def test_explicit_default_value_is_not_overridden_by_cfg(self, tmp_path, caplog):
+        """A-2 pin: if the user explicitly passes --broker with the same
+        string that happens to equal manager's DEFAULT_BROKER, that value
+        must win over bridge-config — not be silently replaced. Before A-2
+        the precedence check was `args.broker == DEFAULT_BROKER`, which
+        could not tell "argparse filled the default" from "user passed
+        the default value explicitly"; both fell into the "fill from
+        bridge-config" branch. The sentinel-None default fixes that."""
+        import logging
+
+        from rustuya_manager.cli import DEFAULT_BROKER, _apply_bridge_config_defaults
+
+        cfg = self._write_cfg(tmp_path, mqtt_broker="mqtt://from-cfg:1883")
+        # broker is explicitly DEFAULT_BROKER — as if the user typed it on
+        # the CLI or wrote it into a docker env var.
+        args = _make_args(tmp_path, embed_bridge=True, bridge_config=cfg, broker=DEFAULT_BROKER)
+        with caplog.at_level(logging.WARNING):
+            _apply_bridge_config_defaults(args)
+        assert args.broker == DEFAULT_BROKER
+        # The disagreement should be surfaced as a warning so the
+        # contradiction isn't silent.
+        assert "broker" in caplog.text.lower() and "disagree" in caplog.text.lower()
 
     def test_cli_value_wins_over_bridge_config(self, tmp_path, caplog):
         import logging
@@ -267,3 +292,32 @@ class TestApplyBridgeConfigDefaults:
         with caplog.at_level(logging.WARNING):
             _apply_bridge_config_defaults(args)
         assert "disagree" not in caplog.text.lower()
+
+
+class TestApplyManagerDefaults:
+    """`_apply_manager_defaults` runs AFTER `_apply_bridge_config_defaults`
+    and fills any still-None sentinel values with the manager's own
+    defaults — i.e. the bottom of the precedence chain. Tests verify the
+    fill happens for unset flags and that non-None values are preserved."""
+
+    def test_fills_broker_when_still_none(self, tmp_path):
+        from rustuya_manager.cli import DEFAULT_BROKER, _apply_manager_defaults
+
+        args = _make_args(tmp_path, broker=None)
+        _apply_manager_defaults(args)
+        assert args.broker == DEFAULT_BROKER
+
+    def test_fills_root_when_still_none(self, tmp_path):
+        from rustuya_manager.cli import DEFAULT_ROOT, _apply_manager_defaults
+
+        args = _make_args(tmp_path, root=None)
+        _apply_manager_defaults(args)
+        assert args.root == DEFAULT_ROOT
+
+    def test_preserves_user_set_values(self, tmp_path):
+        from rustuya_manager.cli import _apply_manager_defaults
+
+        args = _make_args(tmp_path, broker="mqtt://x:1883", root="myroot")
+        _apply_manager_defaults(args)
+        assert args.broker == "mqtt://x:1883"
+        assert args.root == "myroot"

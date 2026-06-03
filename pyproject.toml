@@ -13,7 +13,7 @@ dependencies = [
     "rich>=13.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
-    "pyrustuyabridge>=0.2.0rc8,<0.3",  # 0.2.0rc8 exposes parse_payload_with_template + validate_payload_template — manager delegates the reverse-parse algorithm to the bridge crate instead of duplicating it.
+    "pyrustuyabridge>=0.2.0rc11,<0.3",  # 0.2.0rc11 adds the `reconfigure` action that self-terminates the bridge for a supervisor-driven restart. _EmbeddedBridgeSupervisor (cli.py) depends on that exit shape to make `reconfigure` work in the embedded case.
     "tuyawizard>=0.1.8",  # 0.1.8 adds close()/context manager so the wizard's per-call requests.Sessions don't leak (~750-950 KB/cycle)
     "cryptography>=41",   # missing dep of tuya-sharing-sdk
 ]

@@ -3,11 +3,14 @@
 The full embedded-bridge flow is covered in `tests/test_e2e_bridge.py`
 (real broker, real PyBridgeServer); the tests here exercise the bits
 that should hold even when neither is available — argument shaping,
-default derivation, kwarg propagation to PyBridgeServer.
+default derivation, kwarg propagation to PyBridgeServer, and the
+in-process supervisor that owns the embedded bridge's lifetime.
 """
 
 from __future__ import annotations
 
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -25,6 +28,33 @@ def _make_args(tmp_path, **overrides) -> SimpleNamespace:
     return SimpleNamespace(**base)
 
 
+def _stub_pyrustuyabridge(monkeypatch):
+    """Replace `pb.PyBridgeServer` with a clean-exit stub so the
+    supervisor's thread runs without actually constructing a Rust
+    server. Returns the list it appends every kwargs dict to, so
+    callers can inspect what the supervisor passed in."""
+    import pyrustuyabridge as pb
+
+    seen: list[dict] = []
+
+    def stub(**kw):
+        seen.append(kw)
+        srv = MagicMock()
+        srv.start.return_value = None  # clean exit triggers respawn
+        srv.stop.return_value = None
+        return srv
+
+    monkeypatch.setattr(pb, "PyBridgeServer", stub)
+    return seen
+
+
+def _drain_supervisor(supervisor, thread):
+    """Stop the supervisor and wait for its daemon thread to exit so
+    tests don't leak a busy loop into the next test."""
+    supervisor.stop()
+    thread.join(timeout=2.0)
+
+
 class TestSpawnEmbeddedBridgeKwargs:
     """`_spawn_embedded_bridge` must build the PyBridgeServer kwargs from
     the manager's CLI args. The interesting bits:
@@ -32,70 +62,155 @@ class TestSpawnEmbeddedBridgeKwargs:
         always present
       - `config_path` only appears when --bridge-config was provided
         (so the bridge falls back to defaults otherwise)
+
+    The supervisor stores kwargs on construction; inspect `_kwargs` for
+    a race-free read instead of waiting for the daemon thread to invoke
+    PyBridgeServer.
     """
 
     def test_default_state_file_is_next_to_cloud_path(self, tmp_path, monkeypatch):
-        import pyrustuyabridge as pb
-
         from rustuya_manager.cli import _spawn_embedded_bridge
 
-        seen: dict = {}
-        monkeypatch.setattr(pb, "PyBridgeServer", lambda **kw: seen.update(kw) or MagicMock())
-
-        args = _make_args(tmp_path)
-        _spawn_embedded_bridge(args)
-        # `rustuya.json` next to the (still-nonexistent) cloud file —
-        # matches the standalone bridge's DEFAULT_STATE_FILE.
-        assert seen["state_file"] == str(tmp_path / "rustuya.json")
-        # `config_path` must NOT be in kwargs when --bridge-config wasn't set —
-        # otherwise pyrustuyabridge would try to auto-create a file at None.
-        assert "config_path" not in seen
+        _stub_pyrustuyabridge(monkeypatch)
+        sup, t = _spawn_embedded_bridge(_make_args(tmp_path))
+        try:
+            # `rustuya.json` next to the (still-nonexistent) cloud file —
+            # matches the standalone bridge's DEFAULT_STATE_FILE.
+            assert sup._kwargs["state_file"] == str(tmp_path / "rustuya.json")
+            # `config_path` must NOT be in kwargs when --bridge-config wasn't set —
+            # otherwise pyrustuyabridge would try to auto-create a file at None.
+            assert "config_path" not in sup._kwargs
+        finally:
+            _drain_supervisor(sup, t)
 
     def test_explicit_bridge_state_wins(self, tmp_path, monkeypatch):
-        import pyrustuyabridge as pb
-
         from rustuya_manager.cli import _spawn_embedded_bridge
 
-        seen: dict = {}
-        monkeypatch.setattr(pb, "PyBridgeServer", lambda **kw: seen.update(kw) or MagicMock())
-
+        _stub_pyrustuyabridge(monkeypatch)
         explicit = str(tmp_path / "elsewhere" / "state.json")
-        args = _make_args(tmp_path, bridge_state=explicit)
-        _spawn_embedded_bridge(args)
-        assert seen["state_file"] == explicit
+        sup, t = _spawn_embedded_bridge(_make_args(tmp_path, bridge_state=explicit))
+        try:
+            assert sup._kwargs["state_file"] == explicit
+        finally:
+            _drain_supervisor(sup, t)
 
     def test_bridge_config_propagates_as_config_path(self, tmp_path, monkeypatch):
-        import pyrustuyabridge as pb
-
         from rustuya_manager.cli import _spawn_embedded_bridge
 
-        seen: dict = {}
-        monkeypatch.setattr(pb, "PyBridgeServer", lambda **kw: seen.update(kw) or MagicMock())
-
+        _stub_pyrustuyabridge(monkeypatch)
         cfg = str(tmp_path / "bridge-config.json")
-        args = _make_args(tmp_path, bridge_config=cfg)
-        _spawn_embedded_bridge(args)
-        # Must be passed under the kwarg name pyrustuyabridge expects.
-        assert seen["config_path"] == cfg
-        # Manager-owned settings still present alongside.
-        assert seen["mqtt_broker"] == "mqtt://localhost:1883"
-        assert seen["mqtt_root_topic"] == "test_root"
-        assert seen["log_level"] == "warn"
+        sup, t = _spawn_embedded_bridge(_make_args(tmp_path, bridge_config=cfg))
+        try:
+            # Must be stored under the kwarg name pyrustuyabridge expects.
+            assert sup._kwargs["config_path"] == cfg
+            # Manager-owned settings still present alongside.
+            assert sup._kwargs["mqtt_broker"] == "mqtt://localhost:1883"
+            assert sup._kwargs["mqtt_root_topic"] == "test_root"
+            assert sup._kwargs["log_level"] == "warn"
+        finally:
+            _drain_supervisor(sup, t)
 
     def test_no_signals_always_set(self, tmp_path, monkeypatch):
         # The manager owns SIGINT/SIGTERM (run() installs loop handlers),
         # so the embedded bridge must be told NOT to install its own —
-        # otherwise two handlers race in one process. Shutdown goes
-        # through server.stop() instead.
-        import pyrustuyabridge as pb
-
+        # otherwise two handlers race in one process. The supervisor
+        # forces no_signals=True regardless of caller input (§1.3).
         from rustuya_manager.cli import _spawn_embedded_bridge
 
-        seen: dict = {}
-        monkeypatch.setattr(pb, "PyBridgeServer", lambda **kw: seen.update(kw) or MagicMock())
+        _stub_pyrustuyabridge(monkeypatch)
+        sup, t = _spawn_embedded_bridge(_make_args(tmp_path))
+        try:
+            assert sup._kwargs["no_signals"] is True
+        finally:
+            _drain_supervisor(sup, t)
 
-        _spawn_embedded_bridge(_make_args(tmp_path))
-        assert seen["no_signals"] is True
+
+class TestEmbeddedBridgeSupervisor:
+    """Behaviour of the in-process supervisor wrapping PyBridgeServer.
+
+    The supervisor exists because rustuya-bridge's `reconfigure` action
+    self-terminates `run()` via the same cancellation token that
+    `stop()` trips — from the outside, a reconfigure exit and a stop
+    exit are indistinguishable on the bridge side. The supervisor
+    distinguishes them on the MANAGER side via its own stop-Event,
+    so reconfigure ⇒ respawn, stop ⇒ exit.
+    """
+
+    def test_no_signals_is_forced_even_if_caller_overrides(self):
+        from rustuya_manager.cli import _EmbeddedBridgeSupervisor
+
+        sup = _EmbeddedBridgeSupervisor(no_signals=False)
+        assert sup._kwargs["no_signals"] is True
+
+    def test_stop_before_run_does_not_spawn_any_server(self, monkeypatch):
+        from rustuya_manager.cli import _EmbeddedBridgeSupervisor
+
+        seen = _stub_pyrustuyabridge(monkeypatch)
+        sup = _EmbeddedBridgeSupervisor()
+        sup.stop()
+        sup.run()  # synchronous; should return immediately
+        assert seen == [], "no PyBridgeServer should be constructed once stop is set"
+
+    def test_respawns_on_clean_exit_until_rate_limit(self, monkeypatch):
+        """Each clean exit (reconfigure path) triggers a respawn.
+        Without an external stop the supervisor still terminates when
+        the rate limit fires — proving the cap is wired."""
+        from rustuya_manager.cli import _EmbeddedBridgeSupervisor
+
+        seen = _stub_pyrustuyabridge(monkeypatch)
+        # Tighten the cap so the test exits quickly via the rate limit.
+        monkeypatch.setattr(_EmbeddedBridgeSupervisor, "_MAX_RESTARTS_IN_WINDOW", 3)
+        monkeypatch.setattr(_EmbeddedBridgeSupervisor, "_WINDOW_SEC", 5.0)
+
+        sup = _EmbeddedBridgeSupervisor()
+        t = threading.Thread(target=sup.run, daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "supervisor should have given up after rate limit"
+        # Initial spawn (1) plus _MAX_RESTARTS_IN_WINDOW respawns (3) = 4 servers.
+        assert len(seen) == 4
+        assert sup.restart_count == 3
+
+    def test_stop_during_crash_backoff_is_interruptible(self, monkeypatch):
+        """A long crash backoff must yield to stop() — otherwise
+        shutdown could block for the full _CRASH_BACKOFF_SEC every
+        time the bridge happened to crash near shutdown."""
+        import pyrustuyabridge as pb
+
+        from rustuya_manager.cli import _EmbeddedBridgeSupervisor
+
+        # Use a very long backoff so the test reliably catches the
+        # supervisor inside it.
+        backoff = 30.0
+        monkeypatch.setattr(_EmbeddedBridgeSupervisor, "_CRASH_BACKOFF_SEC", backoff)
+
+        crashed = threading.Event()
+
+        def stub(**kw):
+            srv = MagicMock()
+            srv.start.side_effect = RuntimeError("simulated crash")
+            srv.stop.return_value = None
+            crashed.set()
+            return srv
+
+        monkeypatch.setattr(pb, "PyBridgeServer", stub)
+
+        sup = _EmbeddedBridgeSupervisor()
+        t = threading.Thread(target=sup.run, daemon=True)
+        t_start = time.monotonic()
+        t.start()
+        assert crashed.wait(timeout=2.0), "first crash didn't happen in time"
+        # Give the supervisor a moment to enter Event.wait()
+        time.sleep(0.05)
+        sup.stop()
+        t.join(timeout=2.0)
+        elapsed = time.monotonic() - t_start
+        assert not t.is_alive()
+        # Must exit well before the full backoff window — that's the
+        # whole point of the Event.wait + stop() pattern.
+        assert elapsed < backoff / 4, (
+            f"stop() did not interrupt the crash backoff (took {elapsed:.2f}s)"
+        )
 
 
 class TestPeekBridgeConfig:

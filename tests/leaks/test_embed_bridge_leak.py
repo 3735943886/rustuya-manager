@@ -4,16 +4,20 @@ The real `pyrustuyabridge.PyBridgeServer` import pulls in a Rust tokio
 runtime + ssl + several MB of C heap, and tracemalloc can't see across the
 PyO3 boundary, so a real-import N-cycle test would be slow AND blind.
 
-Instead we patch `pyrustuyabridge.PyBridgeServer` to a MagicMock and pin the
-**Python wiring** in `cli._spawn_embedded_bridge` / `_close_embedded_bridge`:
-threading.Thread creation, MagicMock closure retention, args reference
-retention. If a future change starts holding the `args` namespace or the
-Thread object in a module-global cache, the budget breaks immediately.
+Instead we patch `pyrustuyabridge.PyBridgeServer` to a MagicMock whose
+`start()` blocks on a `threading.Event` until `stop()` trips it — that
+mirrors the production lifecycle of a single bridge instance per spawn,
+so the supervisor's reconfigure-respawn loop does NOT kick in against
+the stub (a clean-exit stub would tight-loop until the rate limit). We
+measure the Python wiring in `cli._spawn_embedded_bridge` /
+`_close_embedded_bridge`: threading.Thread creation, supervisor
+construction, MagicMock closure retention, args reference retention.
 """
 
 from __future__ import annotations
 
 import argparse
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -33,20 +37,29 @@ def _fake_args(tmp_path: Path) -> argparse.Namespace:
     )
 
 
-async def test_embed_resolve_cycle_no_leak(tmp_path: Path):
-    """N=20 spawn+close cycles (Python wiring only) must stay flat.
+def _make_blocking_server(**_kw):
+    """Stub PyBridgeServer whose start() blocks until stop() is called.
 
-    PyBridgeServer is patched to a MagicMock so no Rust thread spins up —
-    we only measure threading.Thread creation, args retention, and the
-    mock-server stop() path. The thread targets `server.start` which
-    returns immediately, so each cycle is dominated by Thread setup/teardown.
+    Each call produces an independent stub with its own Event so the
+    supervisor sees exactly one bridge per iteration, matching the
+    real lifecycle. Without this the supervisor would respawn rapidly
+    against a clean-exit MagicMock and the loop dominates the budget.
     """
+    done = threading.Event()
+    s = MagicMock()
+    s.start.side_effect = lambda: done.wait(timeout=5.0)
+    s.stop.side_effect = done.set
+    return s
+
+
+async def test_embed_resolve_cycle_no_leak(tmp_path: Path):
+    """N=20 spawn+close cycles (Python wiring only) must stay flat."""
     args = _fake_args(tmp_path)
 
     async def one_cycle():
-        with patch("pyrustuyabridge.PyBridgeServer", return_value=MagicMock()):
-            server, thread = _spawn_embedded_bridge(args)
-            await _close_embedded_bridge(server)
+        with patch("pyrustuyabridge.PyBridgeServer", side_effect=_make_blocking_server):
+            supervisor, thread = _spawn_embedded_bridge(args)
+            await _close_embedded_bridge(supervisor)
             thread.join(timeout=1.0)
 
     for _ in range(3):

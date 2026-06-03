@@ -86,14 +86,22 @@ loop. `start_async()` would couple the two: the same stall would delay
 bridge publishing. We trade the cleaner asyncio lifecycle for runtime
 isolation, deliberately.
 
-**The one genuine advantage of `start_async()`** is failure observability: a
-daemon thread that dies (an unexpected `run()` exception) does so silently —
-the manager's loop never sees it. With `start_async()` the exception would
-surface on the awaited task, so the manager could detect and react to bridge
-termination directly. We do not regard this as decisive, because (a) the
-manager already detects a dead bridge through its MQTT bootstrap / presence
-signalling (the `bridge_offline` warning path), so detection is not exclusive
-to the async route, and (b) it does not outweigh the isolation argument above.
+**The one residual advantage of `start_async()`** is programmatic
+failure routing: an awaited task surfaces an unexpected `run()`
+exception directly to the manager's asyncio loop, where the thread
+route would otherwise drop it inside the daemon. The thread route
+narrows that gap with `_EmbeddedBridgeSupervisor`
+([../src/rustuya_manager/cli.py](../src/rustuya_manager/cli.py)): the
+supervisor wraps every iteration of `PyBridgeServer.start()` in a
+`try`, logs the traceback via the manager's logger, backs off, and
+respawns under a rate limit. What it does NOT do is hand the exception
+object back to the asyncio loop for a structured reaction, so a future
+"manager fails closed if the bridge crashes" feature would still be a
+few lines lighter on the async route. For everything else —
+operator-visible logs, automated restart, restart-on-reconfigure (see
+§1.3) — the supervisor closes the observability gap that originally
+favoured `start_async()`. Wedged-but-alive bridges remain the
+`bridge_offline` MQTT-presence path's job, on either route.
 
 **Conditions under which `start_async()` would be preferable** — noted so
 the trade-off is presented honestly rather than as dogma: embedding *many*
@@ -141,7 +149,8 @@ SIGINT  →  manager loop handler  →  stop_event.set()
 ```
 
 **`stop()`, not `close()`.** [_close_embedded_bridge](../src/rustuya_manager/cli.py)
-calls `server.stop()` — the binding's sync, lock-free cancel (added in
+calls `supervisor.stop()`, which in turn trips the live server's
+`stop()` — the binding's sync, lock-free cancel (added in
 pyrustuyabridge 0.2.0rc5). It trips the bridge's internal
 `CancellationToken`, which lives *outside* the `BridgeServer` mutex, so
 `run()` observes the cancel, returns, and performs graceful MQTT cleanup
@@ -160,12 +169,47 @@ state behind.
 The out-of-mutex token closes that gap: `stop()` needs no lock and no
 asyncio runtime, so both shutdown paths now run identical graceful cleanup.
 
+**`_EmbeddedBridgeSupervisor` distinguishes "stop" from "reconfigure".**
+Since rustuya-bridge `b98e152` (Python 0.2.0-rc.9) the bridge's
+`reconfigure` action self-terminates `run()` through the *same*
+`CancellationToken` that `stop()` trips, on the assumption that a
+process supervisor will bring it back — standalone deploys put
+`Restart=always` on systemd; the embedded case has to do the equivalent
+in-process. From the outside, a reconfigure exit and a stop exit are
+indistinguishable on the bridge side: both leave `start()` returning
+without an exception. The manager-side supervisor resolves the ambiguity
+with its own `threading.Event`:
+
+- Bridge cancels its token (reconfigure, or any clean self-termination)
+  → `start()` returns → supervisor sees its stop-Event clear → constructs
+  a fresh `PyBridgeServer` and loops.
+- Manager calls `supervisor.stop()` → sets stop-Event AND trips the live
+  server's token → `start()` returns → supervisor sees stop-Event set →
+  exits the loop.
+
+Crashes (`start()` raises) take a third path: log the traceback, wait
+`_CRASH_BACKOFF_SEC` on the same Event (so a stop request during backoff
+returns immediately rather than always waiting the full window), then
+respawn unless the rate limit
+(`_MAX_RESTARTS_IN_WINDOW` exits in `_WINDOW_SEC`) has tripped — at
+which point the supervisor surfaces an error log and gives up, leaving
+recovery to a manager-process restart. The supervisor forces
+`no_signals=True` regardless of caller input so the rule above this
+paragraph cannot be silently bypassed.
+
 ### 1.4 Single-use
 
 Once `stop()` (or a completed `run()`) has cancelled the token, the server
 has been consumed — `start()` / `start_async()` reject reuse rather than
 silently returning as a no-op. To restart, construct a fresh
-`PyBridgeServer`. The manager never restarts an embedded bridge
-in-process, so this does not constrain it; it is noted here so that a
-future "restart the bridge without restarting the manager" feature does
-not assume reuse is supported.
+`PyBridgeServer`.
+
+The supervisor in §1.3 honours this rule by instantiating a new
+`PyBridgeServer(**self._kwargs)` at the top of every loop iteration; the
+previous version of this section noted that "the manager never restarts
+an embedded bridge in-process", which is no longer true — the
+`reconfigure` action explicitly depends on the supervisor doing exactly
+that — but the underlying single-use constraint is unchanged. The
+restart cost is bounded: tokio runtime spin-up + retained-config
+re-subscribe, on the order of a few hundred milliseconds, which is the
+implicit budget any user of `reconfigure` already accepts.

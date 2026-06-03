@@ -19,8 +19,11 @@ import logging
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
+
+import pyrustuyabridge as pb
 
 from .diff import DiffResult
 from .models import Device
@@ -205,17 +208,144 @@ async def _serve_web(host: str, port: int, app: Any) -> None:
     await server.serve()
 
 
-def _spawn_embedded_bridge(args: argparse.Namespace) -> tuple[Any, threading.Thread]:
-    """Spin up a `pyrustuyabridge.PyBridgeServer` in a daemon thread.
+class _EmbeddedBridgeSupervisor:
+    """Owns the embedded `PyBridgeServer` across its full lifetime,
+    including respawn for the bridge's reconfigure path.
 
-    Used when `--embed-bridge` is set AND no external bridge has claimed the
-    root topic yet (collision check happens in `run()` before this is called).
-    Returns (server, thread) so the caller can `server.stop()` + join on
-    shutdown. The thread is daemon so a manager crash never leaves the
-    embedded bridge orphaned.
+    Why a supervisor is required, not optional. rustuya-bridge's
+    `reconfigure` action (added in 0.3.0-rc.9 / Python 0.2.0-rc.9) ends
+    `run()` via the same internal `CancellationToken` that `stop()`
+    trips — so from the outside, a reconfigure exit and a stop exit
+    look identical: `start()` returns normally with no exception. The
+    bridge documents the contract as "always restarts, supervisor
+    expected" (systemd's `Restart=always` on the standalone deploy).
+    Embedded in the manager, the equivalent has to live in-process —
+    that's what this class is.
+
+    Loop shape:
+      1. Construct a fresh `PyBridgeServer` (§1.4 of internals.md
+         requires a new instance per iteration; the binding rejects
+         reuse).
+      2. Call `start()`. It blocks until `stop()` is called externally,
+         the bridge self-terminates via reconfigure, or a Rust-side
+         error is raised.
+      3. If `stop()` was requested, exit the loop.
+         If `start()` returned cleanly without our stop, respawn
+         immediately (reconfigure path).
+         If `start()` raised, log + back off for `_CRASH_BACKOFF_SEC`,
+         then respawn — unless the rate limit (`_MAX_RESTARTS_IN_WINDOW`
+         in `_WINDOW_SEC`) has been hit, in which case the supervisor
+         gives up.
+
+    Thread safety:
+      `stop()` may be called from any thread (typically the asyncio
+      shutdown path). A `threading.Lock` serialises the read of the
+      current server reference against the loop replacing it between
+      iterations. PyBridgeServer's `stop()` itself is lock-free
+      (out-of-mutex cancellation token, §1.3), so the supervisor's
+      lock only protects the Python reference — not the bridge state.
     """
-    import pyrustuyabridge as pb  # imported lazily — only needed when embedding
 
+    # If the bridge exits more than this many times within the window,
+    # the supervisor stops respawning and surfaces an error. Tight
+    # enough to catch a config-broken tight-loop; loose enough that a
+    # busy operator can issue `reconfigure` a few times in a row
+    # without tripping it.
+    _MAX_RESTARTS_IN_WINDOW = 5
+    _WINDOW_SEC = 30.0
+    _CRASH_BACKOFF_SEC = 5.0
+
+    def __init__(self, **kwargs: Any) -> None:
+        # no_signals=True is forced, matching the pre-supervisor
+        # behaviour (internals.md §1.3 explains why the manager owns
+        # SIGINT/SIGTERM and the embedded bridge must not install
+        # competing handlers).
+        self._kwargs = {**kwargs, "no_signals": True}
+        self._stop = threading.Event()
+        self._server: Any = None
+        self._lock = threading.Lock()
+        self._restart_count = 0  # public via the .restart_count attribute
+
+    @property
+    def restart_count(self) -> int:
+        """Number of times the bridge has been respawned since the
+        supervisor started. Includes both reconfigure-driven and
+        crash-driven restarts; counted AFTER the spawn completes."""
+        return self._restart_count
+
+    def run(self) -> None:
+        """Daemon-thread entry. Returns when `stop()` has been called
+        or the rate limit has been exceeded."""
+        exits: list[float] = []
+        while not self._stop.is_set():
+            crashed = False
+            try:
+                with self._lock:
+                    if self._stop.is_set():
+                        return
+                    self._server = pb.PyBridgeServer(**self._kwargs)
+                self._server.start()
+            except Exception:  # noqa: BLE001 - any failure flows through respawn
+                crashed = True
+                logger.exception("embedded bridge: error during construction or start")
+
+            if self._stop.is_set():
+                return
+
+            now = time.monotonic()
+            exits = [t for t in exits if now - t < self._WINDOW_SEC]
+            exits.append(now)
+            if len(exits) > self._MAX_RESTARTS_IN_WINDOW:
+                logger.error(
+                    "embedded bridge exited %d times in the last %.0fs — giving up. "
+                    "Inspect the bridge config / logs and restart the manager to retry.",
+                    len(exits),
+                    self._WINDOW_SEC,
+                )
+                return
+
+            self._restart_count += 1
+            if crashed:
+                logger.warning(
+                    "embedded bridge will be respawned in %.1fs", self._CRASH_BACKOFF_SEC
+                )
+                # Event.wait() returns True if .set() was called during
+                # the timeout — that lets stop() interrupt the backoff
+                # for a fast shutdown instead of always waiting the
+                # full 5 seconds.
+                if self._stop.wait(timeout=self._CRASH_BACKOFF_SEC):
+                    return
+            else:
+                logger.info(
+                    "embedded bridge exited cleanly (reconfigure or self-terminate); respawning"
+                )
+
+    def stop(self) -> None:
+        """Signal the supervisor to exit. Trips the live server's
+        cancellation token (if any) and prevents the loop from
+        starting a fresh one. Idempotent and safe from any thread."""
+        self._stop.set()
+        with self._lock:
+            srv = self._server
+        if srv is None:
+            return
+        try:
+            srv.stop()
+        except Exception:  # noqa: BLE001 - best-effort; the loop will exit anyway
+            logger.exception("stop() on the embedded bridge failed; supervisor will exit anyway")
+
+
+def _spawn_embedded_bridge(
+    args: argparse.Namespace,
+) -> tuple[_EmbeddedBridgeSupervisor, threading.Thread]:
+    """Build the embedded-bridge supervisor and start its daemon thread.
+
+    The supervisor (see `_EmbeddedBridgeSupervisor`) owns the per-iteration
+    `PyBridgeServer` lifecycle so the bridge's `reconfigure` action — which
+    self-terminates the bridge to apply a fresh config — gets a fresh
+    process equivalent in-process. Returns `(supervisor, thread)`; the
+    caller drives shutdown via `supervisor.stop()` + `thread.join(...)`.
+    """
     default_state = Path(args.cloud).resolve().parent / "rustuya.json"
     state_file = args.bridge_state or str(default_state)
 
@@ -224,46 +354,37 @@ def _spawn_embedded_bridge(args: argparse.Namespace) -> tuple[Any, threading.Thr
     # topics, mqtt user/password, scanner options, retain flag, …) is the
     # bridge's domain and is read from `--bridge-config` when provided.
     # pyrustuyabridge >= 0.1.1 reads + auto-creates that file in PyBridgeServer
-    # the same way the binary's `--config` flag does.
-    #
-    # no_signals=True: the manager already installs SIGINT/SIGTERM handlers
-    # (see run()), so the embedded bridge must NOT install its own — two
-    # signal handlers in one process is the race we want to avoid. The
-    # manager translates a signal into `server.stop()` instead, which trips
-    # the bridge's cancellation token for a clean, deterministic shutdown.
+    # the same way the binary's `--config` flag does. `no_signals=True` is
+    # set inside the supervisor (internals.md §1.3 — manager owns
+    # SIGINT/SIGTERM, so the embedded bridge must NOT install its own).
     kwargs: dict[str, Any] = {
         "mqtt_broker": args.broker,
         "mqtt_root_topic": args.root,
         "state_file": state_file,
         "log_level": args.log_level,
-        "no_signals": True,
     }
     if getattr(args, "bridge_config", None):
         kwargs["config_path"] = args.bridge_config
 
-    server = pb.PyBridgeServer(**kwargs)
-    thread = threading.Thread(target=server.start, daemon=True)
+    supervisor = _EmbeddedBridgeSupervisor(**kwargs)
+    thread = threading.Thread(target=supervisor.run, daemon=True)
     thread.start()
-    return server, thread
+    return supervisor, thread
 
 
-async def _close_embedded_bridge(server: Any) -> None:
-    """Signal the embedded bridge to shut down.
+async def _close_embedded_bridge(supervisor: _EmbeddedBridgeSupervisor) -> None:
+    """Signal the embedded-bridge supervisor to exit.
 
-    `stop()` is pyrustuyabridge's sync, lock-free cancel (>= 0.2.0rc5): it
-    trips the bridge's internal CancellationToken so `run()` returns and
-    performs graceful MQTT cleanup (retained-config clear + state flush) on
-    the way out — on BOTH the signal and non-signal shutdown paths. The
-    caller's `thread.join()` is the barrier that waits for that cleanup to
-    finish, so there's no magic sleep here.
-
-    This replaces an earlier `server.close()` (an unawaited coroutine) +
-    fixed `asyncio.sleep`: close() needed the BridgeServer mutex that the
-    running `start()` holds for the whole of `run()`, so without an OS
-    signal it could never acquire the lock and cleanup was skipped. stop()
-    needs no lock and no asyncio runtime.
+    `supervisor.stop()` does two things atomically: sets the no-respawn
+    flag (so the loop will not construct a fresh server on the next
+    iteration) and trips the live server's cancellation token so its
+    `run()` returns. The token is the same out-of-mutex one (>= 0.2.0rc5)
+    that the bridge's own `reconfigure` action uses, so the cleanup
+    path runs identically on both the signal and non-signal shutdowns.
+    The caller's `thread.join()` is the barrier that waits for the
+    last iteration's cleanup to finish; no fixed sleep is needed.
     """
-    server.stop()
+    supervisor.stop()
 
 
 async def _resolve_embedded_bridge(

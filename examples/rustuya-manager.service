@@ -28,7 +28,13 @@ ExecStart=%h/.local/bin/rustuya-manager \
   --cloud %h/.local/share/rustuya-manager/tuyadevices.json \
   --creds %h/.local/share/rustuya-manager/tuyacreds.json
 WorkingDirectory=%h/.local/share/rustuya-manager
-Restart=on-failure
+# Restart=always so a clean exit (e.g., asyncio loop terminating after an
+# internal stop_event) also gets respawned, not only crash exits. This makes
+# the manager process the de-facto supervisor for the embedded bridge too:
+# if --embed-bridge is in use and the bridge thread dies (the manager has
+# no in-process watchdog for it — see docs/internals.md §1.2), restarting
+# the manager respawns a fresh bridge alongside it.
+Restart=always
 RestartSec=5
 
 [Install]

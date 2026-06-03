@@ -60,22 +60,24 @@ def _peek_bridge_config(path: str | None) -> dict:
 
 
 def _apply_bridge_config_defaults(args: argparse.Namespace) -> None:
-    """If `--bridge-config` carries `mqtt_broker` / `mqtt_root_topic`, treat
-    them as the manager's defaults too — so the user only has to specify
-    them in one place when embedding the bridge.
+    """If `--bridge-config` carries `mqtt_broker` / `mqtt_root_topic` /
+    `state_file`, treat them as the manager's defaults too — so the user
+    only has to specify them in one place when embedding the bridge.
 
     Precedence: CLI flag > bridge-config field > manager default. A CLI
-    flag at the manager-default value is treated as "not set" for this
-    fallback. If the user explicitly set the CLI flag AND it disagrees with
-    the bridge-config value, a warning is logged because the embedded
-    bridge will end up with the kwarg value (manager's CLI) while the
-    bridge-config file says something else — confusing on disk-diff.
+    flag at the manager-default value (or unset for `--bridge-state`) is
+    treated as "not set" for this fallback. If the user explicitly set the
+    CLI flag AND it disagrees with the bridge-config value, a warning is
+    logged because the embedded bridge will end up with the kwarg value
+    (manager's CLI) while the bridge-config file says something else —
+    confusing on disk-diff.
     """
     if not args.embed_bridge or not args.bridge_config:
         return
     cfg = _peek_bridge_config(args.bridge_config)
     cfg_broker = cfg.get("mqtt_broker")
     cfg_root = cfg.get("mqtt_root_topic")
+    cfg_state = cfg.get("state_file")
 
     if cfg_broker:
         if args.broker == DEFAULT_BROKER:
@@ -99,6 +101,22 @@ def _apply_bridge_config_defaults(args: argparse.Namespace) -> None:
                 "manager will use the CLI value, embedded bridge will follow.",
                 args.root,
                 cfg_root,
+            )
+
+    # `--bridge-state` has no manager-side default constant — `args.bridge_state`
+    # is None unless the user passed the flag. Treat None as "not set" for the
+    # fallback; non-None means the CLI value wins, and a disagreement still gets
+    # warned about so the on-disk config does not silently lie.
+    if cfg_state:
+        if args.bridge_state is None:
+            args.bridge_state = cfg_state
+            logger.info("Using state_file %r from --bridge-config", cfg_state)
+        elif args.bridge_state != cfg_state:
+            logger.warning(
+                "--bridge-state (%r) disagrees with --bridge-config state_file (%r); "
+                "manager will use the CLI value, embedded bridge will follow.",
+                args.bridge_state,
+                cfg_state,
             )
 
 

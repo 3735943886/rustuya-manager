@@ -128,13 +128,14 @@ Common flags:
   options without re-exposing every bridge flag here. **Only meaningful
   with `--embed-bridge`** — ignored otherwise.
 
-  Special handling for the two fields that the manager and the bridge
-  *both* care about (`mqtt_broker`, `mqtt_root_topic`): when
-  `--bridge-config` supplies them, the manager adopts them as its own
-  defaults too, so they only need to be specified once. Precedence:
-    1. CLI flag (`--broker`, `--root`)
+  Special handling for the three fields that the manager and the bridge
+  *both* care about (`mqtt_broker`, `mqtt_root_topic`, `state_file`):
+  when `--bridge-config` supplies them, the manager adopts them as its
+  own defaults too, so they only need to be specified once. Precedence:
+    1. CLI flag (`--broker`, `--root`, `--bridge-state`)
     2. value from `--bridge-config`
-    3. manager default (`mqtt://localhost:1883`, `rustuya`)
+    3. manager default (`mqtt://localhost:1883`, `rustuya`, `rustuya.json`
+       next to `--cloud`)
 
   If a CLI flag and the bridge-config value disagree, the CLI value
   overrides (the embedded bridge ends up with the same kwarg) and a
@@ -176,11 +177,20 @@ service.
 docker run -d \
   --name rustuya-manager \
   --network host \
+  --restart unless-stopped \
   -e BROKER=mqtt://your-mosquitto-host:1883 \
   -e AUTH=admin:CHANGE_ME \
   -v rustuya-manager-data:/data \
   3735943886/rustuya-manager:latest
 ```
+
+`--restart unless-stopped` is intentional: with `--embed-bridge` on (the
+image default), the manager process is the de-facto supervisor for the
+in-process bridge thread, and the manager has no in-process watchdog if
+that thread dies (see [docs/internals.md §1.2](docs/internals.md)).
+Restarting the manager container respawns a fresh embedded bridge with
+it, so docker's restart policy covers both. Drop the flag only if you
+deliberately want a one-shot, non-resilient run.
 
 The image runs `rustuya-manager --web --embed-bridge` — manager and
 bridge live in the same process, so the only external dependency is an

@@ -225,3 +225,45 @@ class TestApplyBridgeConfigDefaults:
         with caplog.at_level(logging.WARNING):
             _apply_bridge_config_defaults(args)
         assert "disagree" not in caplog.text.lower()
+
+    def test_fills_state_file_when_cli_unset(self, tmp_path):
+        from rustuya_manager.cli import _apply_bridge_config_defaults
+
+        cfg = self._write_cfg(tmp_path, state_file="/var/lib/rustuya/state.json")
+        # bridge_state=None means the user didn't pass --bridge-state.
+        args = _make_args(tmp_path, embed_bridge=True, bridge_config=cfg, bridge_state=None)
+        _apply_bridge_config_defaults(args)
+        assert args.bridge_state == "/var/lib/rustuya/state.json"
+
+    def test_cli_state_file_wins_over_bridge_config(self, tmp_path, caplog):
+        import logging
+
+        from rustuya_manager.cli import _apply_bridge_config_defaults
+
+        cfg = self._write_cfg(tmp_path, state_file="/from/cfg/state.json")
+        args = _make_args(
+            tmp_path,
+            embed_bridge=True,
+            bridge_config=cfg,
+            bridge_state="/from/cli/state.json",
+        )
+        with caplog.at_level(logging.WARNING):
+            _apply_bridge_config_defaults(args)
+        assert args.bridge_state == "/from/cli/state.json"
+        assert "bridge-state" in caplog.text.lower() and "disagree" in caplog.text.lower()
+
+    def test_matching_state_file_does_not_warn(self, tmp_path, caplog):
+        import logging
+
+        from rustuya_manager.cli import _apply_bridge_config_defaults
+
+        cfg = self._write_cfg(tmp_path, state_file="/same/state.json")
+        args = _make_args(
+            tmp_path,
+            embed_bridge=True,
+            bridge_config=cfg,
+            bridge_state="/same/state.json",
+        )
+        with caplog.at_level(logging.WARNING):
+            _apply_bridge_config_defaults(args)
+        assert "disagree" not in caplog.text.lower()

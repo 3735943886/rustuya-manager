@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rustuya-manager"
-version = "0.1.0rc22"
+version = "0.1.0rc23"
 description = "Management tool for rustuya-bridge — keeps Tuya Cloud devices and the bridge in sync"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -13,7 +13,7 @@ dependencies = [
     "rich>=13.0",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
-    "pyrustuyabridge>=0.2.0rc11,<0.3",  # 0.2.0rc11 adds the `reconfigure` action that self-terminates the bridge for a supervisor-driven restart. _EmbeddedBridgeSupervisor (cli.py) depends on that exit shape to make `reconfigure` work in the embedded case.
+    "pyrustuyabridge>=0.2.0rc16,<0.3",  # 0.2.0rc11 added the `reconfigure` self-terminate that _EmbeddedBridgeSupervisor (cli.py) drives. rc12–rc16 are bridge-side correctness fixes the manager benefits from: rc12 retained cleanup covers the whole fleet, rc13 fixes a cleanup deadlock + coalesced-removes gap, rc15 counts PubAcks instead of buffered writes, rc16 adds a liveness-probe singleton check so post-power-loss startup can't deadlock.
     "tuyawizard>=0.1.8",  # 0.1.8 adds close()/context manager so the wizard's per-call requests.Sessions don't leak (~750-950 KB/cycle)
     "cryptography>=41",   # missing dep of tuya-sharing-sdk
 ]

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rustuya-manager"
-version = "0.1.0rc23"
+version = "0.1.0rc24"
 description = "Management tool for rustuya-bridge — keeps Tuya Cloud devices and the bridge in sync"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -14,7 +14,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "pyrustuyabridge>=0.2.0rc16,<0.3",  # 0.2.0rc11 added the `reconfigure` self-terminate that _EmbeddedBridgeSupervisor (cli.py) drives. rc12–rc16 are bridge-side correctness fixes the manager benefits from: rc12 retained cleanup covers the whole fleet, rc13 fixes a cleanup deadlock + coalesced-removes gap, rc15 counts PubAcks instead of buffered writes, rc16 adds a liveness-probe singleton check so post-power-loss startup can't deadlock.
-    "tuyawizard>=0.1.8",  # 0.1.8 adds close()/context manager so the wizard's per-call requests.Sessions don't leak (~750-950 KB/cycle)
+    "tuyawizard>=0.1.9",  # 0.1.8 added close()/context manager to stop the per-call requests.Session leak (~750-950 KB/cycle); 0.1.9 then changed close()'s default so it no longer POSTs to `/v1.0/m/token/terminal/expire` — the previous default revoked the saved tokens server-side after every wizard run, forcing a fresh QR scan on the next call. Manager's wizard.close() is called with no args so it picks up the new revoke_terminal=False default automatically.
     "cryptography>=41",   # missing dep of tuya-sharing-sdk
 ]
 

@@ -493,6 +493,26 @@ class BridgeClient:
 
     # ── bridge-config handling ──────────────────────────────────────────
     async def _on_bridge_config(self, payload: str) -> None:
+        # Empty/blank payload = retained message was cleared. Bridge's
+        # `reconfigure` action clears its own retained on exit, and the LWT
+        # clears it on ungraceful death — both look identical to subscribers
+        # (retain=True, payload=""). Pre-bootstrap empties are handled by
+        # `bridge_offline` (default-templates fallback timeout); post-bootstrap,
+        # surface a persistent banner so a user who changed `mqtt_root_topic`
+        # realises the manager is still subscribed to the old root and won't
+        # see the new config at `<new-root>/bridge/config`.
+        if not payload.strip():
+            if self._bootstrap_done.is_set():
+                await self.state.set_warning(
+                    "bridge_config_cleared",
+                    "warning",
+                    "Bridge config was cleared (reconfigure or bridge offline). "
+                    "If you changed mqtt_root_topic, the manager is still "
+                    "subscribed to the old root — restart with the new "
+                    "--mqtt-root-topic.",
+                )
+            return
+
         try:
             cfg = json.loads(payload)
         except json.JSONDecodeError as e:
@@ -516,6 +536,16 @@ class BridgeClient:
             payload=cfg.get("mqtt_payload_template") or "{value}",
         )
 
+        # A valid config arrived → both "no config" warnings can come down.
+        # Clear before the idempotence check below so a same-templates
+        # re-delivery (the post-reconfigure / post-LWT republish on the
+        # unchanged root) still clears `bridge_config_cleared` that was set
+        # during the gap. `bridge_offline` is only set by the default-
+        # templates fallback so it's a no-op here in the steady state, but
+        # clearing it unconditionally keeps the two warnings symmetrical.
+        await self.state.clear_warning("bridge_offline")
+        await self.state.clear_warning("bridge_config_cleared")
+
         # Idempotence check: the retained bridge/config message can be
         # re-delivered every time we subscribe to a wildcard that also matches
         # it (e.g. message_topic="{root}/{level}/{id}" → wildcard "{root}/+/+"
@@ -530,9 +560,6 @@ class BridgeClient:
         await self.state.set_templates(templates)
         await self._subscribe_runtime_topics(templates)
         await self._validate_payload_template(templates.payload)
-        # Bridge is alive — clear the offline placeholder warning if it was
-        # set by an earlier default-templates fallback.
-        await self.state.clear_warning("bridge_offline")
         if not self._bootstrap_done.is_set():
             await self._request_initial_status()
             self._bootstrap_done.set()

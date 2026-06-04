@@ -508,6 +508,54 @@ class TestBridgeOfflineWarning:
         assert "bridge_offline" not in client.state.warnings
 
 
+class TestBridgeConfigClearedWarning:
+    """An empty/blank payload on `{root}/bridge/config` means the retained
+    message was cleared — bridge's `reconfigure` exit clears it on purpose,
+    and the LWT clears it on ungraceful death. Post-bootstrap, the manager
+    must surface a persistent warning so a user who changed
+    `mqtt_root_topic` understands the manager is stuck on the old root and
+    needs a restart. Pre-bootstrap is the `bridge_offline` path's job."""
+
+    @pytest.mark.asyncio
+    async def test_empty_payload_post_bootstrap_sets_warning(self):
+        client, _ = _make_client()
+        # First, drive bootstrap with a real config so `_bootstrap_done` is set.
+        await client._on_bridge_config(json.dumps(CUSTOM_CONFIG))
+        assert client._bootstrap_done.is_set()
+        assert "bridge_config_cleared" not in client.state.warnings
+
+        # Now simulate the retained-clear (empty payload on the same topic).
+        await client._on_bridge_config("")
+        warn = client.state.warnings.get("bridge_config_cleared")
+        assert warn is not None
+        assert warn["level"] == "warning"
+        assert "mqtt_root_topic" in warn["message"]
+
+    @pytest.mark.asyncio
+    async def test_empty_payload_pre_bootstrap_is_ignored(self):
+        # If bridge was already dead/never-online at manager start, the
+        # retained slot is empty on first subscribe. That's `bridge_offline`'s
+        # job (via the default-templates fallback timeout) — we don't want
+        # a second redundant banner alongside it.
+        client, _ = _make_client()
+        assert not client._bootstrap_done.is_set()
+        await client._on_bridge_config("")
+        assert "bridge_config_cleared" not in client.state.warnings
+
+    @pytest.mark.asyncio
+    async def test_fresh_config_clears_cleared_warning(self):
+        # A reconfigure cycle that keeps the root unchanged: clear, then a
+        # fresh config arrives on the same topic. The banner must clear so
+        # the UI doesn't keep nagging after the bridge has fully come back.
+        client, _ = _make_client()
+        await client._on_bridge_config(json.dumps(CUSTOM_CONFIG))
+        await client._on_bridge_config("")
+        assert "bridge_config_cleared" in client.state.warnings
+
+        await client._on_bridge_config(json.dumps(CUSTOM_CONFIG))
+        assert "bridge_config_cleared" not in client.state.warnings
+
+
 class TestReconnectLoop:
     """Validates that the aiomqtt reconnect loop turns a connection failure
     into a `broker_unreachable` state warning (the signal the UI surfaces)

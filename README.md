@@ -178,11 +178,18 @@ docker run -d \
   --name rustuya-manager \
   --network host \
   --restart unless-stopped \
-  -e BROKER=mqtt://your-mosquitto-host:1883 \
   -e AUTH=admin:CHANGE_ME \
   -v rustuya-manager-data:/data \
   3735943886/rustuya-manager:latest
 ```
+
+The broker defaults to `mqtt://localhost:1883` (which `--network host`
+makes a host-local mosquitto). For a remote broker, set `mqtt_broker`
+in `/data/config.json` (the embedded bridge auto-creates this on first
+boot) — that's the single source of truth the bridge already reads. The
+`BROKER` env var is still available as a quick override but is not
+shown here on purpose: the env-vs-config-file precedence story (see the
+table below) is easier to keep straight when one place owns the value.
 
 `--restart unless-stopped` is intentional: with `--embed-bridge` on (the
 image default), the manager process is the de-facto supervisor for the

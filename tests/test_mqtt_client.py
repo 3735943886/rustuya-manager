@@ -22,12 +22,12 @@ from unittest.mock import AsyncMock, MagicMock
 import aiomqtt
 import pytest
 
+from rustuya_manager.models import Device
 from rustuya_manager.mqtt import (
     BRIDGE_CONFIG_TOPIC_TPL,
     BridgeClient,
     _format_error_message,
 )
-from rustuya_manager.models import Device
 from rustuya_manager.state import BridgeTemplates, State
 
 # Sample bridge/config that mirrors the custom topology used in our e2e:

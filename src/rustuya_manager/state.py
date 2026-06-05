@@ -176,6 +176,22 @@ class State:
             self.retained_only.discard(device_id)
             self._bump()
 
+    async def clear_all_devices(self) -> None:
+        """Drop every device from every per-device bucket atomically.
+
+        Called when the bridge confirms a `clear` action: it has wiped its
+        own device list and cleared the broker-side retained payloads, so
+        holding on to per-device buckets would leave ghosts in the UI.
+        Mirrors `remove_device` but operates on the whole fleet at once."""
+        async with self._changed:
+            buckets = (self.bridge, self.dps, self.live_status, self.last_seen, self.last_response)
+            if not any(buckets) and not self.retained_only:
+                return
+            for b in buckets:
+                b.clear()
+            self.retained_only.clear()
+            self._bump()
+
     async def replace_scan_results(self, sightings: dict[str, ScanSighting]) -> None:
         """Replace cached scan results with a fresh map. Wholesale replace
         (not merge) so stale entries from a previous scan don't outlive

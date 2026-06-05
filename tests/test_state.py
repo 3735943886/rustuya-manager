@@ -109,6 +109,40 @@ class TestRemoveDevice:
         assert "keep" in state.bridge
 
 
+class TestClearAllDevices:
+    async def test_empties_every_per_device_bucket(self):
+        state = State()
+        await state.set_bridge({"a": Device(id="a"), "b": Device(id="b")})
+        await state.merge_dps("a", {"1": True})
+        await state.merge_dps("b", {"1": False}, retained=True)  # b → retained_only
+        await state.set_live_status("a", "online", code=0, message="")
+        await state.record_response("a", {"action": "get", "status": "ok"})  # live, on "a"
+        assert state.bridge and state.dps and state.live_status
+        assert state.last_seen and state.last_response
+        assert "b" in state.retained_only  # b is retained-only
+
+        v0 = state.version
+        await state.clear_all_devices()
+
+        for bucket in (
+            state.bridge,
+            state.dps,
+            state.live_status,
+            state.last_seen,
+            state.last_response,
+        ):
+            assert bucket == {}
+        assert state.retained_only == set()
+        # One atomic version bump, not five (per-bucket).
+        assert state.version == v0 + 1
+
+    async def test_noop_when_already_empty(self):
+        state = State()
+        v0 = state.version
+        await state.clear_all_devices()
+        assert state.version == v0  # no bump
+
+
 class TestRetainedOnly:
     """Retained MQTT events arrive without a publish timestamp, so `last_seen`
     must NOT be stamped — that would falsely show "just now" for stale data

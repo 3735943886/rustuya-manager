@@ -27,6 +27,7 @@ from rustuya_manager.mqtt import (
     BridgeClient,
     _format_error_message,
 )
+from rustuya_manager.models import Device
 from rustuya_manager.state import BridgeTemplates, State
 
 # Sample bridge/config that mirrors the custom topology used in our e2e:
@@ -243,6 +244,91 @@ class TestDispatch:
         assert state.bridge["bf-aaaa"].ip == "192.168.1.10"
         # last_response also captured
         assert "bridge" in state.last_response
+
+    @pytest.mark.asyncio
+    async def test_clear_action_response_wipes_all_devices(self):
+        """Bridge's `clear` action wipes its whole device list and acks with
+        `{action:clear, status:ok, id:all}` on `<message>/response/all`.
+        The manager must mirror that wipe locally — bridge/config redelivery
+        doesn't refresh the device list, so without acting on the ack the UI
+        would keep ghost rows for devices the bridge no longer knows about."""
+        state = State()
+        await state.set_templates(
+            BridgeTemplates(
+                root="myhome/tuya",
+                command="myhome/tuya/cmd/{id}/{action}",
+                event="myhome/tuya/dev/{name}/dp/{dp}/state",
+                message="tuyalog/{level}/{id}",
+                scanner="myhome/tuya/scanner",
+                payload="{value}",
+            )
+        )
+        # Pre-load per-device buckets with two devices
+        await state.set_bridge({"a": Device(id="a"), "b": Device(id="b")})
+        await state.merge_dps("a", {"1": True})
+        await state.set_live_status("a", "online", code=0, message="")
+        client, _ = _make_client(state)
+
+        await client._dispatch(
+            "tuyalog/response/all",
+            json.dumps({"action": "clear", "status": "ok", "id": "all"}),
+        )
+
+        assert state.bridge == {}
+        assert state.dps == {}
+        assert state.live_status == {}
+        # The ack itself lands under the synthetic "all" target — mirrors
+        # how bridge-level acks land under "bridge".
+        assert state.last_response.get("all", {}).get("action") == "clear"
+
+    @pytest.mark.asyncio
+    async def test_clear_with_mismatched_id_does_not_wipe(self):
+        """Defensive guard: a malformed ack with action=clear but id!=all
+        must not nuke state. Bridge contract is action=clear ↔ id=all."""
+        state = State()
+        await state.set_templates(
+            BridgeTemplates(
+                root="myhome/tuya",
+                command="myhome/tuya/cmd/{id}/{action}",
+                event="myhome/tuya/dev/{name}/dp/{dp}/state",
+                message="tuyalog/{level}/{id}",
+                scanner="myhome/tuya/scanner",
+                payload="{value}",
+            )
+        )
+        await state.set_bridge({"a": Device(id="a")})
+        client, _ = _make_client(state)
+
+        await client._dispatch(
+            "tuyalog/response/a",
+            json.dumps({"action": "clear", "status": "ok", "id": "a"}),
+        )
+
+        assert "a" in state.bridge  # untouched
+
+    @pytest.mark.asyncio
+    async def test_clear_with_error_status_does_not_wipe(self):
+        """Bridge ack-fail (status != ok) on a clear must not wipe state."""
+        state = State()
+        await state.set_templates(
+            BridgeTemplates(
+                root="myhome/tuya",
+                command="myhome/tuya/cmd/{id}/{action}",
+                event="myhome/tuya/dev/{name}/dp/{dp}/state",
+                message="tuyalog/{level}/{id}",
+                scanner="myhome/tuya/scanner",
+                payload="{value}",
+            )
+        )
+        await state.set_bridge({"a": Device(id="a")})
+        client, _ = _make_client(state)
+
+        await client._dispatch(
+            "tuyalog/response/all",
+            json.dumps({"action": "clear", "status": "error", "id": "all"}),
+        )
+
+        assert "a" in state.bridge  # untouched
 
     @pytest.mark.asyncio
     async def test_error_level_marks_device_online_or_offline(self):

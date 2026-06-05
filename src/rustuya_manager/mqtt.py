@@ -429,6 +429,21 @@ class BridgeClient:
                     # picks up the new/updated entry authoritatively.
                     await self.state.record_response(target, parsed, retained=retain)
                     asyncio.create_task(self.publish_command("status", target_id="bridge"))
+                elif (
+                    action == "clear"
+                    and status_val == "ok"
+                    and (target == "all" or parsed.get("id") == "all")
+                ):
+                    # Bridge has wiped its entire device list; mirror locally
+                    # so the UI doesn't keep ghost rows from devices that no
+                    # longer exist on the bridge. The retained bridge/config
+                    # republish would update templates but not the device
+                    # list, so we must act on the action ack ourselves.
+                    # The `id=="all"` guard keeps a malformed message from
+                    # nuking the whole state — the bridge contract is
+                    # `action=clear` ↔ `id="all"`, anything else is suspect.
+                    await self.state.clear_all_devices()
+                    await self.state.record_response(target, parsed, retained=retain)
                 else:
                     await self.state.record_response(target, parsed, retained=retain)
         elif matched_as == "event":

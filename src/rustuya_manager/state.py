@@ -58,6 +58,15 @@ class State:
     cloud: dict[str, Device] = field(default_factory=dict)
     bridge: dict[str, Device] = field(default_factory=dict)
     templates: BridgeTemplates | None = None
+    # The raw, unparsed `{root}/bridge/config` payload dict, exactly as the
+    # bridge published it (before `{root}` substitution). `templates` above is
+    # the resolved/derived form the manager uses internally, but it drops
+    # fields the manager doesn't need — notably `mqtt_retain`. Plugins that
+    # want to re-derive their own view of the config (e.g. rustuya-ha building
+    # an HA discovery scheme) need the original keys, so we keep the raw dict
+    # here and expose it read-only via `PluginContext.bridge_config()`. None
+    # until the first retained config is parsed.
+    bridge_config_raw: dict[str, Any] | None = None
     # Per-device live DPS values keyed by device id.
     dps: dict[str, dict[str, Any]] = field(default_factory=dict)
     # Last action result keyed by device id ("ok", "error", or message text).
@@ -122,6 +131,17 @@ class State:
         async with self._changed:
             self.templates = t
             self._bump()
+
+    async def set_bridge_config_raw(self, cfg: dict[str, Any]) -> None:
+        """Store the raw `{root}/bridge/config` payload dict for plugins.
+
+        Not consumed by the manager itself (it uses `templates`); kept purely
+        so `PluginContext.bridge_config()` can hand plugins the original keys.
+        Doesn't bump the version — `set_templates`, called alongside it in
+        `_on_bridge_config`, already wakes WS listeners for the same config
+        change, so bumping here would be a redundant broadcast."""
+        async with self._changed:
+            self.bridge_config_raw = cfg
 
     async def merge_dps(
         self,

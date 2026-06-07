@@ -593,6 +593,10 @@ class BridgeClient:
 
         self.root = root
         await self.state.set_templates(templates)
+        # Keep the raw config dict around for plugins (read-only via
+        # PluginContext.bridge_config). Stored after the idempotence check so
+        # we only update it when the templates actually change.
+        await self.state.set_bridge_config_raw(cfg)
         await self._subscribe_runtime_topics(templates)
         await self._validate_payload_template(templates.payload)
         if not self._bootstrap_done.is_set():
@@ -737,6 +741,29 @@ class BridgeClient:
         logger.debug("publish %s %s", topic, body)
         try:
             await self._client.publish(topic, body, qos=1)
+        except aiomqtt.MqttError as e:
+            raise RuntimeError(f"MQTT publish failed: {e}") from e
+
+    async def publish_raw(
+        self, topic: str, payload: str, *, retain: bool = False, qos: int = 1
+    ) -> None:
+        """Publish an arbitrary payload to an arbitrary topic.
+
+        Unlike `publish_command` (which forward-renders the bridge's command
+        template and always targets the bridge), this is a generic escape hatch
+        for plugins that own topics outside the bridge's namespace — e.g.
+        rustuya-ha writing/clearing retained `homeassistant/.../config`
+        discovery messages. The caller supplies the fully-formed topic and
+        payload; the host does not interpret either.
+
+        `retain=True` is the common case for discovery/config topics (a clear
+        is `publish_raw(topic, "", retain=True)`). Raises `RuntimeError` when
+        the broker is disconnected or the publish fails, mirroring
+        `publish_command` so plugin API handlers can surface a 503."""
+        if not self._connected.is_set() or self._client is None:
+            raise RuntimeError("MQTT broker not connected — try again shortly")
+        try:
+            await self._client.publish(topic, payload, qos=qos, retain=retain)
         except aiomqtt.MqttError as e:
             raise RuntimeError(f"MQTT publish failed: {e}") from e
 

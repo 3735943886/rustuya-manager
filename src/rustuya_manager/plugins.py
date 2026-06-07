@@ -11,6 +11,11 @@ them (stdlib `importlib.metadata` only — no extra runtime dependency) and call
                                       WS broadcast for free
   4. a UI page (tab + static assets) (ctx.add_page)
 
+It can also *read* two host-owned snapshots — the cloud devices
+(`ctx.devices`) and the raw bridge config (`ctx.bridge_config`) — and publish
+arbitrary retained payloads via `ctx.bridge_client.publish_raw`. These let a
+plugin re-derive its own view of the fleet without the host knowing what for.
+
 The host knows nothing about what any plugin does. Discovery and every
 `register()` call are wrapped so a broken or malicious plugin is logged and
 skipped — the manager always keeps running. With **zero** plugins installed the
@@ -112,9 +117,10 @@ class StateNamespace:
 class PluginContext:
     """The single object handed to every plugin's `register(ctx)`.
 
-    Intentionally small and host-agnostic — it exposes exactly the four
-    contribution surfaces plus the API version and the live `BridgeClient`
-    (for publishing). Plugins must not reach past this into manager internals.
+    Intentionally small and host-agnostic — it exposes the four contribution
+    surfaces, two read-only snapshots (`devices`, `bridge_config`), the API
+    version, and the live `BridgeClient` (for publishing). Plugins must not
+    reach past this into manager internals.
     """
 
     def __init__(
@@ -128,6 +134,30 @@ class PluginContext:
         self._state = state
         self.api_version = PLUGIN_API_VERSION
         self.bridge_client = bridge_client
+
+    def devices(self) -> dict[str, dict[str, Any]]:
+        """Read-only snapshot of the cloud devices as `{id: raw_data}`.
+
+        `raw_data` is the original per-device dict the manager loaded from the
+        cloud JSON (the same shape a plugin would feed to a discovery
+        generator). Returns a fresh outer dict each call so a plugin can't
+        mutate the manager's device map; the inner `raw_data` dicts are shared
+        by reference (not deep-copied — they can be large and plugins are
+        expected to read, not write). Empty until the cloud snapshot loads."""
+        return {did: dev.raw_data for did, dev in self._state.cloud.items()}
+
+    def bridge_config(self) -> dict[str, Any] | None:
+        """Read-only copy of the raw `{root}/bridge/config` payload dict, or
+        None if the bridge config hasn't been received yet.
+
+        These are the bridge's original config keys (`mqtt_root_topic`,
+        `mqtt_event_topic`, `mqtt_payload_template`, `mqtt_retain`, …) before
+        `{root}` substitution — what a plugin needs to re-derive its own view
+        of the bridge's topic/payload scheme. A shallow copy is returned so the
+        caller can't mutate the stored config (values are JSON scalars/strings,
+        so shallow is sufficient)."""
+        cfg = self._state.bridge_config_raw
+        return dict(cfg) if cfg is not None else None
 
     def add_api_router(self, router: APIRouter) -> None:
         self._registry.api_routers.append(router)

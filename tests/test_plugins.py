@@ -14,6 +14,7 @@ import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
+from rustuya_manager.models import Device
 from rustuya_manager.mqtt import BridgeClient
 from rustuya_manager.plugins import (
     PLUGIN_API_VERSION,
@@ -145,6 +146,82 @@ def test_api_plugins_manifest_and_static(tmp_path):
         served = tc.get("/plugins/hello/index.js")
         assert served.status_code == 200
         assert "mount" in served.text
+
+
+# ── (e) Read-only snapshots: devices() + bridge_config() ─────────────────
+async def test_devices_returns_raw_data_snapshot():
+    state = State()
+    raw = {"id": "dev1", "name": "Lamp", "product_id": "abc", "local_key": "k"}
+    await state.set_cloud({"dev1": Device.from_dict(raw)})
+
+    ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
+    snap = ctx.devices()
+    assert snap == {"dev1": raw}
+
+    # Fresh outer dict each call — mutating it must not corrupt the manager's map.
+    snap["dev2"] = {}
+    assert "dev2" not in state.cloud
+    assert set(ctx.devices()) == {"dev1"}
+
+
+def test_devices_empty_before_cloud_load():
+    state = State()
+    ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
+    assert ctx.devices() == {}
+
+
+async def test_bridge_config_none_then_copy():
+    state = State()
+    ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
+    assert ctx.bridge_config() is None
+
+    cfg = {"mqtt_root_topic": "rustuya", "mqtt_retain": True}
+    await state.set_bridge_config_raw(cfg)
+
+    got = ctx.bridge_config()
+    assert got == cfg
+    # Shallow copy — mutating the returned dict must not touch the stored one.
+    got["mqtt_root_topic"] = "hacked"
+    assert state.bridge_config_raw["mqtt_root_topic"] == "rustuya"
+
+
+async def test_set_bridge_config_raw_does_not_bump_version():
+    # set_templates already broadcasts the same config change; storing the raw
+    # dict must not trigger a second redundant WS push.
+    state = State()
+    v0 = state.version
+    await state.set_bridge_config_raw({"mqtt_root_topic": "rustuya"})
+    assert state.version == v0
+
+
+# ── (f) publish_raw ──────────────────────────────────────────────────────
+async def test_publish_raw_when_disconnected_raises():
+    client = _make_client(State())  # never entered → _connected not set
+    with pytest.raises(RuntimeError, match="not connected"):
+        await client.publish_raw("homeassistant/light/x/config", "{}", retain=True)
+
+
+async def test_publish_raw_forwards_topic_payload_and_flags():
+    client = _make_client(State())
+
+    class _FakeMqtt:
+        def __init__(self):
+            self.calls = []
+
+        async def publish(self, topic, payload, *, qos, retain):
+            self.calls.append((topic, payload, qos, retain))
+
+    fake = _FakeMqtt()
+    client._client = fake  # type: ignore[assignment]
+    client._connected.set()
+
+    await client.publish_raw("homeassistant/light/x/config", '{"a":1}', retain=True)
+    await client.publish_raw("homeassistant/light/x/config", "", retain=True)  # clear
+
+    assert fake.calls == [
+        ("homeassistant/light/x/config", '{"a":1}', 1, True),
+        ("homeassistant/light/x/config", "", 1, True),
+    ]
 
 
 # ── Failure isolation ────────────────────────────────────────────────────

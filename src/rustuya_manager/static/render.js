@@ -16,6 +16,10 @@ const $syncBar = document.getElementById("sync-bar");
 
 export function render() {
   if (!state.snapshot) return;
+  // When a plugin page is active, the device view is hidden — skip its work
+  // entirely (it re-runs when the user switches back via showPage()). With no
+  // plugins currentPage is always "devices", so this is a no-op there.
+  if (state.currentPage !== "devices") return;
   renderTemplates();
   renderFilterCounts();
   renderWarnings();

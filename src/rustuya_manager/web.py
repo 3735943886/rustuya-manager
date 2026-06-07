@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
 from .models import Device
 from .mqtt import BridgeClient
+from .plugins import PluginContext, PluginRegistry, load_plugins
 from .scan import LanScanCoordinator
 from .state import State
 from .wizard import WizardManager
@@ -71,7 +72,7 @@ def serialize_state(state: State) -> dict[str, Any]:
     else:
         diff_payload = {"synced": [], "mismatched": [], "missing": [], "orphaned": []}
     tpl = state.templates
-    return {
+    snapshot: dict[str, Any] = {
         "version": state.version,
         "templates": (
             {
@@ -110,6 +111,12 @@ def serialize_state(state: State) -> dict[str, Any]:
             for sid, s in state.scan_results.items()
         },
     }
+    # Plugin state slices ride the same snapshot, but only once a plugin has
+    # actually written one. With no plugins the key is absent entirely so the
+    # wire format is byte-identical to a plugin-less build.
+    if state._plugins:
+        snapshot["plugins"] = dict(state._plugins)
+    return snapshot
 
 
 class _BasicAuthMiddleware:
@@ -159,6 +166,7 @@ def build_app(
     *,
     creds_path: str | None = None,
     auth: str | None = None,
+    plugins: list[Any] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="rustuya-manager", version="0.1.0rc22")
     if auth:
@@ -361,6 +369,51 @@ def build_app(
                 await ws.close(code=1011)
             except Exception:
                 pass
+
+    # ── Plugin host ──────────────────────────────────────────────────────
+    # Discover + register plugins once at app build time. With nothing
+    # installed this is a no-op: no routers, no pages, no static mounts, and
+    # GET /api/plugins returns []. The host is entirely HA-agnostic — it never
+    # imports any specific plugin.
+    registry = PluginRegistry()
+    ctx = PluginContext(registry, bridge_client=client, state=state)
+    load_plugins(ctx, register_callables=plugins)
+
+    for router in registry.api_routers:
+        app.include_router(router)
+
+    @app.get("/api/plugins")
+    async def get_plugins() -> list[dict[str, Any]]:
+        """Manifest of plugin UI pages: [{id, label, js_url}] (empty when none).
+
+        The frontend boot fetches this; an empty list means no tab bar is
+        rendered, keeping a plugin-less UI identical to today."""
+        return [
+            {
+                "id": page["id"],
+                "label": page["label"],
+                "js_url": f"/plugins/{page['id']}/{page['entry']}",
+            }
+            for page in registry.pages
+        ]
+
+    # Serve each plugin's static directory under /plugins/{id}/. The ASGI
+    # _BasicAuthMiddleware wraps the whole app, so these paths inherit the same
+    # auth gate as everything else.
+    for page in registry.pages:
+        static_dir = Path(page["static_dir"])
+        if static_dir.is_dir():
+            app.mount(
+                f"/plugins/{page['id']}",
+                StaticFiles(directory=static_dir),
+                name=f"plugin-{page['id']}",
+            )
+        else:
+            logger.warning(
+                "plugin %r static_dir %s is not a directory; page assets unavailable",
+                page["id"],
+                static_dir,
+            )
 
     # Static assets (JS, eventual CSS, icons). Tailwind comes from a CDN inside
     # the HTML, so there's no build step.

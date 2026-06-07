@@ -23,6 +23,7 @@ import { initSyncModal } from "./modal-sync.js";
 import { initWizardModal } from "./modal-wizard.js";
 import { initDeviceModal, openAddModal } from "./modal-device.js";
 import { initConfirmModal } from "./modal-confirm.js";
+import { initPluginHost } from "./plugins.js";
 
 // ── Cloud upload (drop zone + file picker) ─────────────────────────────────
 const $dropzone = document.getElementById("cloud-dropzone");
@@ -212,3 +213,6 @@ initWizardModal();
 initDeviceModal();
 initConfirmModal();
 connect();
+// Boot the plugin host. No-op (no tab bar, no DOM change) when no plugins
+// are installed — GET /api/plugins returns [].
+initPluginHost();

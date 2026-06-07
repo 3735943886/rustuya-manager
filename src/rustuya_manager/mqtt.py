@@ -38,6 +38,7 @@ import aiomqtt
 import pyrustuyabridge as pb
 
 from .models import Device
+from .plugins import topic_matches
 from .state import BridgeTemplates, State
 
 # Reverse payload parsing lives in the bridge crate (`rustuyabridge::payload`)
@@ -157,6 +158,15 @@ class BridgeClient:
         # is currently the only subscriber, but the list shape is preserved
         # so a future debug/CLI tap could attach without disturbing it.
         self._scanner_subscribers: list[asyncio.Queue[dict[str, Any]]] = []
+        # Plugin-registered MQTT taps: (topic_filter, async handler). Populated
+        # via `add_plugin_subscription` (driven by the plugin host). Each filter
+        # is (re)subscribed on every connect by `_subscribe_initial`, and
+        # `_dispatch` routes any matching message to the handler — independent
+        # of the bridge's own templated topics. Generalises the scanner-tap
+        # pattern above to arbitrary HA-agnostic subscribers.
+        self._plugin_subscriptions: list[
+            tuple[str, Callable[[str, str, bool], Awaitable[None]]]
+        ] = []
 
     # ── async context manager ────────────────────────────────────────────
     async def __aenter__(self) -> BridgeClient:
@@ -291,6 +301,11 @@ class BridgeClient:
         for wildcard in self._runtime_wildcards:
             await client.subscribe(wildcard)
             logger.info("Re-subscribed: %s", wildcard)
+        # Replay plugin taps too so their (often retained) topic flows — e.g.
+        # `homeassistant/#` — resume on every (re)connect.
+        for topic_filter, _ in self._plugin_subscriptions:
+            await client.subscribe(topic_filter)
+            logger.info("Re-subscribed plugin filter: %s", topic_filter)
 
     async def _bootstrap_timeout_guard(self) -> None:
         """Apply default templates if the retained bridge/config doesn't
@@ -317,6 +332,11 @@ class BridgeClient:
                 return
             await self._on_bridge_config(payload)
             return
+
+        # Plugin taps run before the bridge-template guard so plugin topics are
+        # routed regardless of bootstrap state (and so retained plugin topics
+        # delivered at subscribe-time reach their handler immediately).
+        await self._dispatch_plugins(topic, payload, retain)
 
         if self.state.templates is None:
             logger.debug("Dropping %s — templates not resolved yet", topic)
@@ -719,6 +739,48 @@ class BridgeClient:
             await self._client.publish(topic, body, qos=1)
         except aiomqtt.MqttError as e:
             raise RuntimeError(f"MQTT publish failed: {e}") from e
+
+    # ── plugin MQTT taps ─────────────────────────────────────────────────
+    def add_plugin_subscription(
+        self, topic_filter: str, handler: Callable[[str, str, bool], Awaitable[None]]
+    ) -> None:
+        """Register a plugin handler for `topic_filter`.
+
+        Synchronous: the filter is cached for replay by `_subscribe_initial` on
+        every (re)connect, and if a broker connection is already live the
+        subscribe is issued immediately on a fire-and-forget task so a plugin
+        registered after bootstrap starts receiving without waiting for the
+        next reconnect."""
+        self._plugin_subscriptions.append((topic_filter, handler))
+        if self._client is None:
+            return  # not connected yet — _subscribe_initial replays on connect
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return  # no running loop (e.g. registered at build time in a test);
+            # the cached filter is replayed by _subscribe_initial on connect
+        client = self._client
+
+        async def _subscribe_now() -> None:
+            try:
+                await client.subscribe(topic_filter)
+                logger.info("Subscribed plugin filter: %s", topic_filter)
+            except Exception:  # noqa: BLE001 - reconnect replay is the backstop
+                logger.exception("immediate subscribe for plugin filter %s failed", topic_filter)
+
+        loop.create_task(_subscribe_now())
+
+    async def _dispatch_plugins(self, topic: str, payload: str, retain: bool) -> None:
+        """Route a message to every plugin handler whose filter matches.
+
+        Each handler is isolated: an exception is logged and the remaining
+        handlers (and the bridge's own routing downstream) still run."""
+        for topic_filter, handler in self._plugin_subscriptions:
+            if topic_matches(topic_filter, topic):
+                try:
+                    await handler(topic, payload, retain)
+                except Exception:  # noqa: BLE001 - one bad handler must not break others
+                    logger.exception("plugin handler for %s raised on %s", topic_filter, topic)
 
     def subscribe_scanner(self) -> asyncio.Queue[dict[str, Any]]:
         """Returns a fresh queue that will receive every scanner-topic

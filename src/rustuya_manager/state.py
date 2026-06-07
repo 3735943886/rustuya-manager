@@ -91,6 +91,12 @@ class State:
     # the presence of an `_scan_ran_at` timestamp on the coordinator side.
     scan_results: dict[str, ScanSighting] = field(default_factory=dict)
 
+    # Per-plugin state slices keyed by namespace name (see plugins.py). Empty
+    # unless a plugin calls its StateNamespace.set(); `serialize_state` omits
+    # the `plugins` snapshot key entirely while this is empty, so a
+    # plugin-less manager stays byte-identical on the wire.
+    _plugins: dict[str, Any] = field(default_factory=dict)
+
     _version: int = 0
     _changed: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
 
@@ -199,6 +205,19 @@ class State:
         async with self._changed:
             self.scan_results = dict(sightings)
             self._bump()
+
+    async def set_plugin_data(self, name: str, data: dict[str, Any]) -> None:
+        """Store a plugin's namespace data and wake WS listeners.
+
+        Used by `plugins.StateNamespace.set`. Bumps the version unconditionally
+        so the WS broadcast carries the new plugin slice; the manager core never
+        inspects the contents."""
+        async with self._changed:
+            self._plugins[name] = data
+            self._bump()
+
+    def get_plugin_data(self, name: str) -> dict[str, Any] | None:
+        return self._plugins.get(name)
 
     async def set_cloud_path(self, path: str) -> None:
         async with self._changed:

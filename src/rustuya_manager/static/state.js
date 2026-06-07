@@ -35,6 +35,10 @@ export const state = {
   filters: new Set(savedFilters || ALL_CATEGORIES),
   query: "",
   sortKey: VALID_SORT_KEYS.has(savedSortKey) ? savedSortKey : "id",
+  // Active page in the plugin tab-bar. Always "devices" when no plugins are
+  // installed (the tab bar isn't even rendered then), so render() behaves
+  // exactly as before. Plugin pages set this to their plugin id.
+  currentPage: "devices",
 };
 
 export function saveFilters() {

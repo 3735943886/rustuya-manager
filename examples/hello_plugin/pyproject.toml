@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rustuya-hello-plugin"
+version = "0.0.1"
+description = "Throwaway example plugin proving the rustuya-manager plugin host surface (not for production)"
+requires-python = ">=3.10"
+
+# The manager discovers plugins via this entry-point group. `register` is the
+# callable the host invokes with the plugin context.
+[project.entry-points."rustuya_manager.plugins"]
+hello = "rustuya_hello:register"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rustuya_hello*"]
+
+[tool.setuptools.package-data]
+rustuya_hello = ["static/*.js"]

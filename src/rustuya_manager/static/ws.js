@@ -4,6 +4,7 @@
 
 import { state } from "./state.js";
 import { render } from "./render.js";
+import { notifyPluginState } from "./plugins.js";
 
 const $conn = document.getElementById("conn-badge");
 
@@ -36,6 +37,8 @@ export function connect() {
   ws.onmessage = (ev) => {
     state.snapshot = JSON.parse(ev.data);
     render();
+    // Fan the frame out to plugin pages (no-op when no plugins are installed).
+    notifyPluginState(state.snapshot);
   };
   ws.onclose = () => {
     setConn("lost");

@@ -80,6 +80,13 @@ function updateTabStyles() {
 function showPage(page) {
   state.currentPage = page;
   updateTabStyles();
+  // Header actions scoped to the devices view (Add device / Scan LAN) are
+  // meaningless on a plugin tab — hide them there. Both the desktop icons and
+  // their hamburger twins carry data-page-scope, so this covers narrow screens
+  // too. Global actions (cloud refresh, theme, refresh) stay visible.
+  for (const el of document.querySelectorAll('[data-page-scope="devices"]')) {
+    el.classList.toggle("hidden", page !== "devices");
+  }
   if (page === "devices") {
     for (const el of deviceSections) el.classList.remove("hidden");
     $pluginRoot.classList.add("hidden");

@@ -500,25 +500,25 @@ class BridgeClient:
     ) -> dict[str, Any] | None:
         """Returns a {dp: value} map extracted from an event payload, or None.
 
-        Order of attempts:
-          1. parse_payload_with_template — JSON tree walk against the user's
-             `mqtt_payload_template`. Handles arbitrary JSON-shaped templates
-             with any combination of {value}, {dps}, {name}, etc.
-          2. Bridge's parse_mqtt_payload already produced a `dps` dict (the
-             bare-scalar template case: payload `true` + topic {dp}=1 →
-             {"dps":{"1":true}}). Use it.
+        Delegates to the bridge's own `parse_seed_dps` (exposed by
+        pyrustuyabridge ≥ rc19) so the manager reads event payloads
+        byte-identically to how the bridge writes them — both topic modes:
 
-        If neither works, returns None — the user's template isn't a shape
-        the manager can read, and a warning has already been raised at
-        bootstrap to nudge them to fix it."""
+          - Single-DP (`{dp}` in the event topic): the captured value is that
+            DP's value; wrapped into {dp: value}.
+          - Multi-DP (no `{dp}`): the payload is the full DPS object — e.g. a
+            `get` reply on `event/passive/{id}` carrying `{"1":true,...}`.
+            Returned as-is.
+
+        Handles the default `{value}` template and arbitrary JSON-shaped
+        templates ({value}, {dps}, wrapped, etc.). Returns None when the
+        user's template isn't a readable shape (a warning is already raised at
+        bootstrap to nudge them to fix it)."""
         tpls = self.state.templates
         if tpls and payload_str:
-            captures = pb.parse_payload_with_template(payload_str, tpls.payload)
-            if captures:
-                if isinstance(captures.get("dps"), dict):
-                    return captures["dps"]
-                if "value" in captures and vars_.get("dp"):
-                    return {vars_["dp"]: captures["value"]}
+            dps = pb.parse_seed_dps(payload_str, vars_.get("dp"), tpls.payload)
+            if isinstance(dps, dict) and dps:
+                return dps
 
         # Fall back to whatever the bridge's parse_payload produced.
         dps = parsed.get("dps")

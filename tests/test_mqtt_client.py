@@ -189,6 +189,40 @@ class TestDispatch:
         assert state.dps["bf-kitchen-id"] == {"1": True}
 
     @pytest.mark.asyncio
+    async def test_multi_dp_event_no_dp_in_topic_updates_dps(self):
+        """Regression: a `get` reply lands on `event/{type}/{id}` (no {dp} in
+        the topic) with the full DPS object as the payload, e.g.
+        `{"1":true,"14":"off"}`. The old extractor required either a `dps`
+        wrapper or a {dp} topic var, so this whole-object shape was dropped and
+        the device's state never updated. Now it must merge via the bridge's
+        own parse_seed_dps."""
+        state = State()
+        await state.set_templates(
+            BridgeTemplates(
+                root="rustuya",
+                command="rustuya/command",
+                event="rustuya/event/{type}/{id}",
+                message="rustuya/{level}/{id}",
+                scanner="rustuya/scanner",
+                payload="{value}",
+            )
+        )
+        client, _ = _make_client(state)
+        await client._dispatch(
+            "rustuya/event/passive/eb7ba8427911a8ccbda92w",
+            '{"1":true,"14":"off","2":true,"7":0,"8":0}',
+        )
+        assert state.dps["eb7ba8427911a8ccbda92w"] == {
+            "1": True,
+            "14": "off",
+            "2": True,
+            "7": 0,
+            "8": 0,
+        }
+        # Data flowing marks the device online.
+        assert state.live_status["eb7ba8427911a8ccbda92w"]["state"] == "online"
+
+    @pytest.mark.asyncio
     async def test_event_with_unknown_name_skips_silently(self):
         """Regression: when topic carries {name} but bridge doesn't know that
         name yet, we used to create a phantom dps entry keyed by name. Now

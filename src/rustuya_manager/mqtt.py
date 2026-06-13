@@ -167,6 +167,10 @@ class BridgeClient:
         self._plugin_subscriptions: list[
             tuple[str, Callable[[str, str, bool], Awaitable[None]]]
         ] = []
+        # In-progress buffer for a paginated `status` reply (see
+        # `_handle_status_page`). None when no page-through is active; a partial
+        # {id: Device} map while one is. Committed to state on the final page.
+        self._status_accum: dict[str, Device] | None = None
 
     # ── async context manager ────────────────────────────────────────────
     async def __aenter__(self) -> BridgeClient:
@@ -412,8 +416,7 @@ class BridgeClient:
                 target = vars_.get("id", "bridge")
                 level = vars_.get("level", "")
                 if parsed.get("action") == "status" and isinstance(parsed.get("devices"), dict):
-                    bridge_devs = {did: Device.from_dict(d) for did, d in parsed["devices"].items()}
-                    await self.state.set_bridge(bridge_devs)
+                    await self._handle_status_page(parsed)
                 # The bridge publishes per-device connection state under the
                 # `error` level: errorCode=0 means "Connection Successful",
                 # any non-zero code means the device is unreachable / errored.
@@ -494,6 +497,71 @@ class BridgeClient:
 
         if self._on_event is not None:
             await self._on_event(matched_as, vars_, parsed, extras)
+
+    async def _handle_status_page(self, parsed: dict[str, Any]) -> None:
+        """Accumulate a (possibly paginated) `status` reply; commit when complete.
+
+        The bridge paginates `devices` to stay under broker packet limits: every
+        reply carries `offset`/`returned`/`has_more` plus the authoritative
+        `device_count` and `mqtt_drop_count`. We buffer pages keyed by id and
+        replace `state.bridge` wholesale only on the final page, so a fleet
+        larger than the bridge's page size (default 50) isn't truncated to the
+        first page. Older bridges that don't paginate omit `has_more`, so a lone
+        reply commits immediately — behaviour-identical to the pre-paging path.
+        """
+        devices = parsed["devices"]
+        offset = parsed.get("offset", 0)
+        returned = parsed.get("returned", len(devices))
+        has_more = bool(parsed.get("has_more", False))
+
+        # offset 0 starts a fresh snapshot (covers the unpaginated and first-page
+        # cases). A mid-stream restart (another trigger re-issued status) simply
+        # begins again; the id-keyed merge keeps the result convergent. A
+        # non-zero offset arriving with no buffer (e.g. page 0 lost across a
+        # reconnect) still opens one rather than dropping the data.
+        if offset == 0 or self._status_accum is None:
+            self._status_accum = {}
+        for did, d in devices.items():
+            self._status_accum[did] = Device.from_dict(d)
+
+        if has_more and returned > 0:
+            # Fetch the next window. Omit `limit` so we inherit the bridge's
+            # default page size — the packet budget the first page already
+            # proved safe for this broker.
+            await self.publish_command(
+                "status", target_id="bridge", extra={"offset": offset + returned}
+            )
+            return
+
+        # Final page (or unpaginated reply) — commit the assembled snapshot and
+        # the bridge diagnostics in a single state bump.
+        accum = self._status_accum
+        self._status_accum = None
+        drop_count = parsed.get("mqtt_drop_count", 0)
+        await self.state.set_bridge(
+            accum,
+            device_count=parsed.get("device_count"),
+            mqtt_drop_count=drop_count,
+        )
+        await self._surface_mqtt_drops(drop_count)
+
+    async def _surface_mqtt_drops(self, drop_count: Any) -> None:
+        """Raise (or clear) a UI warning for bridge-side MQTT publish drops.
+
+        `mqtt_drop_count` is cumulative since the bridge started, so any non-zero
+        value means at least one live update was lost to broker backpressure or a
+        packet-size limit. Routed through the standard warning channel so it
+        rides the existing banner + WS broadcast."""
+        if isinstance(drop_count, int) and drop_count > 0:
+            await self.state.set_warning(
+                "mqtt_drops",
+                "warning",
+                f"Bridge dropped {drop_count} MQTT publish(es) — broker "
+                f"backpressure or packet-size limit. Some live updates may be "
+                f"missing (count is cumulative since the bridge started).",
+            )
+        else:
+            await self.state.clear_warning("mqtt_drops")
 
     async def _extract_dps_from_event(
         self, vars_: dict[str, str], parsed: dict[str, Any], payload_str: str

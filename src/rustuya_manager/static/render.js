@@ -109,6 +109,29 @@ export function renderTemplates() {
     row.innerHTML = `<span class="text-slate-400 dark:text-slate-500 w-20 shrink-0">${k}</span><span class="flex-1 min-w-0 break-all">${escapeHtml(v)}</span>`;
     $templates.appendChild(row);
   }
+
+  // Bridge-reported diagnostics from the latest status reply live in this same
+  // debug drawer — authoritative totals kept out of the tight header. device_count
+  // is the bridge's full fleet size; mqtt drops is its cumulative publish-drop
+  // count (highlighted when non-zero, mirroring the warning banner).
+  const snap = state.snapshot;
+  const divider = document.createElement("div");
+  divider.className = "border-t border-slate-200 dark:border-slate-700 my-1";
+  $templates.appendChild(divider);
+  const drops = Number(snap.mqtt_drop_count || 0);
+  const diag = [
+    ["devices", snap.device_count != null ? String(snap.device_count) : "—", false],
+    ["mqtt drops", String(drops), drops > 0],
+  ];
+  for (const [k, v, warn] of diag) {
+    const row = document.createElement("div");
+    row.className = "flex";
+    const valueCls = warn
+      ? "flex-1 min-w-0 break-all text-amber-600 dark:text-amber-400 font-medium"
+      : "flex-1 min-w-0 break-all";
+    row.innerHTML = `<span class="text-slate-400 dark:text-slate-500 w-20 shrink-0">${k}</span><span class="${valueCls}">${escapeHtml(v)}</span>`;
+    $templates.appendChild(row);
+  }
 }
 
 // Filter tab styling. Each tab is colored per sync class so the row

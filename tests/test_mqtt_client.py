@@ -826,6 +826,141 @@ class TestFormatErrorMessage:
         assert msg == "reason=ip_mismatch"
 
 
+class TestStatusPagination:
+    """The bridge paginates the `status` device list (default 50/page) to stay
+    under broker packet limits, advertising offset/returned/has_more plus the
+    authoritative device_count and a cumulative mqtt_drop_count. The manager
+    must page through and union, not truncate to the first page."""
+
+    @staticmethod
+    async def _templated_client(state: State) -> tuple[BridgeClient, MagicMock]:
+        await state.set_templates(
+            BridgeTemplates(
+                root="myhome/tuya",
+                command="myhome/tuya/cmd/{id}/{action}",
+                event="myhome/tuya/dev/{name}/dp/{dp}/state",
+                message="tuyalog/{level}/{id}",
+                scanner="myhome/tuya/scanner",
+                payload="{value}",
+            )
+        )
+        return _make_client(state)
+
+    @staticmethod
+    def _status(devices: dict, **extra) -> str:
+        body = {"action": "status", "id": "bridge", "status": "ok", "devices": devices}
+        body.update(extra)
+        return json.dumps(body)
+
+    async def test_single_page_commits_with_diagnostics(self):
+        state = State()
+        client, aio = await self._templated_client(state)
+        await client._dispatch(
+            "tuyalog/response/bridge",
+            self._status(
+                {"a": {"id": "a"}},
+                device_count=1,
+                offset=0,
+                limit=50,
+                returned=1,
+                has_more=False,
+                mqtt_drop_count=0,
+            ),
+        )
+        assert set(state.bridge) == {"a"}
+        assert state.device_count == 1
+        assert state.mqtt_drop_count == 0
+        # has_more=False ⇒ no follow-up page request was published.
+        aio.publish.assert_not_called()
+
+    async def test_pages_through_and_unions(self):
+        state = State()
+        client, aio = await self._templated_client(state)
+
+        # Page 0 of 3 devices (page size 2): has_more ⇒ buffer, don't commit yet,
+        # and request the next window at offset=2.
+        await client._dispatch(
+            "tuyalog/response/bridge",
+            self._status(
+                {"a": {"id": "a"}, "b": {"id": "b"}},
+                device_count=3,
+                offset=0,
+                limit=2,
+                returned=2,
+                has_more=True,
+                mqtt_drop_count=0,
+            ),
+        )
+        assert state.bridge == {}, "must not commit a partial snapshot mid-paging"
+        aio.publish.assert_awaited_once()
+        topic, payload = aio.publish.await_args.args[:2]
+        assert topic == "myhome/tuya/cmd/bridge/status"
+        body = json.loads(payload)
+        assert body["action"] == "status" and body["offset"] == 2
+
+        # Final page: has_more=False ⇒ commit the union of both pages.
+        await client._dispatch(
+            "tuyalog/response/bridge",
+            self._status(
+                {"c": {"id": "c"}},
+                device_count=3,
+                offset=2,
+                limit=2,
+                returned=1,
+                has_more=False,
+                mqtt_drop_count=0,
+            ),
+        )
+        assert set(state.bridge) == {"a", "b", "c"}
+        assert state.device_count == 3
+
+    async def test_mqtt_drop_count_raises_then_clears_warning(self):
+        state = State()
+        client, _ = await self._templated_client(state)
+
+        await client._dispatch(
+            "tuyalog/response/bridge",
+            self._status(
+                {"a": {"id": "a"}},
+                device_count=1,
+                offset=0,
+                returned=1,
+                has_more=False,
+                mqtt_drop_count=4,
+            ),
+        )
+        assert state.mqtt_drop_count == 4
+        assert "mqtt_drops" in state.warnings
+
+        # A later reply with no drops clears the banner.
+        await client._dispatch(
+            "tuyalog/response/bridge",
+            self._status(
+                {"a": {"id": "a"}},
+                device_count=1,
+                offset=0,
+                returned=1,
+                has_more=False,
+                mqtt_drop_count=0,
+            ),
+        )
+        assert "mqtt_drops" not in state.warnings
+
+    async def test_legacy_reply_without_pagination_fields_commits_once(self):
+        # A pre-pagination bridge omits offset/has_more/device_count entirely —
+        # the reply must commit immediately, request no follow-up, and leave
+        # device_count untouched (None). Behaviour-identical to the old path.
+        state = State()
+        client, aio = await self._templated_client(state)
+        await client._dispatch(
+            "tuyalog/response/bridge",
+            self._status({"a": {"id": "a"}, "b": {"id": "b"}}),
+        )
+        assert set(state.bridge) == {"a", "b"}
+        assert state.device_count is None
+        aio.publish.assert_not_called()
+
+
 # pytest-asyncio integration — auto mode is the simplest setup for our needs.
 def pytest_collection_modifyitems(items):
     for item in items:

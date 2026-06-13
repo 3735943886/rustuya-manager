@@ -100,6 +100,15 @@ class State:
     # the presence of an `_scan_ran_at` timestamp on the coordinator side.
     scan_results: dict[str, ScanSighting] = field(default_factory=dict)
 
+    # Bridge-reported diagnostics from the latest `status` reply. `device_count`
+    # is the bridge's authoritative total — it can exceed len(bridge) only
+    # transiently while the manager pages through a large fleet; after a full
+    # page-through the two agree. `mqtt_drop_count` is the bridge's cumulative
+    # count of MQTT publishes it had to drop (non-zero ⇒ data loss worth
+    # surfacing). `device_count` is None until the first status reply lands.
+    device_count: int | None = None
+    mqtt_drop_count: int = 0
+
     # Per-plugin state slices keyed by namespace name (see plugins.py). Empty
     # unless a plugin calls its StateNamespace.set(); `serialize_state` omits
     # the `plugins` snapshot key entirely while this is empty, so a
@@ -122,9 +131,19 @@ class State:
             self.cloud = devices
             self._bump()
 
-    async def set_bridge(self, devices: dict[str, Device]) -> None:
+    async def set_bridge(
+        self,
+        devices: dict[str, Device],
+        *,
+        device_count: int | None = None,
+        mqtt_drop_count: int | None = None,
+    ) -> None:
         async with self._changed:
             self.bridge = devices
+            if device_count is not None:
+                self.device_count = device_count
+            if mqtt_drop_count is not None:
+                self.mqtt_drop_count = mqtt_drop_count
             self._bump()
 
     async def set_templates(self, t: BridgeTemplates) -> None:

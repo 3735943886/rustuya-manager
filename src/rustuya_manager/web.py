@@ -98,6 +98,11 @@ def serialize_state(state: State) -> dict[str, Any]:
         "warnings": state.warnings,
         "cloud_path": state.cloud_path,
         "cloud_loaded": bool(state.cloud),
+        # Bridge-reported diagnostics from the latest paginated `status` reply.
+        # device_count is the authoritative total; mqtt_drop_count is cumulative
+        # publish drops. Surfaced in the "Bridge templates" debug drawer.
+        "device_count": state.device_count,
+        "mqtt_drop_count": state.mqtt_drop_count,
         # Wholesale dict (id → sighting) from the last LAN scan. Empty
         # until the first scan completes. Dataclass → dict here keeps
         # the WS frame schema-stable for the UI (no datetime/None

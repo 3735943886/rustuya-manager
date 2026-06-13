@@ -120,6 +120,7 @@ export function renderTemplates() {
   $templates.appendChild(divider);
   const drops = Number(snap.mqtt_drop_count || 0);
   const diag = [
+    ["bridge", snap.bridge_version || "—", false],
     ["devices", snap.device_count != null ? String(snap.device_count) : "—", false],
     ["mqtt drops", String(drops), drops > 0],
   ];

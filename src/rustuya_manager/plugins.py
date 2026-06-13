@@ -48,6 +48,29 @@ ENTRY_POINT_GROUP = "rustuya_manager.plugins"
 # An MQTT message handler: async (topic, payload, retain) -> None.
 MqttHandler = Callable[[str, str, bool], Awaitable[None]]
 
+# Credential fields stripped from the bridge config before it's handed to a
+# plugin via ctx.bridge_config(). Matches the bridge's own skip_serializing set
+# (rc25+) so the manager redacts identically even against an older/external
+# bridge that still publishes them.
+_REDACTED_CONFIG_KEYS = frozenset({"mqtt_user", "mqtt_password"})
+
+
+def _scrub_broker_url(url: str) -> str:
+    """Drop an inline `user[:pass]@` segment from a broker URL, keeping the
+    scheme + host:port. The bridge documents that credentials embedded directly
+    in `mqtt_broker` still serialize even after rc25's field redaction, so this
+    closes that residual leak path on the manager side."""
+    if "@" not in url:
+        return url
+    scheme = ""
+    rest = url
+    if "://" in url:
+        scheme, rest = url.split("://", 1)
+        scheme += "://"
+    # Strip everything up to and including the last '@' (host/port is the tail).
+    _, _, host = rest.rpartition("@")
+    return scheme + host
+
 
 def topic_matches(filter_: str, topic: str) -> bool:
     """Return True if MQTT topic `topic` matches subscription filter `filter_`.
@@ -147,17 +170,29 @@ class PluginContext:
         return {did: dev.raw_data for did, dev in self._state.cloud.items()}
 
     def bridge_config(self) -> dict[str, Any] | None:
-        """Read-only copy of the raw `{root}/bridge/config` payload dict, or
-        None if the bridge config hasn't been received yet.
+        """Read-only, credential-redacted copy of the raw `{root}/bridge/config`
+        payload dict, or None if the bridge config hasn't been received yet.
 
         These are the bridge's original config keys (`mqtt_root_topic`,
-        `mqtt_event_topic`, `mqtt_payload_template`, `mqtt_retain`, …) before
-        `{root}` substitution — what a plugin needs to re-derive its own view
-        of the bridge's topic/payload scheme. A shallow copy is returned so the
-        caller can't mutate the stored config (values are JSON scalars/strings,
-        so shallow is sufficient)."""
+        `mqtt_event_topic`, `mqtt_payload_template`, `mqtt_retain`, `version`, …)
+        before `{root}` substitution — what a plugin needs to re-derive its own
+        view of the bridge's topic/payload scheme.
+
+        MQTT credentials are stripped before the dict reaches a plugin:
+        `mqtt_user`/`mqtt_password` are dropped and any inline `user:pass@` in
+        `mqtt_broker` is scrubbed. Bridge >= 0.2.0rc25 already omits the
+        credential fields from the published config, but the manager redacts
+        here too so an older or external standalone bridge can't leak its
+        broker credentials through the plugin surface regardless of its version.
+        A fresh dict is returned so the caller can't mutate the stored config."""
         cfg = self._state.bridge_config_raw
-        return dict(cfg) if cfg is not None else None
+        if cfg is None:
+            return None
+        safe = {k: v for k, v in cfg.items() if k not in _REDACTED_CONFIG_KEYS}
+        broker = safe.get("mqtt_broker")
+        if isinstance(broker, str):
+            safe["mqtt_broker"] = _scrub_broker_url(broker)
+        return safe
 
     def add_api_router(self, router: APIRouter) -> None:
         self._registry.api_routers.append(router)

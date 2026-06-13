@@ -103,6 +103,9 @@ def serialize_state(state: State) -> dict[str, Any]:
         # publish drops. Surfaced in the "Bridge templates" debug drawer.
         "device_count": state.device_count,
         "mqtt_drop_count": state.mqtt_drop_count,
+        # Running bridge build, published into {root}/bridge/config since bridge
+        # 0.2.0rc25 (None when an older bridge omits it). Same debug drawer.
+        "bridge_version": (state.bridge_config_raw or {}).get("version"),
         # Wholesale dict (id → sighting) from the last LAN scan. Empty
         # until the first scan completes. Dataclass → dict here keeps
         # the WS frame schema-stable for the UI (no datetime/None

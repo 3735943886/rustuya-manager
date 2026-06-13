@@ -185,6 +185,39 @@ async def test_bridge_config_none_then_copy():
     assert state.bridge_config_raw["mqtt_root_topic"] == "rustuya"
 
 
+async def test_bridge_config_redacts_credentials():
+    # ctx.bridge_config() must never hand MQTT credentials to a plugin, even if
+    # an older/external bridge published them. mqtt_user/mqtt_password are
+    # dropped and inline user:pass@ in mqtt_broker is scrubbed; everything else
+    # (incl. the bridge version) passes through.
+    state = State()
+    ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
+    await state.set_bridge_config_raw(
+        {
+            "mqtt_root_topic": "rustuya",
+            "mqtt_user": "admin",
+            "mqtt_password": "secret",
+            "mqtt_broker": "mqtt://u:p@host:1883",
+            "version": "0.3.0-rc.25",
+        }
+    )
+    got = ctx.bridge_config()
+    assert "mqtt_user" not in got
+    assert "mqtt_password" not in got
+    assert got["mqtt_broker"] == "mqtt://host:1883"  # inline creds scrubbed
+    assert got["version"] == "0.3.0-rc.25"  # non-secret fields preserved
+    assert got["mqtt_root_topic"] == "rustuya"
+    # The stored config is untouched (redaction works on a copy).
+    assert state.bridge_config_raw["mqtt_user"] == "admin"
+
+
+async def test_serialize_exposes_bridge_version():
+    state = State()
+    assert serialize_state(state)["bridge_version"] is None  # no config yet
+    await state.set_bridge_config_raw({"mqtt_root_topic": "rustuya", "version": "0.3.0-rc.25"})
+    assert serialize_state(state)["bridge_version"] == "0.3.0-rc.25"
+
+
 async def test_set_bridge_config_raw_does_not_bump_version():
     # set_templates already broadcasts the same config change; storing the raw
     # dict must not trigger a second redundant WS push.

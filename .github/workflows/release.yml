@@ -51,13 +51,15 @@ jobs:
           cache: pip
 
       - name: Sanity-check that the tag matches the package version
-        # The tag (minus its leading `v`) must equal pyproject's [project].version.
-        # Catches the easy mistake of bumping one but not the other before tagging.
+        # The tag (minus its leading `v`) must equal the single-sourced version
+        # in src/rustuya_manager/__init__.py:__version__ (pyproject resolves it
+        # dynamically from there, so there's nothing static to read in pyproject).
+        # Catches tagging without bumping __version__.
         run: |
           TAG="${GITHUB_REF_NAME#v}"
-          PKG_VER=$(python -c "import tomllib; print(tomllib.loads(open('pyproject.toml','rb').read().decode())['project']['version'])")
+          PKG_VER=$(grep -oP '__version__\s*=\s*"\K[^"]+' src/rustuya_manager/__init__.py | head -n1)
           if [ "$TAG" != "$PKG_VER" ]; then
-            echo "Tag v$TAG does not match pyproject version $PKG_VER" >&2
+            echo "Tag v$TAG does not match package __version__ $PKG_VER" >&2
             exit 1
           fi
 

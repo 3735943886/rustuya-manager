@@ -4,7 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rustuya-manager"
-version = "0.1.0rc33"
+# Single source of truth: src/rustuya_manager/__init__.py:__version__. Bump it
+# there only — this resolves it at build time, web.py reads it at runtime, and
+# check.sh reads it from the installed package. See [tool.setuptools.dynamic].
+dynamic = ["version"]
 description = "Management tool for rustuya-bridge — keeps Tuya Cloud devices and the bridge in sync"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -29,6 +32,9 @@ dev = [
 
 [project.scripts]
 rustuya-manager = "rustuya_manager.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "rustuya_manager.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

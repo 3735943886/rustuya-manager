@@ -23,6 +23,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import __version__
 from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
 from .models import Device
 from .mqtt import BridgeClient
@@ -168,7 +169,7 @@ def build_app(
     auth: str | None = None,
     plugins: list[Any] | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version="0.1.0rc22")
+    app = FastAPI(title="rustuya-manager", version=__version__)
     if auth:
         if ":" not in auth:
             raise ValueError("--auth must be in 'user:password' form")

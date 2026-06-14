@@ -16,13 +16,13 @@
 
 import { state, ALL_CATEGORIES, saveFilters } from "./state.js";
 import { formatAgo, toast } from "./dom.js";
-import { uploadCloud, postCommand, postScan } from "./api.js";
+import { uploadCloud, postCommand, postScan, publishCommand } from "./api.js";
 import { connect } from "./ws.js";
 import { render, renderDevices, renderFilterCounts } from "./render.js";
 import { initSyncModal } from "./modal-sync.js";
 import { initWizardModal } from "./modal-wizard.js";
 import { initDeviceModal, openAddModal } from "./modal-device.js";
-import { initConfirmModal } from "./modal-confirm.js";
+import { initConfirmModal, confirm } from "./modal-confirm.js";
 import { initPluginHost } from "./plugins.js";
 
 // ── Cloud upload (drop zone + file picker) ─────────────────────────────────
@@ -196,16 +196,30 @@ document.getElementById("device-add-btn")?.addEventListener("click", () => {
   openAddModal();
 });
 
-// ── Mobile hamburger ───────────────────────────────────────────────────────
-// Each menu item carries `data-mobile-action="<desktop-button-id>"`; we
-// forward the click to that button so existing handlers stay the single
-// source of truth, then close the <details> so the panel dismisses itself.
-for (const el of document.querySelectorAll("[data-mobile-action]")) {
-  el.addEventListener("click", () => {
-    document.getElementById(el.dataset.mobileAction)?.click();
-    el.closest("details")?.removeAttribute("open");
+// ── Actions menu ─────────────────────────────────────────────────────────
+// Every header action lives in one <details id="actions-menu"> on all
+// viewports. Each item keeps its own id, so the per-button handlers above bind
+// directly — here we just dismiss the menu after any item click.
+const $actionsMenu = document.getElementById("actions-menu");
+$actionsMenu?.addEventListener("click", (e) => {
+  if (e.target.closest("button")) $actionsMenu.removeAttribute("open");
+});
+
+// Reconfigure: tell the bridge to re-read its config and restart. Guarded by a
+// confirm because it briefly disconnects the bridge (devices are not removed).
+// `id: "bridge"` matches the bridge's command contract; the manager handles the
+// resulting bridge/config clear + re-resolve, and an embedded bridge respawns.
+document.getElementById("reconfigure-btn")?.addEventListener("click", async () => {
+  const ok = await confirm({
+    title: "Reconfigure bridge",
+    message:
+      "The bridge will re-read its configuration and briefly disconnect. " +
+      "Devices are not removed.",
+    okLabel: "Reconfigure",
   });
-}
+  if (!ok) return;
+  await publishCommand({ action: "reconfigure", id: "bridge" });
+});
 
 // ── Init modals + open the socket ──────────────────────────────────────────
 initSyncModal();

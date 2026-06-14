@@ -52,9 +52,9 @@ def test_theme_toggle_flips_html_dark_class(page: Page, server_url: str) -> None
     page.goto(server_url)
     html = page.locator("html")
     initial_dark = "dark" in (html.get_attribute("class") or "")
-    # First-match handles both the desktop button and the mobile menu
-    # twin; whichever is visible at the viewport's media query wins.
-    page.locator("#theme-btn, [data-mobile-action='theme-btn']").first.click()
+    # All header actions live in the single #actions-menu now; open it first.
+    page.locator("#actions-menu > summary").click()
+    page.locator("#theme-btn").click()
     final_dark = "dark" in (html.get_attribute("class") or "")
     assert initial_dark != final_dark, "theme toggle did not flip the html class"
 
@@ -424,6 +424,8 @@ def test_scan_button_posts_to_api_scan(page: Page, server_url: str) -> None:
     the server — we only assert the *client* sends the right request, the
     coordinator's behavior is exercised in tests/test_scan.py."""
     page.goto(server_url)
+    # Scan lives in the single #actions-menu now; open it to reach the button.
+    page.locator("#actions-menu > summary").click()
     button = page.locator("#scan-btn")
     expect(button).to_be_visible()
 

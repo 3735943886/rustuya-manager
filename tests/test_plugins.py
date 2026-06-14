@@ -142,10 +142,52 @@ def test_api_plugins_manifest_and_static(tmp_path):
     client = _make_client(state)
     with TestClient(build_app(state, client, plugins=[register])) as tc:
         manifest = tc.get("/api/plugins").json()
-        assert manifest == [{"id": "hello", "label": "Hello", "js_url": "/plugins/hello/index.js"}]
+        assert manifest == {
+            "pages": [{"id": "hello", "label": "Hello", "js_url": "/plugins/hello/index.js"}],
+            "init_scripts": [],
+        }
         served = tc.get("/plugins/hello/index.js")
         assert served.status_code == 200
         assert "mount" in served.text
+
+
+def test_api_plugins_header_init_manifest_and_shared_mount(tmp_path):
+    # A plugin can contribute an eager init script (the route for header menu
+    # items) reusing the same id/static_dir as its page — mounted once.
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.js").write_text("export function mount() {}")
+    (static_dir / "init.js").write_text("export function init(ctx) {}")
+
+    def register(ctx):
+        ctx.add_page("hello", "Hello", static_dir=str(static_dir))
+        ctx.add_header_init("hello", static_dir=str(static_dir))
+
+    state = State()
+    client = _make_client(state)
+    with TestClient(build_app(state, client, plugins=[register])) as tc:
+        manifest = tc.get("/api/plugins").json()
+        assert manifest["init_scripts"] == ["/plugins/hello/init.js"]
+        # Shared mount serves both the page and the init module.
+        assert "mount" in tc.get("/plugins/hello/index.js").text
+        assert "init" in tc.get("/plugins/hello/init.js").text
+
+
+def test_header_only_plugin_has_init_script_but_no_pages(tmp_path):
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "init.js").write_text("export function init(ctx) {}")
+
+    def register(ctx):
+        ctx.add_header_init("menu-only", static_dir=str(static_dir))
+
+    state = State()
+    client = _make_client(state)
+    with TestClient(build_app(state, client, plugins=[register])) as tc:
+        manifest = tc.get("/api/plugins").json()
+        assert manifest["pages"] == []
+        assert manifest["init_scripts"] == ["/plugins/menu-only/init.js"]
+        assert tc.get("/plugins/menu-only/init.js").status_code == 200
 
 
 # ── (e) Read-only snapshots: devices() + bridge_config() ─────────────────
@@ -289,7 +331,9 @@ class TestZeroPluginNoRegression:
         state = State()
         client = _make_client(state)
         with TestClient(build_app(state, client)) as tc:
-            assert tc.get("/api/plugins").json() == []
+            # Empty lists ⇒ the client builds no tab bar and runs no eager
+            # imports, so a plugin-less UI is identical to before.
+            assert tc.get("/api/plugins").json() == {"pages": [], "init_scripts": []}
 
     def test_index_html_has_no_tab_bar(self):
         state = State()

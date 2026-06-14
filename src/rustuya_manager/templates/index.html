@@ -64,39 +64,17 @@
            (the WS keeps state live, so even Refresh is rarely needed), so a
            single menu keeps the tight header uncluttered and scales as actions
            are added — no more desktop-icon / mobile-hamburger duplication.
-           Items keep their original ids so the per-button handlers in app.js
-           bind directly. `data-page-scope="devices"` items are hidden by the
-           plugin host (plugins.js) when a plugin tab is active. The disclosure
-           triangle is stripped from <summary> globally in the <head>. -->
+           The dropdown is rendered from the unified header-action registry
+           (header-actions.js): app.js registers the built-ins and plugins add
+           their own via ctx.addHeaderAction, so there's one code path for both.
+           `data-page-scope="devices"` items (set by the registry) are hidden by
+           the plugin host (plugins.js) when a plugin tab is active. The
+           disclosure triangle is stripped from <summary> globally in <head>. -->
       <details id="actions-menu" class="relative">
         <summary class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none cursor-pointer select-none" title="Menu">
           ☰
         </summary>
-        <div class="absolute right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-lg p-1 z-20 min-w-[200px]">
-          <button id="device-add-btn" data-page-scope="devices" class="w-full px-3 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-sm text-left">
-            <span class="w-5 text-center">+</span><span>Add device</span>
-          </button>
-          <button id="wizard-header-btn" class="w-full px-3 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-sm text-left">
-            <span class="w-5 text-center">☁</span><span>Fetch from cloud</span>
-          </button>
-          <button id="scan-btn" data-page-scope="devices" class="w-full px-3 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-sm text-left">
-            <span class="w-5 text-center">📡</span><span>Scan LAN</span>
-          </button>
-          <button id="theme-btn" class="w-full px-3 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-sm text-left">
-            <span class="w-5 text-center"><span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span></span>
-            <span><span class="dark:hidden">Dark mode</span><span class="hidden dark:inline">Light mode</span></span>
-          </button>
-          <button id="refresh-btn" data-page-scope="devices" class="w-full px-3 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-sm text-left">
-            <span class="w-5 text-center">⟳</span><span>Refresh</span>
-          </button>
-          <div class="my-1 border-t border-slate-200 dark:border-slate-700"></div>
-          <!-- Bridge admin. Devices-scoped so it's hidden on plugin tabs. Sends
-               a `reconfigure` command (guarded by a confirm in app.js): the
-               bridge re-reads its config and restarts; devices are kept. -->
-          <button id="reconfigure-btn" data-page-scope="devices" class="w-full px-3 py-2 flex items-center gap-3 hover:bg-amber-50 dark:hover:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded text-sm text-left" title="Tell the bridge to re-read its config and restart">
-            <span class="w-5 text-center">🔧</span><span>Reconfigure bridge</span>
-          </button>
-        </div>
+        <div data-actions-panel class="absolute right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-lg p-1 z-20 min-w-[200px]"></div>
       </details>
     </div>
   </div>
@@ -210,10 +188,16 @@
     </div>
   </section>
 
-  <!-- Resolved bridge templates (debug aid) -->
+  <!-- Bridge info: version, device count, mode (embedded/external), and the
+       resolved topic templates. The summary carries a mode badge that render.js
+       fills, so embedded-vs-external (and the embed→external conflict) is
+       visible even while the drawer is collapsed. -->
   <section>
     <details class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-      <summary class="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50">Bridge templates</summary>
+      <summary class="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-center gap-2">
+        <span>Bridge info</span>
+        <span id="bridge-info-badge" class="hidden text-xs px-2 py-0.5 rounded-full border"></span>
+      </summary>
       <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-700 dark:text-slate-300 space-y-1" id="templates-block">
         <div class="text-slate-400 dark:text-slate-500">(waiting for bootstrap)</div>
       </div>

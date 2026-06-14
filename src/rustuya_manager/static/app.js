@@ -20,10 +20,11 @@ import { uploadCloud, postCommand, postScan, publishCommand } from "./api.js";
 import { connect } from "./ws.js";
 import { render, renderDevices, renderFilterCounts } from "./render.js";
 import { initSyncModal } from "./modal-sync.js";
-import { initWizardModal } from "./modal-wizard.js";
+import { initWizardModal, openWizardModal } from "./modal-wizard.js";
 import { initDeviceModal, openAddModal } from "./modal-device.js";
 import { initConfirmModal, confirm } from "./modal-confirm.js";
 import { initPluginHost } from "./plugins.js";
+import { registerHeaderAction, renderActionsMenu } from "./header-actions.js";
 
 // ── Cloud upload (drop zone + file picker) ─────────────────────────────────
 const $dropzone = document.getElementById("cloud-dropzone");
@@ -122,13 +123,17 @@ $sort.addEventListener("change", (e) => {
   renderDevices();
 });
 
-// ── Refresh / theme ────────────────────────────────────────────────────────
-const $refreshBtn = document.getElementById("refresh-btn");
-$refreshBtn.addEventListener("click", async () => {
-  // Keep the label stable — the refresh usually completes in <100ms and a
-  // "refreshing…" flicker just makes the button size jitter. Disabled is
-  // enough visual feedback; the toast confirms completion.
-  $refreshBtn.disabled = true;
+// ── Header actions (unified registry) ───────────────────────────────────────
+// The hamburger dropdown is rendered from header-actions.js. The built-ins are
+// registered here; plugins add their own via ctx.addHeaderAction (plugins.js)
+// into the same registry — one code path for both. Handlers receive (ev, btn)
+// so per-action UI (e.g. disabling during a fetch) works without a pre-fetched
+// element reference (the buttons are created by renderActionsMenu).
+
+// Refresh — pull a fresh snapshot and re-ask the bridge for its status. Keep the
+// label stable (it usually completes <100ms); disabled is enough feedback.
+async function doRefresh(_ev, btn) {
+  btn.disabled = true;
   try {
     const res = await fetch("/api/state");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -142,24 +147,19 @@ $refreshBtn.addEventListener("click", async () => {
   } catch (e) {
     toast(`Refresh failed: ${e.message}`, "error");
   } finally {
-    $refreshBtn.disabled = false;
+    btn.disabled = false;
   }
-});
+}
 
 // Scan — runs the bridge LAN scan through the server-side coordinator
-// (POST /api/scan). The endpoint awaits the full drain (~18s typical, 20s
-// max) and returns once sightings land on state.scan_results, so the WS
-// snapshot the UI receives next already reflects what the bridge saw.
-//
-// Two effects:
-//   - Devices registered with a pinned IP whose sighting drifted get an
-//     ERR_STATE 906 on the bridge side, surfaced in MSG / row-3 warning.
-//   - Missing-class devices (cloud-only) that answered the broadcast
-//     appear in scan_results so the card renderer can highlight them
-//     (PR C).
-const $scanBtn = document.getElementById("scan-btn");
-$scanBtn?.addEventListener("click", async () => {
-  $scanBtn.disabled = true;
+// (POST /api/scan). The endpoint awaits the full drain (~18s typical, 20s max)
+// and returns once sightings land on state.scan_results, so the next WS
+// snapshot already reflects what the bridge saw. Devices registered with a
+// pinned IP whose sighting drifted get an ERR_STATE 906 (surfaced in MSG);
+// cloud-only devices that answered show up in scan_results for the card
+// renderer to highlight.
+async function doScan(_ev, btn) {
+  btn.disabled = true;
   try {
     const result = await postScan();
     if (result.ok) {
@@ -168,48 +168,30 @@ $scanBtn?.addEventListener("click", async () => {
       toast(`Scan failed: ${result.error || "unknown"}`, "error");
     }
   } finally {
-    $scanBtn.disabled = false;
+    btn.disabled = false;
   }
-});
+}
 
-// Theme toggle — flips the `dark` class on <html> and persists the choice.
-// The initial application happens inline in the <head> to avoid FOUC; this
-// handler only deals with user-initiated toggling.
-document.getElementById("theme-btn")?.addEventListener("click", () => {
+// Theme toggle — flips the `dark` class on <html> and persists the choice. The
+// initial application happens inline in <head> to avoid FOUC.
+function doThemeToggle() {
   const dark = document.documentElement.classList.toggle("dark");
   localStorage.setItem("theme", dark ? "dark" : "light");
-});
+}
 
-// Re-render the "Xs ago" labels every 5 seconds without a full re-render.
-setInterval(() => {
-  for (const el of document.querySelectorAll("[data-lastseen]")) {
-    el.textContent = formatAgo(Number(el.dataset.lastseen));
-  }
-}, 5000);
-
-// ── Top-bar [+] → open add-device modal ────────────────────────────────────
-document.getElementById("device-add-btn")?.addEventListener("click", () => {
+function doAddDevice() {
   if (!state.snapshot) {
     toast("waiting for bridge state…", "error");
     return;
   }
   openAddModal();
-});
-
-// ── Actions menu ─────────────────────────────────────────────────────────
-// Every header action lives in one <details id="actions-menu"> on all
-// viewports. Each item keeps its own id, so the per-button handlers above bind
-// directly — here we just dismiss the menu after any item click.
-const $actionsMenu = document.getElementById("actions-menu");
-$actionsMenu?.addEventListener("click", (e) => {
-  if (e.target.closest("button")) $actionsMenu.removeAttribute("open");
-});
+}
 
 // Reconfigure: tell the bridge to re-read its config and restart. Guarded by a
 // confirm because it briefly disconnects the bridge (devices are not removed).
 // `id: "bridge"` matches the bridge's command contract; the manager handles the
 // resulting bridge/config clear + re-resolve, and an embedded bridge respawns.
-document.getElementById("reconfigure-btn")?.addEventListener("click", async () => {
+async function doReconfigure() {
   const ok = await confirm({
     title: "Reconfigure bridge",
     message:
@@ -219,6 +201,48 @@ document.getElementById("reconfigure-btn")?.addEventListener("click", async () =
   });
   if (!ok) return;
   await publishCommand({ action: "reconfigure", id: "bridge" });
+}
+
+// Built-in items — ids/scopes/order preserved so the menu (and the e2e suite)
+// looks and behaves exactly as before.
+registerHeaderAction({ id: "device-add-btn", iconHtml: "+", labelHtml: "Add device", scope: "devices", order: 10, onClick: doAddDevice });
+registerHeaderAction({ id: "wizard-header-btn", iconHtml: "☁", labelHtml: "Fetch from cloud", order: 20, onClick: openWizardModal });
+registerHeaderAction({ id: "scan-btn", iconHtml: "📡", labelHtml: "Scan LAN", scope: "devices", order: 30, onClick: doScan });
+registerHeaderAction({
+  id: "theme-btn",
+  iconHtml: `<span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span>`,
+  labelHtml: `<span class="dark:hidden">Dark mode</span><span class="hidden dark:inline">Light mode</span>`,
+  order: 40,
+  onClick: doThemeToggle,
+});
+registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: "Refresh", scope: "devices", order: 50, onClick: doRefresh });
+registerHeaderAction({
+  id: "reconfigure-btn",
+  iconHtml: "🔧",
+  labelHtml: "Reconfigure bridge",
+  scope: "devices",
+  order: 100,
+  dividerBefore: true,
+  danger: true,
+  title: "Tell the bridge to re-read its config and restart",
+  onClick: doReconfigure,
+});
+renderActionsMenu();
+
+// Re-render the "Xs ago" labels every 5 seconds without a full re-render.
+setInterval(() => {
+  for (const el of document.querySelectorAll("[data-lastseen]")) {
+    el.textContent = formatAgo(Number(el.dataset.lastseen));
+  }
+}, 5000);
+
+// ── Actions menu dismiss ─────────────────────────────────────────────────────
+// Buttons are wired per-item by the registry; here we just close the dropdown
+// after any item click (delegated, so it covers registry- and plugin-added
+// items alike).
+const $actionsMenu = document.getElementById("actions-menu");
+$actionsMenu?.addEventListener("click", (e) => {
+  if (e.target.closest("button")) $actionsMenu.removeAttribute("open");
 });
 
 // ── Init modals + open the socket ──────────────────────────────────────────

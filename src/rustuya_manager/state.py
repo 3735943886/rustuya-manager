@@ -109,6 +109,17 @@ class State:
     device_count: int | None = None
     mqtt_drop_count: int = 0
 
+    # How this manager is sourcing the bridge, for UI display. `embed_requested`
+    # records whether `--embed-bridge` was passed; `bridge_embedded` is True only
+    # once an embedded bridge was actually spawned in-process. The pair lets the
+    # UI flag the conflict case — embed requested but an external bridge already
+    # owned the root, so we aborted the embed and talk to the external one
+    # (see cli._resolve_embedded_bridge, which also sets the
+    # `embedded_bridge_aborted` warning). Set once at startup; never mutated
+    # under the condition lock, so plain attributes (no _bump) are fine.
+    embed_requested: bool = False
+    bridge_embedded: bool = False
+
     # Per-plugin state slices keyed by namespace name (see plugins.py). Empty
     # unless a plugin calls its StateNamespace.set(); `serialize_state` omits
     # the `plugins` snapshot key entirely while this is empty, so a

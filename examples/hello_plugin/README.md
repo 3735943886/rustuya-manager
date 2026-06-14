@@ -1,6 +1,6 @@
 # hello_plugin — example rustuya-manager plugin
 
-A throwaway plugin that proves the manager's plugin host exposes all five
+A throwaway plugin that proves the manager's plugin host exposes all six
 surfaces. **Not** part of the manager package (absent from its package-data and
 entry points); it lives here purely for manual end-to-end verification.
 
@@ -13,6 +13,7 @@ entry points); it lives here purely for manual end-to-end verification.
 | State namespace | `"hello"`, broadcast over the existing `/ws` snapshot |
 | UI page | a "Hello" tab serving `static/index.js` |
 | Bridge client | `ctx.bridge_client` (available for publishing) |
+| Header menu item | eager `static/init.js` → `ctx.addHeaderAction` ("Ping (hello)") |
 
 ## Manual e2e
 
@@ -26,6 +27,8 @@ Then:
 1. Open the UI → click the **Hello** tab → the state block renders.
 2. Click **Call /api/hello/ping** → toast shows the incrementing counter, and the
    state block updates live (namespace → WS → `onState`).
+   - Or, without leaving Devices: open the ☰ menu → **Ping (hello)** (added by
+     the plugin's eager `init.js`) → same toast, no tab switch.
 3. Publish an MQTT message and watch the tab update live:
    ```bash
    mosquitto_pub -t 'hello/world' -m '{"msg":"hi"}'

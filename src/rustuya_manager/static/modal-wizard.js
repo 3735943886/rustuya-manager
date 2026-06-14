@@ -17,7 +17,6 @@ const $wizardQrImage = document.getElementById("wizard-qr-image");
 const $wizardWorkingMsg = document.getElementById("wizard-working-message");
 const $wizardDoneMsg = document.getElementById("wizard-done-message");
 const $wizardErrorMsg = document.getElementById("wizard-error-message");
-const $wizardHeaderBtn = document.getElementById("wizard-header-btn");
 const $wizardScanToggle = document.getElementById("wizard-scan-toggle");
 const $wizardScanInfo = document.getElementById("wizard-scan-info");
 const $wizardScanPopover = document.getElementById("wizard-scan-popover");
@@ -27,7 +26,7 @@ let wizardPollTimer = null;
 // toast firing on every tick until auto-close. Reset on each startWizard().
 let wizardWarningShown = false;
 
-async function openWizardModal() {
+export async function openWizardModal() {
   showWizardPane("idle");
   $wizardModal.classList.remove("hidden");
   $wizardStart.disabled = false;
@@ -186,10 +185,11 @@ async function cancelWizard() {
 
 export function initWizardModal() {
   $wizardOpen?.addEventListener("click", openWizardModal);
-  // The header has its own permanent entry point — same modal, same handler.
-  // Lets users re-fetch from Tuya cloud after the initial run (e.g. after
-  // adding a new device on the phone) without deleting tuyadevices.json first.
-  $wizardHeaderBtn?.addEventListener("click", openWizardModal);
+  // The header's "Fetch from cloud" entry point is registered in app.js through
+  // the unified header-action registry (it calls openWizardModal directly), so
+  // there's no wizard-header-btn binding here — same modal, one code path. This
+  // lets users re-fetch from Tuya cloud after the initial run (e.g. after adding
+  // a device on the phone) without deleting tuyadevices.json first.
   $wizardClose?.addEventListener("click", cancelWizard);
   $wizardCancel?.addEventListener("click", cancelWizard);
   $wizardStart?.addEventListener("click", startWizard);

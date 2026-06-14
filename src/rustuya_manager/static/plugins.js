@@ -10,6 +10,7 @@ import { state } from "./state.js";
 import { render } from "./render.js";
 import { toast } from "./dom.js";
 import { confirm } from "./modal-confirm.js";
+import { registerHeaderAction, renderActionsMenu } from "./header-actions.js";
 
 let manifest = [];
 const stateSubs = new Set();
@@ -60,6 +61,14 @@ function pluginCtx() {
     },
     toast,
     confirm,
+    // Contribute a hamburger-menu item through the same registry the built-in
+    // actions use. Plugins default into the 200+ order band (after the app's
+    // own items) and should namespace their `id` (e.g. "myplugin-thing") to
+    // avoid clobbering a built-in. Re-renders the menu immediately.
+    addHeaderAction: (action) => {
+      registerHeaderAction({ order: 200, ...action });
+      renderActionsMenu();
+    },
   };
 }
 
@@ -162,13 +171,31 @@ function buildTabBar() {
 }
 
 export async function initPluginHost() {
+  let data;
   try {
     const res = await fetch("/api/plugins");
     if (!res.ok) return;
-    manifest = await res.json();
+    data = await res.json();
   } catch {
     return; // host stays invisible on any boot error
   }
-  if (!Array.isArray(manifest) || manifest.length === 0) return; // no tab bar
-  buildTabBar();
+  // Manifest shape: { pages: [...], init_scripts: [url, ...] }.
+  manifest = Array.isArray(data?.pages) ? data.pages : [];
+  const initScripts = Array.isArray(data?.init_scripts) ? data.init_scripts : [];
+
+  // Eagerly load init modules so always-visible contributions (e.g. header
+  // menu items) appear without opening the plugin's tab. Each runs in
+  // isolation — one failing module doesn't block the others or the tab bar.
+  for (const url of initScripts) {
+    try {
+      const mod = await import(url);
+      if (typeof mod.init === "function") await mod.init(pluginCtx());
+    } catch (e) {
+      console.error("plugin init script failed", url, e);
+    }
+  }
+
+  // Tab bar only when there are pages; header-only plugins boot via init above
+  // without adding a tab.
+  if (manifest.length > 0) buildTabBar();
 }

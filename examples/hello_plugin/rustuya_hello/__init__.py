@@ -1,4 +1,4 @@
-"""Example rustuya-manager plugin — exercises all five host surfaces.
+"""Example rustuya-manager plugin — exercises all six host surfaces.
 
 This package is intentionally NOT shipped with rustuya-manager (it is not in the
 manager's package-data or entry points). Install it into the same environment to
@@ -13,6 +13,7 @@ It demonstrates, via the single `register(ctx)` entry point:
   3. a state namespace      ("hello", rides the WS broadcast)
   4. a UI page              (the "Hello" tab + static/index.js)
   5. the bridge client      (ctx.bridge_client, available for publishing)
+  6. a header menu item     (eager static/init.js → ctx.addHeaderAction)
 """
 
 from __future__ import annotations
@@ -61,3 +62,9 @@ def register(ctx) -> None:
 
     # ── 4. UI page ───────────────────────────────────────────────────────
     ctx.add_page("hello", "Hello", static_dir=str(_STATIC_DIR), entry="index.js")
+
+    # ── 6. Header menu item (eager init script) ──────────────────────────
+    # init.js runs at boot and calls ctx.addHeaderAction, so a "Ping" entry
+    # appears in the hamburger menu without opening the Hello tab. Shares the
+    # "hello" id/static_dir with the page, so it's served from the same mount.
+    ctx.add_header_init("hello", static_dir=str(_STATIC_DIR), entry="init.js")

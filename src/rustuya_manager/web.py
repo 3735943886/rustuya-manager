@@ -100,9 +100,17 @@ def serialize_state(state: State) -> dict[str, Any]:
         "cloud_loaded": bool(state.cloud),
         # Bridge-reported diagnostics from the latest paginated `status` reply.
         # device_count is the authoritative total; mqtt_drop_count is cumulative
-        # publish drops. Surfaced in the "Bridge templates" debug drawer.
+        # publish drops. Surfaced in the "Bridge info" drawer.
         "device_count": state.device_count,
         "mqtt_drop_count": state.mqtt_drop_count,
+        # How the bridge is sourced, for the "Bridge info" drawer. "embedded" =
+        # spawned in-process via --embed-bridge; "external" = a separate bridge
+        # over MQTT. `embed_requested` lets the UI flag the conflict case
+        # (embed asked for, but an external bridge already owned the root so the
+        # embed was aborted — also carried as the `embedded_bridge_aborted`
+        # warning above).
+        "bridge_mode": "embedded" if state.bridge_embedded else "external",
+        "embed_requested": state.embed_requested,
         # Running bridge build, published into {root}/bridge/config since bridge
         # 0.2.0rc25 (None when an older bridge omits it). Same debug drawer.
         "bridge_version": (state.bridge_config_raw or {}).get("version"),
@@ -392,35 +400,50 @@ def build_app(
         app.include_router(router)
 
     @app.get("/api/plugins")
-    async def get_plugins() -> list[dict[str, Any]]:
-        """Manifest of plugin UI pages: [{id, label, js_url}] (empty when none).
+    async def get_plugins() -> dict[str, Any]:
+        """Manifest the frontend boot fetches:
 
-        The frontend boot fetches this; an empty list means no tab bar is
-        rendered, keeping a plugin-less UI identical to today."""
-        return [
             {
-                "id": page["id"],
-                "label": page["label"],
-                "js_url": f"/plugins/{page['id']}/{page['entry']}",
+              "pages": [{id, label, js_url}],        # lazy tab pages
+              "init_scripts": ["/plugins/<id>/init.js", ...]  # eager modules
             }
-            for page in registry.pages
-        ]
+
+        Both lists empty ⇒ plugin-less UI is identical to today (no tab bar, no
+        eager imports). `init_scripts` modules export `init(ctx)` and run at
+        boot — that's how a plugin contributes always-visible UI such as a
+        hamburger-menu item (ctx.addHeaderAction)."""
+        return {
+            "pages": [
+                {
+                    "id": page["id"],
+                    "label": page["label"],
+                    "js_url": f"/plugins/{page['id']}/{page['entry']}",
+                }
+                for page in registry.pages
+            ],
+            "init_scripts": [
+                f"/plugins/{s['id']}/{s['entry']}" for s in registry.init_scripts
+            ],
+        }
 
     # Serve each plugin's static directory under /plugins/{id}/. The ASGI
     # _BasicAuthMiddleware wraps the whole app, so these paths inherit the same
-    # auth gate as everything else.
-    for page in registry.pages:
-        static_dir = Path(page["static_dir"])
+    # auth gate as everything else. Pages and init scripts share the same
+    # per-id mount, so a plugin that ships both under one id is mounted once.
+    _mounted_static: dict[str, Path] = {}
+    for item in (*registry.pages, *registry.init_scripts):
+        _mounted_static.setdefault(item["id"], Path(item["static_dir"]))
+    for plugin_id, static_dir in _mounted_static.items():
         if static_dir.is_dir():
             app.mount(
-                f"/plugins/{page['id']}",
+                f"/plugins/{plugin_id}",
                 StaticFiles(directory=static_dir),
-                name=f"plugin-{page['id']}",
+                name=f"plugin-{plugin_id}",
             )
         else:
             logger.warning(
-                "plugin %r static_dir %s is not a directory; page assets unavailable",
-                page["id"],
+                "plugin %r static_dir %s is not a directory; assets unavailable",
+                plugin_id,
                 static_dir,
             )
 

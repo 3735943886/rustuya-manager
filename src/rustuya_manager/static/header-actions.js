@@ -1,0 +1,69 @@
+// Unified header-action registry.
+//
+// Both the app's own hamburger items (Add device, Scan, Refresh, …) and any
+// plugin-contributed items register here; the host renders the #actions-menu
+// dropdown from this one list, sorted by `order`. A plugin adds a menu item the
+// exact same way the app declares its own — no second code path (DRY).
+//
+// An action is:
+//   { id, labelHtml, iconHtml, scope, order, dividerBefore, danger, title, onClick }
+//     id            stable element id (built-ins keep their original ids so the
+//                   e2e suite and any external selectors stay valid)
+//     labelHtml     text/HTML for the label (HTML allowed: the theme toggle uses
+//                   dark:/light: spans)
+//     iconHtml      text/HTML for the leading icon glyph
+//     scope         "devices" | undefined → sets data-page-scope so plugins.js
+//                   hides the item on plugin tabs
+//     order         sort key (built-ins 10..60, reconfigure 100; plugins 200+)
+//     dividerBefore insert a separator above this item
+//     danger        amber styling (used by Reconfigure)
+//     title         tooltip
+//     onClick       (ev, btn) => void
+
+const actions = [];
+
+const ITEM_CLS =
+  "w-full px-3 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 rounded text-sm text-left";
+const DANGER_CLS =
+  "w-full px-3 py-2 flex items-center gap-3 hover:bg-amber-50 dark:hover:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded text-sm text-left";
+
+// Register (or replace, by id) a header action. Idempotent on id so a plugin
+// re-init can't double-insert. Does not re-render — call renderActionsMenu()
+// after a batch of registrations.
+export function registerHeaderAction(action) {
+  if (!action || !action.id) return;
+  const next = { order: 100, ...action };
+  const i = actions.findIndex((a) => a.id === action.id);
+  if (i >= 0) actions[i] = next;
+  else actions.push(next);
+}
+
+// (Re)render the dropdown inside #actions-menu from the registry.
+export function renderActionsMenu() {
+  const menu = document.getElementById("actions-menu");
+  if (!menu) return;
+  const panel = menu.querySelector("[data-actions-panel]");
+  if (!panel) return;
+  panel.innerHTML = "";
+  const sorted = [...actions].sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+  for (const a of sorted) {
+    if (a.dividerBefore) {
+      const div = document.createElement("div");
+      div.className = "my-1 border-t border-slate-200 dark:border-slate-700";
+      panel.appendChild(div);
+    }
+    const btn = document.createElement("button");
+    btn.id = a.id;
+    btn.type = "button";
+    btn.className = a.danger ? DANGER_CLS : ITEM_CLS;
+    if (a.scope) btn.dataset.pageScope = a.scope;
+    if (a.title) btn.title = a.title;
+    btn.innerHTML =
+      `<span class="w-5 text-center">${a.iconHtml || ""}</span>` +
+      `<span>${a.labelHtml || ""}</span>`;
+    if (typeof a.onClick === "function") {
+      btn.addEventListener("click", (ev) => a.onClick(ev, btn));
+    }
+    panel.appendChild(btn);
+  }
+}

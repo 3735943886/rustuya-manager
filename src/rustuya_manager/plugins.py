@@ -115,6 +115,11 @@ class PluginRegistry:
         self.api_routers: list[APIRouter] = []
         self.mqtt_subscriptions: list[tuple[str, MqttHandler]] = []
         self.pages: list[dict[str, Any]] = []
+        # Eagerly-loaded JS modules (each {id, static_dir, entry}). Unlike pages
+        # (mounted lazily when their tab opens), these are imported at boot so a
+        # plugin can contribute always-visible UI — e.g. a header menu item via
+        # ctx.addHeaderAction — without the user ever opening its tab.
+        self.init_scripts: list[dict[str, Any]] = []
 
 
 class StateNamespace:
@@ -216,6 +221,26 @@ class PluginContext:
     ) -> None:
         self._registry.pages.append(
             {"id": id, "label": label, "static_dir": static_dir, "entry": entry}
+        )
+
+    def add_header_init(
+        self,
+        id: str,
+        *,
+        static_dir: str,
+        entry: str = "init.js",
+    ) -> None:
+        """Register a JS module loaded eagerly at UI boot (not lazily like a page).
+
+        Its `static_dir` is served under `/plugins/{id}/` exactly like a page's
+        (a plugin may reuse the same `id`/`static_dir` for both a page and its
+        init script — the host mounts each id once). The module should export
+        `init(ctx)`, which runs at boot with the same context a page mount gets,
+        plus `ctx.addHeaderAction(...)` to contribute hamburger-menu items. This
+        is the route for always-visible plugin UI — the item shows up without the
+        user opening the plugin's tab."""
+        self._registry.init_scripts.append(
+            {"id": id, "static_dir": static_dir, "entry": entry}
         )
 
 

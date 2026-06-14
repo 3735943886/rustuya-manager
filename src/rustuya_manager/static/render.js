@@ -88,7 +88,18 @@ export function renderSyncBar() {
 }
 
 export function renderTemplates() {
-  const t = state.snapshot.templates;
+  const snap = state.snapshot;
+  // Mode badge on the <summary> — visible even while the drawer is collapsed.
+  // Conflict = --embed-bridge was requested but we're on an external bridge
+  // (an external one already owned the root, so the embed was aborted). The
+  // backend also carries this as the `embedded_bridge_aborted` warning.
+  const mode = snap.bridge_mode || "external";
+  const conflict =
+    (snap.embed_requested && mode === "external") ||
+    !!(snap.warnings && snap.warnings.embedded_bridge_aborted);
+  renderBridgeModeBadge(mode, conflict);
+
+  const t = snap.templates;
   if (!t) return;
   $templates.innerHTML = "";
   // Root is surfaced here (rather than as a header label) so the header
@@ -111,10 +122,10 @@ export function renderTemplates() {
   }
 
   // Bridge-reported diagnostics from the latest status reply live in this same
-  // debug drawer — authoritative totals kept out of the tight header. device_count
+  // drawer — authoritative totals kept out of the tight header. device_count
   // is the bridge's full fleet size; mqtt drops is its cumulative publish-drop
-  // count (highlighted when non-zero, mirroring the warning banner).
-  const snap = state.snapshot;
+  // count (highlighted when non-zero, mirroring the warning banner). The mode
+  // row goes amber on the embed→external conflict.
   const divider = document.createElement("div");
   divider.className = "border-t border-slate-200 dark:border-slate-700 my-1";
   $templates.appendChild(divider);
@@ -123,6 +134,7 @@ export function renderTemplates() {
     ["bridge", snap.bridge_version || "—", false],
     ["devices", snap.device_count != null ? String(snap.device_count) : "—", false],
     ["mqtt drops", String(drops), drops > 0],
+    ["mode", mode, conflict],
   ];
   for (const [k, v, warn] of diag) {
     const row = document.createElement("div");
@@ -132,6 +144,40 @@ export function renderTemplates() {
       : "flex-1 min-w-0 break-all";
     row.innerHTML = `<span class="text-slate-400 dark:text-slate-500 w-20 shrink-0">${k}</span><span class="${valueCls}">${escapeHtml(v)}</span>`;
     $templates.appendChild(row);
+  }
+
+  // Spell out the conflict — a colored "external" value is easy to miss.
+  if (conflict) {
+    const note = document.createElement("div");
+    note.className =
+      "mt-1 text-amber-700 dark:text-amber-300 break-words whitespace-normal";
+    const warnMsg = snap.warnings && snap.warnings.embedded_bridge_aborted;
+    note.textContent =
+      "⚠ " +
+      ((warnMsg && warnMsg.message) ||
+        "--embed-bridge was requested, but an external bridge already owns this root — talking to the external one.");
+    $templates.appendChild(note);
+  }
+}
+
+// Fill the mode badge on the Bridge-info <summary> so embedded/external (and
+// the conflict) is visible even with the drawer collapsed.
+function renderBridgeModeBadge(mode, conflict) {
+  const el = document.getElementById("bridge-info-badge");
+  if (!el) return;
+  el.classList.remove("hidden");
+  if (conflict) {
+    el.textContent = "external ⚠";
+    el.className =
+      "text-xs px-2 py-0.5 rounded-full border bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700 font-medium";
+  } else if (mode === "embedded") {
+    el.textContent = "embedded";
+    el.className =
+      "text-xs px-2 py-0.5 rounded-full border bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700";
+  } else {
+    el.textContent = "external";
+    el.className =
+      "text-xs px-2 py-0.5 rounded-full border bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600";
   }
 }
 

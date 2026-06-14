@@ -94,6 +94,34 @@ class TestHTTP:
             assert body["templates"]["root"] == "rustuya"
             assert "diff" in body and "synced" in body["diff"]
 
+    def test_api_state_reports_external_bridge_mode_by_default(self):
+        state, client = _fixture_state()
+        with TestClient(build_app(state, client)) as tc:
+            body = tc.get("/api/state").json()
+            assert body["bridge_mode"] == "external"
+            assert body["embed_requested"] is False
+
+    def test_api_state_reports_embedded_bridge_mode(self):
+        state, client = _fixture_state()
+        state.embed_requested = True
+        state.bridge_embedded = True
+        with TestClient(build_app(state, client)) as tc:
+            body = tc.get("/api/state").json()
+            assert body["bridge_mode"] == "embedded"
+            assert body["embed_requested"] is True
+
+    def test_api_state_surfaces_embed_external_conflict(self):
+        # --embed-bridge requested but an external bridge owned the root, so the
+        # embed was aborted: mode stays external while embed_requested is True.
+        # The client derives the conflict from this pair (+ the warning).
+        state, client = _fixture_state()
+        state.embed_requested = True
+        state.bridge_embedded = False
+        with TestClient(build_app(state, client)) as tc:
+            body = tc.get("/api/state").json()
+            assert body["bridge_mode"] == "external"
+            assert body["embed_requested"] is True
+
     def test_api_command_validates_action(self):
         state, client = _fixture_state()
         with TestClient(build_app(state, client)) as tc:

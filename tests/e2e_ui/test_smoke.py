@@ -433,3 +433,82 @@ def test_scan_button_posts_to_api_scan(page: Page, server_url: str) -> None:
         lambda req: req.url.endswith("/api/scan") and req.method == "POST"
     ):
         button.click()
+
+
+def _bridge_info_snap(*, bridge_mode: str, embed_requested: bool, warnings=None) -> dict:
+    """Minimal snapshot that renders the Bridge-info drawer fully (templates
+    present so the drawer body, not just the badge, draws)."""
+    return {
+        "cloud": {},
+        "bridge": {},
+        "templates": {
+            "root": "rustuya",
+            "command": "rustuya/command",
+            "event": "rustuya/event/{type}/{id}",
+            "message": "rustuya/{level}/{id}",
+            "scanner": "rustuya/scanner",
+            "payload": "{value}",
+        },
+        "dps": {},
+        "last_response": {},
+        "last_seen": {},
+        "retained_only": [],
+        "live_status": {},
+        "warnings": warnings or {},
+        "cloud_loaded": True,
+        "diff": {"synced": [], "mismatched": [], "missing": [], "orphaned": []},
+        "device_count": 0,
+        "mqtt_drop_count": 0,
+        "bridge_version": "0.3.0",
+        "bridge_mode": bridge_mode,
+        "embed_requested": embed_requested,
+    }
+
+
+def test_bridge_info_drawer_label_and_external_badge(page: Page, server_url: str) -> None:
+    page.goto(server_url)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+    _apply_snapshot(page, _bridge_info_snap(bridge_mode="external", embed_requested=False))
+    # Renamed drawer + a neutral "external" mode badge on the summary.
+    summary = page.locator("#bridge-info-badge").locator("xpath=..")
+    expect(summary).to_contain_text("Bridge info")
+    badge = page.locator("#bridge-info-badge")
+    expect(badge).to_be_visible()
+    expect(badge).to_have_text("external")
+
+
+def test_bridge_info_badge_flags_embed_external_conflict(page: Page, server_url: str) -> None:
+    page.goto(server_url)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+    _apply_snapshot(
+        page,
+        _bridge_info_snap(
+            bridge_mode="external",
+            embed_requested=True,
+            warnings={
+                "embedded_bridge_aborted": {
+                    "level": "error",
+                    "message": "--embed-bridge requested, but a bridge is already running on root 'rustuya'.",
+                }
+            },
+        ),
+    )
+    badge = page.locator("#bridge-info-badge")
+    expect(badge).to_contain_text("external")
+    expect(badge).to_contain_text("⚠")
+    # Amber emphasis on the conflict (visible while the drawer is collapsed).
+    assert "amber" in (badge.get_attribute("class") or "")
+
+
+def test_plugin_contributes_header_menu_item(page: Page, server_url_with_plugin: str) -> None:
+    """A plugin's eager init.js (ctx.add_header_init → ctx.addHeaderAction) puts
+    an item in the hamburger menu without the user opening the plugin's tab."""
+    page.goto(server_url_with_plugin)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+    page.locator("#actions-menu > summary").click()
+    action = page.locator("#e2e-plugin-action")
+    expect(action).to_be_visible()
+    expect(action).to_contain_text("Plugin action")
+    action.click()
+    # The init module's onClick stamps document.title as a side-effect probe.
+    expect(page).to_have_title("plugin-action-fired")

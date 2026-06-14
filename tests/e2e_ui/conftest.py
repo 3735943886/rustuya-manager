@@ -83,6 +83,31 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _start_server(app: Any) -> tuple[str, uvicorn.Server, threading.Thread]:
+    """Start `app` on a random localhost port in a daemon thread; return its URL
+    plus the handles needed to stop it. uvicorn flips `server.started` once the
+    socket is listening; poll until it's true (10s is generous — a healthy local
+    start is sub-second)."""
+    port = _free_port()
+    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", access_log=False)
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if server.started:
+            break
+        time.sleep(0.05)
+    else:
+        raise RuntimeError("uvicorn did not start within 10s")
+    return f"http://127.0.0.1:{port}", server, thread
+
+
+def _stop_server(server: uvicorn.Server, thread: threading.Thread) -> None:
+    server.should_exit = True
+    thread.join(timeout=5)
+
+
 @pytest.fixture(scope="session")
 def server_url() -> str:
     """URL of a running uvicorn instance with the rustuya-manager app.
@@ -91,28 +116,31 @@ def server_url() -> str:
     whole e2e_ui suite. Daemon thread + `should_exit` flag keeps the
     teardown clean even if a test raises.
     """
-    state = State()
-    app = build_app(state, _StubBridgeClient())
+    url, server, thread = _start_server(build_app(State(), _StubBridgeClient()))
+    yield url
+    _stop_server(server, thread)
 
-    port = _free_port()
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", access_log=False)
-    server = uvicorn.Server(config)
 
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
+@pytest.fixture(scope="session")
+def server_url_with_plugin(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """Like `server_url`, but with one plugin registered that contributes a
+    header menu item via an eager init script (the add_header_init route). Lets
+    the e2e suite prove a plugin can add a hamburger item without a tab page."""
+    static_dir = tmp_path_factory.mktemp("e2e_plugin_static")
+    (static_dir / "init.js").write_text(
+        "export function init(ctx) {\n"
+        "  ctx.addHeaderAction({\n"
+        "    id: 'e2e-plugin-action', iconHtml: '★', labelHtml: 'Plugin action',\n"
+        "    onClick: () => { document.title = 'plugin-action-fired'; },\n"
+        "  });\n"
+        "}\n"
+    )
 
-    # uvicorn flips `server.started` once the socket is listening; poll
-    # until it's true (or bail out). 10s is generous — a healthy local
-    # start is sub-second.
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        if server.started:
-            break
-        time.sleep(0.05)
-    else:
-        raise RuntimeError("uvicorn did not start within 10s")
+    def register(ctx: Any) -> None:
+        ctx.add_header_init("e2eplugin", static_dir=str(static_dir))
 
-    yield f"http://127.0.0.1:{port}"
-
-    server.should_exit = True
-    thread.join(timeout=5)
+    url, server, thread = _start_server(
+        build_app(State(), _StubBridgeClient(), plugins=[register])
+    )
+    yield url
+    _stop_server(server, thread)

@@ -449,6 +449,9 @@ async def _resolve_embedded_bridge(
       - Flag set + no external → spawn.
     Returns (server, thread) on spawn, None otherwise.
     """
+    # Record the request up front so the UI can flag the conflict case even when
+    # we end up aborting the embed below.
+    state.embed_requested = bool(args.embed_bridge)
     if not args.embed_bridge:
         return None
     external_present = await state.wait_for(lambda: state.templates is not None, timeout=1.0)
@@ -462,6 +465,7 @@ async def _resolve_embedded_bridge(
         logger.error(msg)
         return None
     embedded = _spawn_embedded_bridge(args)
+    state.bridge_embedded = True
     logger.info("Embedded bridge started on root=%r", args.root)
     return embedded
 

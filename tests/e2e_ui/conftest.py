@@ -139,8 +139,6 @@ def server_url_with_plugin(tmp_path_factory: pytest.TempPathFactory) -> str:
     def register(ctx: Any) -> None:
         ctx.add_header_init("e2eplugin", static_dir=str(static_dir))
 
-    url, server, thread = _start_server(
-        build_app(State(), _StubBridgeClient(), plugins=[register])
-    )
+    url, server, thread = _start_server(build_app(State(), _StubBridgeClient(), plugins=[register]))
     yield url
     _stop_server(server, thread)

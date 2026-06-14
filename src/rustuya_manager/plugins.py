@@ -239,9 +239,7 @@ class PluginContext:
         plus `ctx.addHeaderAction(...)` to contribute hamburger-menu items. This
         is the route for always-visible plugin UI — the item shows up without the
         user opening the plugin's tab."""
-        self._registry.init_scripts.append(
-            {"id": id, "static_dir": static_dir, "entry": entry}
-        )
+        self._registry.init_scripts.append({"id": id, "static_dir": static_dir, "entry": entry})
 
 
 def load_plugins(

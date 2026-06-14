@@ -421,9 +421,7 @@ def build_app(
                 }
                 for page in registry.pages
             ],
-            "init_scripts": [
-                f"/plugins/{s['id']}/{s['entry']}" for s in registry.init_scripts
-            ],
+            "init_scripts": [f"/plugins/{s['id']}/{s['entry']}" for s in registry.init_scripts],
         }
 
     # Serve each plugin's static directory under /plugins/{id}/. The ASGI

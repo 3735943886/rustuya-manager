@@ -3,7 +3,7 @@
 A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bridge) that diffs Tuya Cloud devices against the running bridge and syncs add / remove / update operations. Includes a web UI with built-in Tuya Cloud login.
 
 ![rustuya-manager web UI](docs/screenshots/main-annotated.png)
-<sub>Desktop view — sync categories highlighted with their actions; <b>📡</b> in the header triggers a bridge LAN scan. Each row also carries a live-status dot and per-device ✎ edit / 🗑 remove / ↻ query-status icons.</sub>
+<sub>Desktop view — sync categories highlighted with their actions; the header's <b>⋯ Menu</b> holds add device, cloud login, <b>📡 Scan</b>, theme, refresh, and <b>🔧 Reconfigure bridge</b>. Each row also carries a live-status dot and per-device ✎ edit / 🗑 remove / ↻ query-status icons.</sub>
 
 <img src="docs/screenshots/main-mobile.png" alt="Mobile layout" width="280">
 <br><sub>Mobile view — layout adapts to narrow viewports.</sub>
@@ -23,7 +23,7 @@ A management tool for [rustuya-bridge](https://github.com/3735943886/rustuya-bri
 Start with `--web` (the Docker image does this by default). The
 dashboard loads every device known to either side and categorizes
 it by how the bridge's view compares to the Tuya Cloud-of-record
-— uploaded as `tuyadevices.json` or pulled in-app via the ☁ button:
+— uploaded as `tuyadevices.json` or pulled in-app via the header **⋯ Menu → ☁ Fetch from cloud**:
 
 - 🟦 **Missing** — in cloud, not yet on the bridge. Click **Add** on
   the card to publish it; the bridge picks it up and starts polling.
@@ -47,7 +47,7 @@ unchanged); the trash 🗑 removes the device from the bridge.
 
 ### Refreshing from Tuya Cloud
 
-The ☁ button in the header opens the in-app login wizard. Sign in
+The header **⋯ Menu → ☁ Fetch from cloud** opens the in-app login wizard. Sign in
 once via QR with the Smart Life or Tuya Smart app — credentials are
 cached in `tuyacreds.json`, so subsequent re-fetches skip the scan and
 go straight to the device list.
@@ -65,13 +65,13 @@ manager writes into the bridge record:
   every reconnect goes straight to the recorded address. Only useful
   when every device has a pinned IP (manual static or DHCP
   reservation on the router). On DHCP networks where leases rotate
-  the bridge ends up retrying stale addresses; the header's **📡 Scan**
-  button (or a fresh cloud re-fetch) recovers visibility.
+  the bridge ends up retrying stale addresses; the header **⋯ Menu →
+  📡 Scan LAN** (or a fresh cloud re-fetch) recovers visibility.
 
 The toggle state is persisted per browser.
 
-The **📡 Scan** button asks the bridge for a one-shot LAN scan. Any
-device registered with an explicit (non-auto) IP that has drifted
+**📡 Scan LAN** (header **⋯ Menu**) asks the bridge for a one-shot LAN
+scan. Any device registered with an explicit (non-auto) IP that has drifted
 surfaces as `ERR_STATE 906` in the MSG line, so the right device can
 be fixed at the router.
 

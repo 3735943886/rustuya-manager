@@ -244,8 +244,8 @@ _ANNOTATE_JS = r"""
     const GAP = 14;
 
     const items = [
-        [document.querySelector('header .ml-auto > div'),
-         'Top-right: <b>+</b> add · <b>☁</b> cloud · <b>📡</b> scan · <b>🌙</b> theme · <b>⟳</b> refresh'],
+        [document.querySelector('#actions-menu'),
+         'Top-right <b>⋯ Menu</b> — add device · cloud login · 📡 scan · theme · refresh · 🔧 reconfigure'],
         [document.querySelector('#sync-bar'),
          '<b>Bulk sync</b> — fix one category or apply all.'],
         [document.querySelector('#search-input').closest('.flex'),
@@ -372,7 +372,7 @@ def main() -> None:
                 page.screenshot(path=str(OUT / f"main-{theme}.png"))
                 ctx.close()
 
-            # Mobile (light) — narrow viewport exercises the hamburger,
+            # Mobile (light) — narrow viewport exercises the actions menu,
             # the wrapped filter row, and the search/sort pairing.
             ctx = browser.new_context(
                 viewport={"width": 390, "height": 844}, color_scheme="light"
@@ -407,6 +407,9 @@ def main() -> None:
             page = ctx.new_page()
             page.goto(url)
             page.get_by_text("RF Hub").first.wait_for()
+            # Every header action lives in the single #actions-menu now — open
+            # it before clicking the "Fetch from cloud" item.
+            page.locator("#actions-menu > summary").click()
             page.locator("#wizard-header-btn").click()
             page.locator("#wizard-modal").wait_for(state="visible")
             # The first child of #wizard-modal is the rounded panel itself;

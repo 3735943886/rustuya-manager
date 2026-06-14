@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import signal
 import sys
 import threading
@@ -124,6 +125,30 @@ def _apply_bridge_config_defaults(args: argparse.Namespace) -> None:
                 cfg_state,
             )
 
+    # Broker credentials: let --bridge-config supply them for the manager's own
+    # connection too (the embedded single-process deploy shares one broker), but
+    # the CLI flag / env always wins. Values are never logged — only presence —
+    # to keep credentials out of logs.
+    cfg_user = cfg.get("mqtt_user")
+    cfg_pass = cfg.get("mqtt_password")
+    if cfg_user:
+        if args.mqtt_user is None:
+            args.mqtt_user = cfg_user
+            logger.info("Using mqtt_user from --bridge-config")
+        elif args.mqtt_user != cfg_user:
+            logger.warning(
+                "--mqtt-user / RUSTUYA_MQTT_USER disagrees with --bridge-config "
+                "mqtt_user; using the CLI/env value (embedded bridge follows the kwarg)."
+            )
+    if cfg_pass:
+        if args.mqtt_pass is None:
+            args.mqtt_pass = cfg_pass
+        elif args.mqtt_pass != cfg_pass:
+            logger.warning(
+                "--mqtt-pass / RUSTUYA_MQTT_PASSWORD disagrees with --bridge-config "
+                "mqtt_password; using the CLI/env value."
+            )
+
 
 def _apply_manager_defaults(args: argparse.Namespace) -> None:
     """Fill any still-`None` sentinel values with the manager's own
@@ -134,6 +159,20 @@ def _apply_manager_defaults(args: argparse.Namespace) -> None:
         args.broker = DEFAULT_BROKER
     if args.root is None:
         args.root = DEFAULT_ROOT
+
+
+def _resolve_mqtt_credentials(args: argparse.Namespace) -> None:
+    """Fill broker credentials from the environment when the flag is absent.
+
+    Precedence: `--mqtt-user`/`--mqtt-pass` > `RUSTUYA_MQTT_USER`/
+    `RUSTUYA_MQTT_PASSWORD` env. Prefer the env vars in production — a password
+    passed as a CLI flag is visible in the host's process list (`ps`). Runs
+    before `_apply_bridge_config_defaults` so the resolved value is what the
+    bridge-config precedence check compares against."""
+    if args.mqtt_user is None:
+        args.mqtt_user = os.environ.get("RUSTUYA_MQTT_USER") or None
+    if args.mqtt_pass is None:
+        args.mqtt_pass = os.environ.get("RUSTUYA_MQTT_PASSWORD") or None
 
 
 async def _on_event(
@@ -349,14 +388,17 @@ def _spawn_embedded_bridge(
     default_state = Path(args.cloud).resolve().parent / "rustuya.json"
     state_file = args.bridge_state or str(default_state)
 
-    # The manager owns broker / root / state-file / log-level — embedded bridge
-    # must agree with the manager's view on those. Everything else (custom
-    # topics, mqtt user/password, scanner options, retain flag, …) is the
-    # bridge's domain and is read from `--bridge-config` when provided.
-    # pyrustuyabridge >= 0.1.1 reads + auto-creates that file in PyBridgeServer
-    # the same way the binary's `--config` flag does. `no_signals=True` is
-    # set inside the supervisor (internals.md §1.3 — manager owns
-    # SIGINT/SIGTERM, so the embedded bridge must NOT install its own).
+    # The manager owns broker / root / state-file / log-level / broker creds —
+    # the embedded bridge must agree with the manager's view on those, since
+    # both connect to the same broker. Broker credentials are co-owned now (the
+    # manager has its own authenticated connection): they come from
+    # --mqtt-user/--mqtt-pass or the env, and are forwarded as kwargs here so a
+    # single-process deploy configures them once. Everything else (custom
+    # topics, scanner options, retain flag, …) stays the bridge's domain, read
+    # from `--bridge-config` when provided. pyrustuyabridge resolves
+    # kwargs > config file > defaults, so these kwargs override the config file.
+    # `no_signals=True` is set inside the supervisor (internals.md §1.3 —
+    # manager owns SIGINT/SIGTERM, so the embedded bridge must NOT install its own).
     kwargs: dict[str, Any] = {
         "mqtt_broker": args.broker,
         "mqtt_root_topic": args.root,
@@ -365,6 +407,13 @@ def _spawn_embedded_bridge(
     }
     if getattr(args, "bridge_config", None):
         kwargs["config_path"] = args.bridge_config
+    # Forward broker credentials as kwargs (in-memory, so no process-list
+    # exposure for the bridge). Only when set, so an unauthenticated broker
+    # still gets a clean kwargs dict.
+    if getattr(args, "mqtt_user", None):
+        kwargs["mqtt_user"] = args.mqtt_user
+    if getattr(args, "mqtt_pass", None):
+        kwargs["mqtt_password"] = args.mqtt_pass
 
     supervisor = _EmbeddedBridgeSupervisor(**kwargs)
     thread = threading.Thread(target=supervisor.run, daemon=True)
@@ -468,6 +517,7 @@ async def run(args: argparse.Namespace) -> int:
     # repeat the same values twice. Must run BEFORE BridgeClient is built
     # since that fixes the broker/root for the manager's own MQTT
     # connection. CLI-given values always win.
+    _resolve_mqtt_credentials(args)
     _apply_bridge_config_defaults(args)
     _apply_manager_defaults(args)
 
@@ -493,6 +543,8 @@ async def run(args: argparse.Namespace) -> int:
         state=state,
         client_id=args.client_id,
         on_event=event_cb,
+        username=args.mqtt_user,
+        password=args.mqtt_pass,
     )
 
     print(f"Connecting to {args.broker}, root={args.root!r} ...")
@@ -600,10 +652,11 @@ def main(argv: list[str] | None = None) -> int:
         "--broker",
         default=None,
         help=(
-            f"MQTT broker URL (mqtt://host:port). Default {DEFAULT_BROKER!r} is "
-            "applied when the flag is absent AND no bridge-config supplies one — "
-            "leaving the flag off is how the bridge-config fallback (--bridge-config) "
-            "is allowed to win."
+            f"MQTT broker URL. Use mqtt://host:port for plaintext or "
+            f"mqtts://host:port for TLS (validated against the system trust store; "
+            f"default port 8883). Default {DEFAULT_BROKER!r} is applied when the "
+            "flag is absent AND no bridge-config supplies one — leaving the flag "
+            "off is how the bridge-config fallback (--bridge-config) is allowed to win."
         ),
     )
     parser.add_argument(
@@ -616,6 +669,26 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--client-id", default="rustuya-manager")
+    parser.add_argument(
+        "--mqtt-user",
+        default=None,
+        help=(
+            "MQTT broker username for the manager's own connection (and the "
+            "embedded bridge under --embed-bridge). Falls back to the "
+            "RUSTUYA_MQTT_USER env var. Required by most hosted/TLS brokers."
+        ),
+    )
+    parser.add_argument(
+        "--mqtt-pass",
+        default=None,
+        metavar="PASSWORD",
+        help=(
+            "MQTT broker password. Falls back to the RUSTUYA_MQTT_PASSWORD env "
+            "var — prefer the env var: a password on the command line is visible "
+            "in the host process list (ps). Use a TLS broker URL (mqtts://...) "
+            "so credentials aren't sent in the clear."
+        ),
+    )
     parser.add_argument(
         "--log-level",
         default="info",

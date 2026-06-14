@@ -27,6 +27,7 @@ from rustuya_manager.mqtt import (
     BRIDGE_CONFIG_TOPIC_TPL,
     BridgeClient,
     _format_error_message,
+    _parse_broker_url,
 )
 from rustuya_manager.state import BridgeTemplates, State
 
@@ -959,6 +960,56 @@ class TestStatusPagination:
         assert set(state.bridge) == {"a", "b"}
         assert state.device_count is None
         aio.publish.assert_not_called()
+
+
+class TestBrokerEndpointAndTls:
+    """Broker URL parsing now yields scheme-driven TLS + default port and any
+    inline credentials, and _client_kwargs() forwards TLS/auth to aiomqtt only
+    when configured (plaintext + no-auth stays byte-identical to before)."""
+
+    def test_parse_plaintext_defaults(self):
+        assert _parse_broker_url("mqtt://host:1883") == ("host", 1883, False, None, None)
+        assert _parse_broker_url("host") == ("host", 1883, False, None, None)
+        assert _parse_broker_url("host:1884") == ("host", 1884, False, None, None)
+
+    def test_parse_tls_scheme_defaults_port_8883(self):
+        assert _parse_broker_url("mqtts://host") == ("host", 8883, True, None, None)
+        assert _parse_broker_url("ssl://host:9000") == ("host", 9000, True, None, None)
+
+    def test_parse_inline_credentials(self):
+        assert _parse_broker_url("mqtts://u:p@host:8883") == ("host", 8883, True, "u", "p")
+        assert _parse_broker_url("mqtt://u@host") == ("host", 1883, False, "u", None)
+
+    def test_client_kwargs_plaintext_no_auth_unchanged(self):
+        # The default case must construct exactly the same kwargs as before the
+        # TLS/auth work — no tls_params/username/password keys.
+        client, _ = _make_client()
+        assert client._client_kwargs() == {
+            "hostname": "localhost",
+            "port": 1883,
+            "identifier": "rustuya-manager",
+            "max_queued_incoming_messages": BridgeClient._MAX_QUEUED_INCOMING,
+        }
+
+    def test_client_kwargs_tls_and_auth(self):
+        client = BridgeClient("mqtts://broker.example", "r", State(), username="u", password="p")
+        kw = client._client_kwargs()
+        assert kw["hostname"] == "broker.example"
+        assert kw["port"] == 8883
+        assert kw["username"] == "u"
+        assert kw["password"] == "p"
+        assert isinstance(kw["tls_params"], aiomqtt.TLSParameters)
+
+    def test_explicit_creds_win_over_inline_url(self):
+        client = BridgeClient(
+            "mqtts://inlineu:inlinep@host", "r", State(), username="flagu", password="flagp"
+        )
+        assert (client.username, client.password) == ("flagu", "flagp")
+
+    def test_inline_creds_used_when_no_explicit(self):
+        client = BridgeClient("mqtts://u:p@host", "r", State())
+        assert client.tls is True
+        assert (client.username, client.password) == ("u", "p")
 
 
 # pytest-asyncio integration — auto mode is the simplest setup for our needs.

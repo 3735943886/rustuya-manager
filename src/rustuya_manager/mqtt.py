@@ -32,7 +32,7 @@ import contextlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, NamedTuple
 
 import aiomqtt
 import pyrustuyabridge as pb
@@ -85,17 +85,45 @@ def _format_error_message(parsed: dict[str, Any]) -> str:
     return f"{base} ({details})" if base else details
 
 
-def _parse_broker_url(broker: str) -> tuple[str, int]:
-    """Accepts 'mqtt://host:port' or 'host:port' or 'host'."""
+class _BrokerEndpoint(NamedTuple):
+    host: str
+    port: int
+    tls: bool
+    username: str | None
+    password: str | None
+
+
+# Schemes that select a TLS transport. `mqtts` is the conventional one; the
+# others are accepted as aliases so a user's existing broker URL just works.
+_TLS_SCHEMES = frozenset({"mqtts", "ssl", "tls", "mqtt+ssl"})
+
+
+def _parse_broker_url(broker: str) -> _BrokerEndpoint:
+    """Parse a broker URL into host / port / tls and any inline credentials.
+
+    Accepts 'mqtt(s)://[user[:pass]@]host[:port]', 'host:port', or 'host'. A
+    TLS scheme (mqtts/ssl/tls) flips `tls` and defaults the port to 8883;
+    plaintext defaults to 1883. Inline `user:pass@` credentials are captured
+    here; the BridgeClient prefers explicit username/password (CLI flag / env)
+    over these, falling back to them so `mqtts://u:p@host` also works."""
+    tls = False
+    username: str | None = None
+    password: str | None = None
     if "://" in broker:
-        broker = broker.split("://", 1)[1]
-    # strip optional user:pass@
+        scheme, broker = broker.split("://", 1)
+        tls = scheme.lower() in _TLS_SCHEMES
     if "@" in broker:
-        broker = broker.split("@", 1)[1]
+        creds, broker = broker.split("@", 1)
+        user, sep, pw = creds.partition(":")
+        username = user or None
+        password = pw if sep else None
     if ":" in broker:
         host, port_s = broker.rsplit(":", 1)
-        return host, int(port_s)
-    return broker, 1883
+        port = int(port_s)
+    else:
+        host = broker
+        port = 8883 if tls else 1883
+    return _BrokerEndpoint(host, port, tls, username, password)
 
 
 class BridgeClient:
@@ -131,10 +159,17 @@ class BridgeClient:
         client_id: str = "rustuya-manager",
         on_event: Callable[[str, dict[str, str], Any, dict[str, Any] | None], Awaitable[None]]
         | None = None,
+        username: str | None = None,
+        password: str | None = None,
     ) -> None:
-        host, port = _parse_broker_url(broker)
-        self.host = host
-        self.port = port
+        ep = _parse_broker_url(broker)
+        self.host = ep.host
+        self.port = ep.port
+        self.tls = ep.tls
+        # Explicit creds (CLI flag / env) win over any embedded in the URL;
+        # fall back to the inline ones so `mqtts://user:pass@host` also works.
+        self.username = username if username is not None else ep.username
+        self.password = password if password is not None else ep.password
         self.root = root
         self.state = state
         self._client_id = client_id
@@ -171,6 +206,29 @@ class BridgeClient:
         # `_handle_status_page`). None when no page-through is active; a partial
         # {id: Device} map while one is. Committed to state on the final page.
         self._status_accum: dict[str, Device] | None = None
+
+    def _client_kwargs(self) -> dict[str, Any]:
+        """Build the aiomqtt.Client constructor kwargs.
+
+        TLS and auth keys are added only when configured, so a plaintext,
+        unauthenticated connection is constructed exactly as before (no
+        behavioural change for the default `mqtt://` + no-creds case).
+        `aiomqtt.TLSParameters()` with no overrides uses the platform's default
+        trust store — validating against public-CA brokers, matching the
+        bridge's own native-root-cert TLS handling."""
+        kwargs: dict[str, Any] = {
+            "hostname": self.host,
+            "port": self.port,
+            "identifier": self._client_id,
+            "max_queued_incoming_messages": self._MAX_QUEUED_INCOMING,
+        }
+        if self.username is not None:
+            kwargs["username"] = self.username
+        if self.password is not None:
+            kwargs["password"] = self.password
+        if self.tls:
+            kwargs["tls_params"] = aiomqtt.TLSParameters()
+        return kwargs
 
     # ── async context manager ────────────────────────────────────────────
     async def __aenter__(self) -> BridgeClient:
@@ -217,12 +275,7 @@ class BridgeClient:
         try:
             while True:
                 try:
-                    async with aiomqtt.Client(
-                        hostname=self.host,
-                        port=self.port,
-                        identifier=self._client_id,
-                        max_queued_incoming_messages=self._MAX_QUEUED_INCOMING,
-                    ) as client:
+                    async with aiomqtt.Client(**self._client_kwargs()) as client:
                         if delay != self._INITIAL_BACKOFF_SEC:
                             logger.info("MQTT reconnected; resetting backoff.")
                             delay = self._INITIAL_BACKOFF_SEC

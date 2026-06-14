@@ -110,6 +110,33 @@ class TestSpawnEmbeddedBridgeKwargs:
         finally:
             _drain_supervisor(sup, t)
 
+    def test_mqtt_credentials_propagate_when_set(self, tmp_path, monkeypatch):
+        # --mqtt-user/--mqtt-pass (or their env fallback) forward to the
+        # embedded bridge as kwargs so a single-process deploy is configured
+        # once. pyrustuyabridge resolves kwargs > config file, so these win.
+        from rustuya_manager.cli import _spawn_embedded_bridge
+
+        _stub_pyrustuyabridge(monkeypatch)
+        sup, t = _spawn_embedded_bridge(_make_args(tmp_path, mqtt_user="u", mqtt_pass="p"))
+        try:
+            assert sup._kwargs["mqtt_user"] == "u"
+            assert sup._kwargs["mqtt_password"] == "p"
+        finally:
+            _drain_supervisor(sup, t)
+
+    def test_no_mqtt_credentials_means_no_cred_kwargs(self, tmp_path, monkeypatch):
+        # Unauthenticated broker: the credential kwargs must be absent entirely
+        # (not None), so the binding falls through to config-file/defaults.
+        from rustuya_manager.cli import _spawn_embedded_bridge
+
+        _stub_pyrustuyabridge(monkeypatch)
+        sup, t = _spawn_embedded_bridge(_make_args(tmp_path))
+        try:
+            assert "mqtt_user" not in sup._kwargs
+            assert "mqtt_password" not in sup._kwargs
+        finally:
+            _drain_supervisor(sup, t)
+
     def test_no_signals_always_set(self, tmp_path, monkeypatch):
         # The manager owns SIGINT/SIGTERM (run() installs loop handlers),
         # so the embedded bridge must be told NOT to install its own —
@@ -123,6 +150,41 @@ class TestSpawnEmbeddedBridgeKwargs:
             assert sup._kwargs["no_signals"] is True
         finally:
             _drain_supervisor(sup, t)
+
+
+class TestResolveMqttCredentials:
+    """Broker credentials fall back to env vars; an explicit flag always wins.
+    Values are never logged (only presence), so these tests cover resolution."""
+
+    def test_env_fallback_fills_missing(self, monkeypatch):
+        from rustuya_manager.cli import _resolve_mqtt_credentials
+
+        monkeypatch.setenv("RUSTUYA_MQTT_USER", "envu")
+        monkeypatch.setenv("RUSTUYA_MQTT_PASSWORD", "envp")
+        args = SimpleNamespace(mqtt_user=None, mqtt_pass=None)
+        _resolve_mqtt_credentials(args)
+        assert args.mqtt_user == "envu"
+        assert args.mqtt_pass == "envp"
+
+    def test_flag_wins_over_env(self, monkeypatch):
+        from rustuya_manager.cli import _resolve_mqtt_credentials
+
+        monkeypatch.setenv("RUSTUYA_MQTT_USER", "envu")
+        monkeypatch.setenv("RUSTUYA_MQTT_PASSWORD", "envp")
+        args = SimpleNamespace(mqtt_user="flagu", mqtt_pass="flagp")
+        _resolve_mqtt_credentials(args)
+        assert args.mqtt_user == "flagu"
+        assert args.mqtt_pass == "flagp"
+
+    def test_absent_everywhere_stays_none(self, monkeypatch):
+        from rustuya_manager.cli import _resolve_mqtt_credentials
+
+        monkeypatch.delenv("RUSTUYA_MQTT_USER", raising=False)
+        monkeypatch.delenv("RUSTUYA_MQTT_PASSWORD", raising=False)
+        args = SimpleNamespace(mqtt_user=None, mqtt_pass=None)
+        _resolve_mqtt_credentials(args)
+        assert args.mqtt_user is None
+        assert args.mqtt_pass is None
 
 
 class TestEmbeddedBridgeSupervisor:

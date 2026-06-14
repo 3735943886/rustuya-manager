@@ -14,6 +14,35 @@ import re
 from playwright.sync_api import Page, expect
 
 
+def _apply_snapshot(page: Page, snap: dict, *, expanded: tuple[str, ...] = ()) -> None:
+    """Inject a client-side WS snapshot and render it — resilient to the
+    initial-load execution-context swap.
+
+    A plain ``page.evaluate`` runs once and dies with "Execution context was
+    destroyed, most likely because of a navigation" if Chromium swaps the
+    document's execution context while the body runs — which intermittently
+    races the ``goto``/load handshake right after page load. ``wait_for_function``
+    re-installs and re-runs its body in the live context across such a swap, so
+    the injection lands deterministically. The body is idempotent (set snapshot
+    + render), so re-running is harmless.
+
+    Caller must already have awaited a readiness signal (the ``conn-badge``
+    showing "live") so the app's modules are loaded and the initial WS frame has
+    arrived — otherwise a late initial frame could overwrite the injected snap.
+    """
+    page.wait_for_function(
+        """(arg) => (async () => {
+            const s = await import('/static/state.js');
+            const r = await import('/static/render.js');
+            for (const id of arg.expanded) s.expandedIds.add(id);
+            s.state.snapshot = arg.snap;
+            r.render();
+            return true;
+        })()""",
+        arg={"snap": snap, "expanded": list(expanded)},
+    )
+
+
 def test_root_page_renders(page: Page, server_url: str) -> None:
     page.goto(server_url)
     expect(page.locator("h1")).to_have_text("rustuya-manager")
@@ -117,16 +146,7 @@ def test_expanded_card_shows_full_key_and_escapes_special_chars(
         "cloud_loaded": True,
         "diff": {"synced": [], "mismatched": [], "missing": ["dev-pwn"], "orphaned": []},
     }
-    page.evaluate(
-        """async (snap) => {
-            const s = await import('/static/state.js');
-            const r = await import('/static/render.js');
-            s.expandedIds.add('dev-pwn');
-            s.state.snapshot = snap;
-            r.render();
-        }""",
-        snap,
-    )
+    _apply_snapshot(page, snap, expanded=("dev-pwn",))
     assert not errors, f"page errors during render: {errors}"
 
     # Missing-class card should have the sky edge stripe (cards.js
@@ -192,16 +212,7 @@ def test_missing_card_renders_scan_row_with_diff_colors(page: Page, server_url: 
             },
         },
     }
-    page.evaluate(
-        """async (snap) => {
-            const s = await import('/static/state.js');
-            const r = await import('/static/render.js');
-            s.expandedIds.add('dev-auto-ip');
-            s.state.snapshot = snap;
-            r.render();
-        }""",
-        snap,
-    )
+    _apply_snapshot(page, snap, expanded=("dev-auto-ip",))
 
     # SCAN IP cell — cloud is "Auto" → amber color class
     scan_ip = page.locator("#device-list div").filter(has_text="SCAN IP").last
@@ -244,16 +255,7 @@ def test_missing_card_omits_scan_row_when_no_sighting(page: Page, server_url: st
         "diff": {"synced": [], "mismatched": [], "missing": ["dev-no-scan"], "orphaned": []},
         "scan_results": {},
     }
-    page.evaluate(
-        """async (snap) => {
-            const s = await import('/static/state.js');
-            const r = await import('/static/render.js');
-            s.expandedIds.add('dev-no-scan');
-            s.state.snapshot = snap;
-            r.render();
-        }""",
-        snap,
-    )
+    _apply_snapshot(page, snap, expanded=("dev-no-scan",))
 
     # No SCAN IP / SCAN VER rows when scan_results is empty
     assert page.locator("#device-list div").filter(has_text="SCAN IP").count() == 0

@@ -16,6 +16,9 @@ let manifest = [];
 const stateSubs = new Set();
 // id -> { rootEl, mounted } for each plugin page; "devices" is implicit.
 const pages = new Map();
+// Init-script URLs already imported, so a rescan only runs *new* ones (ES
+// module imports are cached by URL anyway; this also skips the await + init()).
+const importedInit = new Set();
 let $tabs = null;
 let $pluginRoot = null;
 let deviceSections = [];
@@ -136,7 +139,18 @@ async function mountPlugin(id) {
   }
 }
 
-function buildTabBar() {
+function addTab(page, label) {
+  if ($tabs.querySelector(`button[data-page="${page}"]`)) return; // already present
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.dataset.page = page;
+  btn.textContent = label;
+  btn.className = tabClass(page === state.currentPage);
+  btn.addEventListener("click", () => showPage(page));
+  $tabs.appendChild(btn);
+}
+
+function buildTabBarShell() {
   const main = document.querySelector("main");
   if (!main) return;
   // The existing <section> children make up the device view; capture them so
@@ -145,22 +159,8 @@ function buildTabBar() {
 
   $tabs = document.createElement("nav");
   $tabs.id = "page-tabs";
-  $tabs.className =
-    "flex items-end gap-1 border-b border-slate-200 dark:border-slate-700 mb-1";
-
-  const addTab = (page, label) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.dataset.page = page;
-    btn.textContent = label;
-    btn.className = tabClass(page === state.currentPage);
-    btn.addEventListener("click", () => showPage(page));
-    $tabs.appendChild(btn);
-  };
-
+  $tabs.className = "flex items-end gap-1 border-b border-slate-200 dark:border-slate-700 mb-1";
   addTab("devices", "Devices");
-  for (const p of manifest) addTab(p.id, p.label);
-
   main.insertBefore($tabs, main.firstChild);
   // deviceSections was captured before inserting the tab bar, so it's excluded.
 
@@ -168,6 +168,39 @@ function buildTabBar() {
   $pluginRoot.id = "plugin-page-root";
   $pluginRoot.className = "hidden";
   main.appendChild($pluginRoot);
+}
+
+// Ensure the tab bar exists (once any plugin page exists) and add a tab for any
+// page not already shown — safe to call repeatedly after a rescan.
+function syncTabs() {
+  if (manifest.length === 0) return;
+  if (!$tabs) buildTabBarShell();
+  for (const p of manifest) addTab(p.id, p.label);
+}
+
+// Import any not-yet-imported init modules and run their init(ctx). Each runs in
+// isolation — one failing module doesn't block the others or the tab bar.
+async function loadInitScripts(urls) {
+  for (const url of urls) {
+    if (importedInit.has(url)) continue;
+    importedInit.add(url);
+    try {
+      const mod = await import(url);
+      if (typeof mod.init === "function") await mod.init(pluginCtx());
+    } catch (e) {
+      console.error("plugin init script failed", url, e);
+    }
+  }
+}
+
+// Apply a /api/plugins manifest incrementally: update the page list, run any new
+// init scripts, and add any new tabs. Idempotent — re-applying the same manifest
+// is a no-op, so this backs both the initial boot and a later rescan.
+async function applyManifest(data) {
+  manifest = Array.isArray(data?.pages) ? data.pages : [];
+  const initScripts = Array.isArray(data?.init_scripts) ? data.init_scripts : [];
+  await loadInitScripts(initScripts);
+  syncTabs();
 }
 
 export async function initPluginHost() {
@@ -179,23 +212,24 @@ export async function initPluginHost() {
   } catch {
     return; // host stays invisible on any boot error
   }
-  // Manifest shape: { pages: [...], init_scripts: [url, ...] }.
-  manifest = Array.isArray(data?.pages) ? data.pages : [];
-  const initScripts = Array.isArray(data?.init_scripts) ? data.init_scripts : [];
+  await applyManifest(data);
+}
 
-  // Eagerly load init modules so always-visible contributions (e.g. header
-  // menu items) appear without opening the plugin's tab. Each runs in
-  // isolation — one failing module doesn't block the others or the tab bar.
-  for (const url of initScripts) {
-    try {
-      const mod = await import(url);
-      if (typeof mod.init === "function") await mod.init(pluginCtx());
-    } catch (e) {
-      console.error("plugin init script failed", url, e);
-    }
+// Load plugins newly dropped into the server's plugin dir, without a restart.
+// Add-only: picks up new plugin packages/modules; it cannot reload edited code
+// or unload a plugin (those need a process restart — see README). Wired to the
+// "Load new plugins" hamburger item in app.js.
+export async function scanForPlugins() {
+  let data;
+  try {
+    const res = await fetch("/api/plugins/scan", { method: "POST" });
+    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+    data = await res.json();
+  } catch (e) {
+    toast(`Plugin scan failed: ${e.message}`, "error");
+    return;
   }
-
-  // Tab bar only when there are pages; header-only plugins boot via init above
-  // without adding a tab.
-  if (manifest.length > 0) buildTabBar();
+  await applyManifest(data);
+  const n = data.added ?? 0;
+  toast(n > 0 ? `Loaded ${n} new plugin${n === 1 ? "" : "s"}` : "No new plugins found", "ok");
 }

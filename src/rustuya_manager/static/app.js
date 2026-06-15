@@ -23,7 +23,7 @@ import { initSyncModal } from "./modal-sync.js";
 import { initWizardModal, openWizardModal } from "./modal-wizard.js";
 import { initDeviceModal, openAddModal } from "./modal-device.js";
 import { initConfirmModal, confirm } from "./modal-confirm.js";
-import { initPluginHost } from "./plugins.js";
+import { initPluginHost, scanForPlugins } from "./plugins.js";
 import { registerHeaderAction, renderActionsMenu } from "./header-actions.js";
 
 // ── Cloud upload (drop zone + file picker) ─────────────────────────────────
@@ -203,6 +203,35 @@ async function doReconfigure() {
   await publishCommand({ action: "reconfigure", id: "bridge" });
 }
 
+// Load plugins newly dropped into the server's plugin dir (add-only, no restart).
+async function doLoadNewPlugins() {
+  await scanForPlugins();
+}
+
+// Restart the manager process in place — the "full reload" that picks up edited
+// or removed plugins. Confirm-guarded: it briefly drops the WS (auto-reconnects)
+// and restarts an embedded bridge.
+async function doRestartManager() {
+  const ok = await confirm({
+    title: "Restart manager",
+    message:
+      "Restart the manager process to fully reload plugins — this picks up " +
+      "edited or removed plugins, which 'Load new plugins' can't. The UI " +
+      "reconnects automatically in a few seconds; an embedded bridge restarts " +
+      "too, briefly disconnecting devices.",
+    okLabel: "Restart",
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const res = await fetch("/api/restart", { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    toast("Restarting manager… reconnecting shortly", "ok");
+  } catch (e) {
+    toast(`Restart failed: ${e.message}`, "error");
+  }
+}
+
 // Built-in items — ids/scopes/order preserved so the menu (and the e2e suite)
 // looks and behaves exactly as before.
 registerHeaderAction({ id: "device-add-btn", iconHtml: "+", labelHtml: "Add device", scope: "devices", order: 10, onClick: doAddDevice });
@@ -216,6 +245,7 @@ registerHeaderAction({
   onClick: doThemeToggle,
 });
 registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: "Refresh", scope: "devices", order: 50, onClick: doRefresh });
+registerHeaderAction({ id: "plugin-scan-btn", iconHtml: "🧩", labelHtml: "Load new plugins", order: 60, onClick: doLoadNewPlugins });
 registerHeaderAction({
   id: "reconfigure-btn",
   iconHtml: "🔧",
@@ -226,6 +256,15 @@ registerHeaderAction({
   danger: true,
   title: "Tell the bridge to re-read its config and restart",
   onClick: doReconfigure,
+});
+registerHeaderAction({
+  id: "restart-btn",
+  iconHtml: "♻",
+  labelHtml: "Restart manager",
+  order: 110,
+  danger: true,
+  title: "Restart the manager process to fully reload plugins",
+  onClick: doRestartManager,
 });
 renderActionsMenu();
 

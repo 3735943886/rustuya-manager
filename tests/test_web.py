@@ -122,6 +122,22 @@ class TestHTTP:
             assert body["bridge_mode"] == "external"
             assert body["embed_requested"] is True
 
+    def test_api_restart_schedules_hook(self):
+        # /api/restart re-execs the process in prod; here we stub the hook so we
+        # can assert it's scheduled (and don't replace the test runner).
+        import threading
+
+        state, client = _fixture_state()
+        app = build_app(state, client)
+        fired = threading.Event()
+        app.state.restart_hook = fired.set
+        app.state.restart_delay = 0.0
+        with TestClient(app) as tc:
+            r = tc.post("/api/restart")
+            assert r.status_code == 200
+            assert r.json() == {"ok": True}
+            assert fired.wait(2.0), "restart hook was not invoked"
+
     def test_api_command_validates_action(self):
         state, client = _fixture_state()
         with TestClient(build_app(state, client)) as tc:

@@ -272,6 +272,46 @@ def test_dir_plugin_ignores_non_packages_and_underscored(tmp_path):
         assert tc.get("/api/plugins").json() == {"pages": [], "init_scripts": []}
 
 
+# ── (g) Runtime add-only scan (POST /api/plugins/scan) ───────────────────
+def test_scan_loads_newly_added_dir_plugin(tmp_path):
+    # A plugin dropped into the dir AFTER startup is picked up by a scan — its
+    # route/page/static are wired onto the live app, no restart.
+    state = State()
+    client = _make_client(state)
+    with TestClient(build_app(state, client, plugin_dirs=[str(tmp_path)])) as tc:
+        assert tc.get("/api/plugins").json() == {"pages": [], "init_scripts": []}
+
+        _write_pkg_plugin(
+            tmp_path,
+            "late_plugin",
+            "from pathlib import Path\n"
+            "_S = Path(__file__).resolve().parent / 'static'\n"
+            "def register(ctx):\n"
+            "    ctx.add_page('late', 'Late', static_dir=str(_S))\n",
+        )
+        static = tmp_path / "late_plugin" / "static"
+        static.mkdir()
+        (static / "index.js").write_text("export function mount() {}")
+
+        r = tc.post("/api/plugins/scan").json()
+        assert r["ok"] is True
+        assert r["added"] == 1
+        assert {"id": "late", "label": "Late", "js_url": "/plugins/late/index.js"} in r["pages"]
+        # GET reflects it and the runtime static mount serves the asset.
+        assert any(p["id"] == "late" for p in tc.get("/api/plugins").json()["pages"])
+        assert "mount" in tc.get("/plugins/late/index.js").text
+        # Idempotent: a second scan finds nothing new (dedup by register identity).
+        assert tc.post("/api/plugins/scan").json()["added"] == 0
+
+
+def test_scan_with_no_plugin_dir_is_noop(tmp_path):
+    state = State()
+    client = _make_client(state)
+    with TestClient(build_app(state, client)) as tc:
+        r = tc.post("/api/plugins/scan").json()
+        assert r == {"ok": True, "added": 0, "pages": [], "init_scripts": []}
+
+
 # ── (e) Read-only snapshots: devices() + bridge_config() ─────────────────
 async def test_devices_returns_raw_data_snapshot():
     state = State()

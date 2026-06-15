@@ -275,7 +275,6 @@ single `*.py` file:
   quicktweak.py         # single-file plugin: just register(ctx)
 ```
 
-Restart the container to pick up changes (plugins load once at boot).
 Outside Docker, point the manager at any directory with
 `--plugin-dir DIR` (or `RUSTUYA_MANAGER_PLUGIN_DIR`); it's opt-in, so
 nothing is scanned unless set. Two caveats: a drop-in plugin **can't
@@ -284,6 +283,20 @@ the manager already provides — for anything heavier, install it as an
 entry-point package instead), and loading code from this directory
 **executes it in-process**, so only point it at plugins you trust. See
 [`examples/hello_plugin`](examples/hello_plugin) for a complete plugin.
+
+#### Loading without a restart
+
+Two hamburger-menu (☰) items handle reloads:
+
+- **Load new plugins** — scans the plugin dir and loads any *newly
+  added* plugin live, no restart. Add-only: it can't pick up edits to an
+  already-loaded plugin or unload one (live routes/mounts can't be
+  cleanly removed).
+- **Restart manager** — restarts the manager process in place (same PID,
+  via re-exec). This is the full reload: it picks up edited plugin code,
+  drops removed plugins, and respawns an embedded bridge — lighter than a
+  container restart and works outside Docker too. The UI reconnects
+  automatically; an embedded bridge briefly disconnects its devices.
 
 ## License
 MIT

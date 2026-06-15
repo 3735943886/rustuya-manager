@@ -16,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +29,7 @@ from . import __version__
 from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
 from .models import Device
 from .mqtt import BridgeClient
-from .plugins import PluginContext, PluginRegistry, load_plugins
+from .plugins import PluginContext, PluginRegistry, discover_plugins
 from .scan import LanScanCoordinator
 from .state import State
 from .wizard import WizardManager
@@ -175,6 +177,26 @@ class _BasicAuthMiddleware:
                     await send({"type": "websocket.close", "code": 1008})
                 return
         await self.app(scope, receive, send)
+
+
+def _reexec_process() -> None:
+    """Replace the current process image with a fresh manager (same PID), via
+    `os.execvp` on the original argv. This is the "full reload": a brand-new
+    Python process re-imports everything, so edited plugin code and removed
+    plugins are picked up — and an embedded bridge is respawned — without a
+    container/service restart. WebSocket clients drop and auto-reconnect once
+    the new process is serving.
+
+    Works wherever the manager was started by its argv: the console script
+    (`rustuya-manager …`, incl. the Docker entrypoint) or an absolute path.
+    On any failure we exit non-zero so a supervisor (Docker `restart:`, systemd)
+    brings us back rather than leaving a half-dead process."""
+    logger.warning("re-exec'ing the manager process (full reload): %s", sys.argv)
+    try:
+        os.execvp(sys.argv[0], sys.argv)
+    except Exception:  # noqa: BLE001 - last resort: let a supervisor restart us
+        logger.exception("re-exec failed; exiting so a supervisor can restart us")
+        os._exit(1)
 
 
 def build_app(
@@ -389,16 +411,74 @@ def build_app(
                 pass
 
     # ── Plugin host ──────────────────────────────────────────────────────
-    # Discover + register plugins once at app build time. With nothing
-    # installed this is a no-op: no routers, no pages, no static mounts, and
-    # GET /api/plugins returns []. The host is entirely HA-agnostic — it never
-    # imports any specific plugin.
+    # Discover + register plugins at app build time, and again on demand via
+    # POST /api/plugins/scan (add-only). With nothing installed this is a no-op:
+    # no routers, no pages, no static mounts, and GET /api/plugins returns empty
+    # lists. The host is HA-agnostic — it never imports any specific plugin.
     registry = PluginRegistry()
     ctx = PluginContext(registry, bridge_client=client, state=state)
-    load_plugins(ctx, register_callables=plugins, plugin_dirs=plugin_dirs)
+    # Dedup state so a rescan only wires *new* plugins: register callables
+    # already run, router objects already included, and plugin ids already
+    # mounted. Routes/mounts can be added to a live Starlette app but not cleanly
+    # removed, so scan is strictly additive — picking up edited code or removing
+    # a plugin needs a full reload (POST /api/restart → _reexec_process).
+    _applied: set[Any] = set()
+    _included: set[int] = set()
+    _mounted: set[str] = set()
 
-    for router in registry.api_routers:
-        app.include_router(router)
+    def _apply_new_plugins(registers: list[Any]) -> int:
+        """Register + wire any not-yet-applied plugins; return how many ran."""
+        added = 0
+        for reg in registers:
+            if reg in _applied:
+                continue
+            _applied.add(reg)
+            try:
+                reg(ctx)
+                added += 1
+            except Exception:  # noqa: BLE001 - one bad plugin must not abort the rest
+                logger.exception("plugin register(ctx) raised; skipping that plugin")
+        for router in registry.api_routers:
+            if id(router) in _included:
+                continue
+            _included.add(id(router))
+            app.include_router(router)
+        # Pages + init scripts share one per-id static mount under /plugins/{id}.
+        seen: dict[str, Path] = {}
+        for item in (*registry.pages, *registry.init_scripts):
+            seen.setdefault(item["id"], Path(item["static_dir"]))
+        for plugin_id, static_dir in seen.items():
+            if plugin_id in _mounted:
+                continue
+            if static_dir.is_dir():
+                _mounted.add(plugin_id)
+                app.mount(
+                    f"/plugins/{plugin_id}",
+                    StaticFiles(directory=static_dir),
+                    name=f"plugin-{plugin_id}",
+                )
+            else:
+                logger.warning(
+                    "plugin %r static_dir %s is not a directory; assets unavailable",
+                    plugin_id,
+                    static_dir,
+                )
+        return added
+
+    _apply_new_plugins(discover_plugins(register_callables=plugins, plugin_dirs=plugin_dirs))
+
+    def _plugin_manifest() -> dict[str, Any]:
+        return {
+            "pages": [
+                {
+                    "id": page["id"],
+                    "label": page["label"],
+                    "js_url": f"/plugins/{page['id']}/{page['entry']}",
+                }
+                for page in registry.pages
+            ],
+            "init_scripts": [f"/plugins/{s['id']}/{s['entry']}" for s in registry.init_scripts],
+        }
 
     @app.get("/api/plugins")
     async def get_plugins() -> dict[str, Any]:
@@ -413,38 +493,33 @@ def build_app(
         eager imports). `init_scripts` modules export `init(ctx)` and run at
         boot — that's how a plugin contributes always-visible UI such as a
         hamburger-menu item (ctx.addHeaderAction)."""
-        return {
-            "pages": [
-                {
-                    "id": page["id"],
-                    "label": page["label"],
-                    "js_url": f"/plugins/{page['id']}/{page['entry']}",
-                }
-                for page in registry.pages
-            ],
-            "init_scripts": [f"/plugins/{s['id']}/{s['entry']}" for s in registry.init_scripts],
-        }
+        return _plugin_manifest()
 
-    # Serve each plugin's static directory under /plugins/{id}/. The ASGI
-    # _BasicAuthMiddleware wraps the whole app, so these paths inherit the same
-    # auth gate as everything else. Pages and init scripts share the same
-    # per-id mount, so a plugin that ships both under one id is mounted once.
-    _mounted_static: dict[str, Path] = {}
-    for item in (*registry.pages, *registry.init_scripts):
-        _mounted_static.setdefault(item["id"], Path(item["static_dir"]))
-    for plugin_id, static_dir in _mounted_static.items():
-        if static_dir.is_dir():
-            app.mount(
-                f"/plugins/{plugin_id}",
-                StaticFiles(directory=static_dir),
-                name=f"plugin-{plugin_id}",
-            )
-        else:
-            logger.warning(
-                "plugin %r static_dir %s is not a directory; assets unavailable",
-                plugin_id,
-                static_dir,
-            )
+    @app.post("/api/plugins/scan")
+    async def scan_plugins() -> dict[str, Any]:
+        """Load plugins newly dropped into the plugin dir, without a restart.
+        Add-only: returns `{ok, added, pages, init_scripts}`. Cannot reload
+        edited plugin code or unload a plugin — that needs POST /api/restart."""
+        added = _apply_new_plugins(discover_plugins(plugin_dirs=plugin_dirs))
+        logger.info("plugin scan: %d new plugin(s) loaded", added)
+        return {"ok": True, "added": added, **_plugin_manifest()}
+
+    # Restart hook is indirected through app.state so tests can stub it (the real
+    # one replaces the process). Scheduled a beat after responding so the HTTP
+    # 200 reaches the client before the image is swapped.
+    app.state.restart_hook = _reexec_process
+    app.state.restart_delay = 0.5
+
+    @app.post("/api/restart")
+    async def restart_manager() -> dict[str, Any]:
+        """Restart the manager process in place (full reload). Picks up edited
+        plugin code, drops removed plugins, respawns an embedded bridge —
+        lighter than a container restart and works outside Docker too. Clients'
+        WebSockets drop and auto-reconnect once the new process is serving."""
+        logger.warning("manager restart requested via web UI")
+        loop = asyncio.get_running_loop()
+        loop.call_later(app.state.restart_delay, app.state.restart_hook)
+        return {"ok": True}
 
     # Static assets (JS, eventual CSS, icons). Tailwind comes from a CDN inside
     # the HTML, so there's no build step.

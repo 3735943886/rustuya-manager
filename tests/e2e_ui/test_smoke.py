@@ -495,3 +495,22 @@ def test_plugin_contributes_header_menu_item(page: Page, server_url_with_plugin:
     action.click()
     # The init module's onClick stamps document.title as a side-effect probe.
     expect(page).to_have_title("plugin-action-fired")
+
+
+def test_plugin_reload_menu_items_present(page: Page, server_url: str) -> None:
+    """The hamburger menu exposes both reload paths: add-only "Load new plugins"
+    and the full-reload "Restart manager". (We don't click Restart — it would
+    re-exec the test server; the endpoint itself is covered in test_web.py.)"""
+    page.goto(server_url)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+    page.locator("#actions-menu > summary").click()
+    scan = page.locator("#plugin-scan-btn")
+    expect(scan).to_be_visible()
+    expect(scan).to_contain_text("Load new plugins")
+    restart = page.locator("#restart-btn")
+    expect(restart).to_be_visible()
+    expect(restart).to_contain_text("Restart manager")
+    # "Load new plugins" is safe to fire on the stub server (no plugin dir →
+    # added 0); it must not throw and the menu closes.
+    scan.click()
+    expect(page.locator("#toast-container")).to_contain_text("No new plugins found")

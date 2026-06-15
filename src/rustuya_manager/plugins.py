@@ -304,24 +304,21 @@ def _discover_dir_plugins(
     return found
 
 
-def load_plugins(
-    ctx: PluginContext,
+def discover_plugins(
     *,
     register_callables: list[Callable[[PluginContext], None]] | None = None,
     plugin_dirs: list[str] | None = None,
-) -> None:
-    """Discover and register all plugins into `ctx`.
+) -> list[Callable[[PluginContext], None]]:
+    """Return all `register(ctx)` callables from the three sources, without
+    calling them. Split out from `load_plugins` so a runtime rescan can diff the
+    result against what's already applied and register only the new ones.
 
-    Three sources, all running through the same per-plugin isolation:
-      - `register_callables`: injected directly (tests, or an explicit
-        `build_app(..., plugins=[...])`).
-      - the `rustuya_manager.plugins` entry-point group (pip-installed plugins).
-      - `plugin_dirs`: packages/modules dropped into a directory (e.g. a mounted
-        `/data/plugins`), via `_discover_dir_plugins`.
-
-    Discovery, loading, and each `register()` call are individually guarded so
-    one bad plugin can never take the manager down.
-    """
+    Sources: `register_callables` (injected directly), the
+    `rustuya_manager.plugins` entry-point group, and `plugin_dirs`
+    (dropped-in packages/modules). For already-imported entry-point/dir plugins
+    the SAME callable object comes back across calls (modules are cached in
+    `sys.modules`), so caller-side identity dedup is reliable; a newly-dropped
+    dir plugin imports fresh and yields a new callable."""
     registers: list[Callable[[PluginContext], None]] = list(register_callables or [])
 
     try:
@@ -341,7 +338,28 @@ def load_plugins(
     if plugin_dirs:
         registers.extend(_discover_dir_plugins(plugin_dirs))
 
-    for reg in registers:
+    return registers
+
+
+def load_plugins(
+    ctx: PluginContext,
+    *,
+    register_callables: list[Callable[[PluginContext], None]] | None = None,
+    plugin_dirs: list[str] | None = None,
+) -> None:
+    """Discover and register all plugins into `ctx`.
+
+    Three sources, all running through the same per-plugin isolation:
+      - `register_callables`: injected directly (tests, or an explicit
+        `build_app(..., plugins=[...])`).
+      - the `rustuya_manager.plugins` entry-point group (pip-installed plugins).
+      - `plugin_dirs`: packages/modules dropped into a directory (e.g. a mounted
+        `/data/plugins`), via `_discover_dir_plugins`.
+
+    Discovery, loading, and each `register()` call are individually guarded so
+    one bad plugin can never take the manager down.
+    """
+    for reg in discover_plugins(register_callables=register_callables, plugin_dirs=plugin_dirs):
         try:
             reg(ctx)
         except Exception:  # noqa: BLE001 - register() failure is isolated per plugin

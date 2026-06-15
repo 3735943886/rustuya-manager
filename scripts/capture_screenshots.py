@@ -245,7 +245,7 @@ _ANNOTATE_JS = r"""
 
     const items = [
         [document.querySelector('#actions-menu'),
-         'Top-right <b>☰ Menu</b> — add device · cloud login · 📡 scan · theme · refresh · 🔧 reconfigure'],
+         'Top-right <b>☰ Menu</b>'],
         [document.querySelector('#sync-bar'),
          '<b>Bulk sync</b> — fix one category or apply all.'],
         [document.querySelector('#search-input').closest('.flex'),

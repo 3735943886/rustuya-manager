@@ -38,7 +38,7 @@ RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl
 # host UID work without pre-chowning the directory; the user name is
 # the only stable handle.
 RUN useradd --create-home --shell /usr/sbin/nologin manager \
-    && mkdir -p /data
+    && mkdir -p /data /data/plugins
 
 WORKDIR /data
 
@@ -56,6 +56,10 @@ WORKDIR /data
 #   * CLOUD / BRIDGE_CONFIG / HOST keep their Dockerfile ENV defaults
 #     because the docker persona wants paths under /data and a non-
 #     loopback bind, which differ from manager defaults.
+#   * PLUGIN_DIR defaults to /data/plugins so drop-in plugins "just work":
+#     mount a folder there and restart. Empty/absent dir loads nothing.
+#     Loading code from this dir runs it in-process, so only mount plugins
+#     you trust (same trust as installing a package).
 #   * PUID/PGID default to 1000 which matches the first non-root user
 #     on most desktop / Pi / Armbian installs. Override with
 #     `-e PUID=$(id -u) -e PGID=$(id -g)` for hosts where the data
@@ -69,6 +73,7 @@ ENV HOST=0.0.0.0 \
     PORT=8373 \
     CLOUD=/data/tuyadevices.json \
     BRIDGE_CONFIG=/data/config.json \
+    PLUGIN_DIR=/data/plugins \
     PUID=1000 \
     PGID=1000 \
     EMBED_BRIDGE=1

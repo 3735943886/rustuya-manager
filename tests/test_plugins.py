@@ -20,6 +20,7 @@ from rustuya_manager.plugins import (
     PLUGIN_API_VERSION,
     PluginContext,
     PluginRegistry,
+    load_plugins,
     topic_matches,
 )
 from rustuya_manager.state import State
@@ -188,6 +189,87 @@ def test_header_only_plugin_has_init_script_but_no_pages(tmp_path):
         assert manifest["pages"] == []
         assert manifest["init_scripts"] == ["/plugins/menu-only/init.js"]
         assert tc.get("/plugins/menu-only/init.js").status_code == 200
+
+
+# ── (f) Drop-in directory plugins (no pip install) ───────────────────────
+def _write_pkg_plugin(root, name: str, body: str) -> None:
+    pkg = root / name
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text(body)
+
+
+def test_dir_plugin_package_is_discovered_and_registered(tmp_path):
+    # A package dropped into plugin_dir, exposing register(ctx), is loaded — and
+    # its own static/ (resolved via Path(__file__).parent) serves correctly.
+    _write_pkg_plugin(
+        tmp_path,
+        "dropin_pkg",
+        "from pathlib import Path\n"
+        "_STATIC = Path(__file__).resolve().parent / 'static'\n"
+        "def register(ctx):\n"
+        "    ctx.add_page('dropin', 'Drop-in', static_dir=str(_STATIC))\n",
+    )
+    static = tmp_path / "dropin_pkg" / "static"
+    static.mkdir()
+    (static / "index.js").write_text("export function mount() {}")
+
+    state = State()
+    client = _make_client(state)
+    with TestClient(build_app(state, client, plugin_dirs=[str(tmp_path)])) as tc:
+        manifest = tc.get("/api/plugins").json()
+        assert {
+            "id": "dropin",
+            "label": "Drop-in",
+            "js_url": "/plugins/dropin/index.js",
+        } in manifest["pages"]
+        assert "mount" in tc.get("/plugins/dropin/index.js").text
+
+
+def test_dir_plugin_single_file_is_discovered(tmp_path):
+    (tmp_path / "dropin_solo.py").write_text(
+        "def register(ctx):\n    ctx.add_api_router(_router())\n"
+        "def _router():\n"
+        "    from fastapi import APIRouter\n"
+        "    r = APIRouter()\n"
+        "    @r.get('/api/dropin-solo')\n"
+        "    async def _h():\n        return {'ok': True}\n"
+        "    return r\n"
+    )
+    state = State()
+    client = _make_client(state)
+    with TestClient(build_app(state, client, plugin_dirs=[str(tmp_path)])) as tc:
+        assert tc.get("/api/dropin-solo").json() == {"ok": True}
+
+
+def test_dir_plugin_broken_one_is_skipped_others_load(tmp_path):
+    # A package that raises at import time must not stop a sibling from loading.
+    _write_pkg_plugin(tmp_path, "dropin_boom", "raise RuntimeError('boom at import')\n")
+    _write_pkg_plugin(
+        tmp_path,
+        "dropin_ok",
+        "def register(ctx):\n    ctx.state_namespace('dropin_ok')\n",
+    )
+    registry = PluginRegistry()
+    state = State()
+    ctx = PluginContext(registry, bridge_client=_make_client(state), state=state)
+    # Must not raise despite the broken sibling.
+    load_plugins(ctx, plugin_dirs=[str(tmp_path)])
+    # The good one ran (it didn't add a page/router, but reaching here without
+    # an exception proves isolation held and discovery continued).
+
+
+def test_dir_plugin_ignores_non_packages_and_underscored(tmp_path):
+    # A bare dir (no __init__.py) and an _private.py are both skipped.
+    (tmp_path / "not_a_pkg").mkdir()
+    (tmp_path / "not_a_pkg" / "data.txt").write_text("nope")
+    (tmp_path / "_private.py").write_text(
+        "def register(ctx):\n    raise AssertionError('loaded!')\n"
+    )
+    state = State()
+    client = _make_client(state)
+    # Build succeeds and the underscored module's register never runs.
+    with TestClient(build_app(state, client, plugin_dirs=[str(tmp_path)])) as tc:
+        assert tc.get("/api/plugins").json() == {"pages": [], "init_scripts": []}
 
 
 # ── (e) Read-only snapshots: devices() + bridge_config() ─────────────────

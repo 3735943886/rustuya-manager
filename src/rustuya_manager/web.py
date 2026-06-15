@@ -184,6 +184,7 @@ def build_app(
     creds_path: str | None = None,
     auth: str | None = None,
     plugins: list[Any] | None = None,
+    plugin_dirs: list[str] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="rustuya-manager", version=__version__)
     if auth:
@@ -394,7 +395,7 @@ def build_app(
     # imports any specific plugin.
     registry = PluginRegistry()
     ctx = PluginContext(registry, bridge_client=client, state=state)
-    load_plugins(ctx, register_callables=plugins)
+    load_plugins(ctx, register_callables=plugins, plugin_dirs=plugin_dirs)
 
     for router in registry.api_routers:
         app.include_router(router)

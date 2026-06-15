@@ -56,5 +56,6 @@ exec rustuya-manager \
     ${ROOT:+--root "$ROOT"} \
     ${AUTH:+--auth "$AUTH"} \
     ${CLOUD:+--cloud "$CLOUD"} \
+    ${PLUGIN_DIR:+--plugin-dir "$PLUGIN_DIR"} \
     ${BRIDGE_CONFIG:+--bridge-config "$BRIDGE_CONFIG"} \
     ${BRIDGE_STATE:+--bridge-state "$BRIDGE_STATE"}

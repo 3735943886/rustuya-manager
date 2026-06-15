@@ -1,15 +1,21 @@
 """Universal, HA-agnostic plugin host for rustuya-manager.
 
-A plugin is any installed package that exposes a `register(ctx)` callable under
-the `rustuya_manager.plugins` entry-point group. At startup `build_app` discovers
-them (stdlib `importlib.metadata` only — no extra runtime dependency) and calls
-`register(ctx)` once each. Through `ctx` a plugin can contribute four things:
+A plugin is anything exposing a `register(ctx)` callable, found one of two ways:
+  - an installed package under the `rustuya_manager.plugins` entry-point group
+    (stdlib `importlib.metadata` only — no extra runtime dependency); or
+  - a package/module dropped into a `--plugin-dir` (e.g. a mounted Docker
+    `/data/plugins`), loaded by `_discover_dir_plugins` — no pip install needed.
+
+At startup `build_app` discovers both and calls `register(ctx)` once each.
+Through `ctx` a plugin can contribute five things:
 
   1. a FastAPI `APIRouter`            (ctx.add_api_router)
   2. an MQTT subscription + handler   (ctx.add_mqtt_subscription)
   3. a state namespace               (ctx.state_namespace) — rides the existing
                                       WS broadcast for free
   4. a UI page (tab + static assets) (ctx.add_page)
+  5. an eager init module            (ctx.add_header_init) — runs at boot, e.g.
+                                      to add a hamburger-menu item
 
 It can also *read* two host-owned snapshots — the cloud devices
 (`ctx.devices`) and the raw bridge config (`ctx.bridge_config`) — and publish
@@ -25,9 +31,12 @@ no behavioural change at all.
 
 from __future__ import annotations
 
+import importlib
 import importlib.metadata
 import logging
+import sys
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -242,18 +251,76 @@ class PluginContext:
         self._registry.init_scripts.append({"id": id, "static_dir": static_dir, "entry": entry})
 
 
+def _discover_dir_plugins(
+    plugin_dirs: list[str],
+) -> list[Callable[[PluginContext], None]]:
+    """Import `register` callables from plugin packages/modules dropped into
+    `plugin_dirs` (e.g. a mounted Docker `/data/plugins`) — no pip install
+    needed.
+
+    Each immediate child of a dir is loaded if it's a package (has
+    `__init__.py`) or a top-level `*.py` file (names starting with `.`/`_` are
+    skipped). The dir is put on `sys.path` and the child imported by name, so a
+    plugin's `Path(__file__).parent / "static"` resolves to its real on-disk
+    location and `add_page`/`add_header_init` static serving works unchanged.
+
+    Per-item failures are logged and skipped — a broken folder never aborts the
+    rest. Caveats (documented for users): a dir plugin can't pip-install
+    dependencies (it gets stdlib + what `ctx`/the manager provide), and its
+    package/module name must be distinctive enough not to shadow an installed
+    module on `sys.path`."""
+    found: list[Callable[[PluginContext], None]] = []
+    for raw in plugin_dirs:
+        root = Path(raw).expanduser()
+        if not root.is_dir():
+            logger.warning("plugin dir %s is not a directory; skipping", root)
+            continue
+        if str(root) not in sys.path:
+            sys.path.insert(0, str(root))
+        for child in sorted(root.iterdir()):
+            name = child.name
+            if name.startswith((".", "_")):
+                continue
+            if child.is_dir():
+                if not (child / "__init__.py").is_file():
+                    continue
+                mod_name = name
+            elif child.suffix == ".py":
+                mod_name = child.stem
+            else:
+                continue
+            try:
+                module = importlib.import_module(mod_name)
+                reg = getattr(module, "register", None)
+                if callable(reg):
+                    found.append(reg)
+                    logger.info("loaded dir plugin %r from %s", mod_name, root)
+                else:
+                    logger.warning(
+                        "dir plugin %r in %s has no register(ctx); skipping", mod_name, root
+                    )
+            except Exception:  # noqa: BLE001 - a broken dir plugin must not abort the rest
+                logger.exception("failed to import dir plugin %r from %s; skipping", mod_name, root)
+    return found
+
+
 def load_plugins(
     ctx: PluginContext,
     *,
     register_callables: list[Callable[[PluginContext], None]] | None = None,
+    plugin_dirs: list[str] | None = None,
 ) -> None:
     """Discover and register all plugins into `ctx`.
 
-    `register_callables` lets callers (tests, or an explicit `build_app(...,
-    plugins=[...])`) inject `register` functions without an installed entry
-    point; they run in addition to anything discovered via the entry-point
-    group. Discovery, loading, and each `register()` call are individually
-    guarded so one bad plugin can never take the manager down.
+    Three sources, all running through the same per-plugin isolation:
+      - `register_callables`: injected directly (tests, or an explicit
+        `build_app(..., plugins=[...])`).
+      - the `rustuya_manager.plugins` entry-point group (pip-installed plugins).
+      - `plugin_dirs`: packages/modules dropped into a directory (e.g. a mounted
+        `/data/plugins`), via `_discover_dir_plugins`.
+
+    Discovery, loading, and each `register()` call are individually guarded so
+    one bad plugin can never take the manager down.
     """
     registers: list[Callable[[PluginContext], None]] = list(register_callables or [])
 
@@ -270,6 +337,9 @@ def load_plugins(
             logger.exception(
                 "failed to load plugin entry point %r; skipping", getattr(ep, "name", ep)
             )
+
+    if plugin_dirs:
+        registers.extend(_discover_dir_plugins(plugin_dirs))
 
     for reg in registers:
         try:

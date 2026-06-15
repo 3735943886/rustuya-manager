@@ -40,3 +40,17 @@ Uninstall to confirm the manager returns to its exact plugin-less behaviour
 ```bash
 pip uninstall rustuya-hello-plugin
 ```
+
+## As a drop-in (no install)
+
+The same plugin works without pip — copy the `rustuya_hello/` package into a
+plugin directory and point the manager at it:
+
+```bash
+cp -r examples/hello_plugin/rustuya_hello /path/to/plugins/
+rustuya-manager --web --plugin-dir /path/to/plugins
+```
+
+In Docker the image already sets `PLUGIN_DIR=/data/plugins`, so mounting the
+package there (`-v ./plugins:/data/plugins`) and restarting is enough. Drop-in
+plugins can't install dependencies and run in-process — only use ones you trust.

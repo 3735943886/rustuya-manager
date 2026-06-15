@@ -222,6 +222,7 @@ Environment variables (defaults shown; all optional unless noted):
 | `ROOT` | *(unset — manager falls back to bridge-config, then `rustuya`)* | `--root` |
 | `AUTH` | *(off)* | `--auth USER:PASS` |
 | `CLOUD` | `/data/tuyadevices.json` | `--cloud` |
+| `PLUGIN_DIR` | `/data/plugins` | `--plugin-dir` |
 | `BRIDGE_CONFIG` | `/data/config.json` | `--bridge-config` |
 | `BRIDGE_STATE` | *(unset — manager falls back to bridge-config `state_file`, then `/data/rustuya.json`)* | `--bridge-state` |
 | `PUID` | `1000` | UID the app runs as |
@@ -255,6 +256,34 @@ so the in-container user can write to them:
 The entrypoint then renumbers its internal `manager` user to that
 UID/GID and `chown`s `/data` on startup, so any host owner works. With
 named volumes Docker handles ownership and the defaults are fine.
+
+### Drop-in plugins
+
+Plugins normally ship as pip-installed packages (the
+`rustuya_manager.plugins` entry-point group). For Docker — where you'd
+otherwise rebuild the image — you can instead **drop a plugin into a
+directory** and have it loaded at startup. The image defaults
+`PLUGIN_DIR=/data/plugins`; mount a folder there and drop in either a
+package (a directory with `__init__.py` exposing `register(ctx)`) or a
+single `*.py` file:
+
+```
+/data/plugins/
+  rustuya_hello/        # package plugin
+    __init__.py         #   defines register(ctx)
+    static/             #   its UI assets (served automatically)
+  quicktweak.py         # single-file plugin: just register(ctx)
+```
+
+Restart the container to pick up changes (plugins load once at boot).
+Outside Docker, point the manager at any directory with
+`--plugin-dir DIR` (or `RUSTUYA_MANAGER_PLUGIN_DIR`); it's opt-in, so
+nothing is scanned unless set. Two caveats: a drop-in plugin **can't
+install its own dependencies** (it gets the standard library plus what
+the manager already provides — for anything heavier, install it as an
+entry-point package instead), and loading code from this directory
+**executes it in-process**, so only point it at plugins you trust. See
+[`examples/hello_plugin`](examples/hello_plugin) for a complete plugin.
 
 ## License
 MIT

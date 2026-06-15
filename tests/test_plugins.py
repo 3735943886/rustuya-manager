@@ -150,6 +150,9 @@ def test_api_plugins_manifest_and_static(tmp_path):
         served = tc.get("/plugins/hello/index.js")
         assert served.status_code == 200
         assert "mount" in served.text
+        # Plugin assets must be no-cache like /static, so a drop-in plugin edited
+        # on disk (swap files + restart) takes effect without a browser restart.
+        assert "no-cache" in served.headers.get("cache-control", "")
 
 
 def test_api_plugins_header_init_manifest_and_shared_mount(tmp_path):

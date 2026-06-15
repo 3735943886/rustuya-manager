@@ -440,6 +440,21 @@ def build_app(
     _included: set[int] = set()
     _mounted: set[str] = set()
 
+    # `Cache-Control: no-cache` forces every load to revalidate against the
+    # server's ETag / Last-Modified — a 304 when nothing changed, fresh bytes
+    # when it did. Applied to *both* the manager's own /static and each plugin
+    # mount below: a plugin's ES module is imported by a bare `/plugins/<id>/
+    # index.js` URL that never changes across releases, so without this a
+    # drop-in plugin edited on disk (swap files + restart) would keep running
+    # the browser's stale cached module — the "did my fix actually deploy?" trap.
+    _NO_CACHE = {"cache-control": "no-cache, must-revalidate"}
+
+    class _NoCacheStaticFiles(StaticFiles):
+        async def get_response(self, path, scope):
+            response = await super().get_response(path, scope)
+            response.headers.update(_NO_CACHE)
+            return response
+
     def _apply_new_plugins(registers: list[Any]) -> int:
         """Register + wire any not-yet-applied plugins; return how many ran."""
         added = 0
@@ -468,7 +483,7 @@ def build_app(
                 _mounted.add(plugin_id)
                 app.mount(
                     f"/plugins/{plugin_id}",
-                    StaticFiles(directory=static_dir),
+                    _NoCacheStaticFiles(directory=static_dir),
                     name=f"plugin-{plugin_id}",
                 )
             else:
@@ -536,24 +551,10 @@ def build_app(
         return {"ok": True}
 
     # Static assets (JS, eventual CSS, icons). Tailwind comes from a CDN inside
-    # the HTML, so there's no build step.
-    #
-    # `Cache-Control: no-cache` forces every load to revalidate against the
-    # server's ETag / Last-Modified — when nothing changed, Starlette returns
-    # 304 with no body, so the perceived cost is negligible. The alternative
-    # (default heuristic caching) bites every release: ES-module imports use
-    # bare paths like `./state.js`, so a `?v=` busted root script.js still
-    # pulls stale siblings out of disk cache. Revalidation skips that whole
-    # class of "did my fix actually deploy?" confusion.
-    _NO_CACHE = {"cache-control": "no-cache, must-revalidate"}
+    # the HTML, so there's no build step. Served no-cache (see _NoCacheStaticFiles
+    # above) so every release revalidates instead of pulling stale ES-module
+    # siblings (bare `./state.js` imports) out of disk cache.
     if _STATIC_DIR.is_dir():
-
-        class _NoCacheStaticFiles(StaticFiles):
-            async def get_response(self, path, scope):
-                response = await super().get_response(path, scope)
-                response.headers.update(_NO_CACHE)
-                return response
-
         app.mount("/static", _NoCacheStaticFiles(directory=_STATIC_DIR), name="static")
 
     @app.get("/")

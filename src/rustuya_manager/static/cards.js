@@ -94,11 +94,14 @@ function resolveIp(bridge, cloud) {
       return { value: bridge.ip, tooltip: "" };
     }
     // bridge.ip === "Auto" → no fixed IP; the bridge follows DHCP / dynamic
-    // assignment. Report that literally; substituting the cloud value would
-    // be misleading because it's usually the external NAT'd address, not LAN.
+    // assignment. Report that literally rather than substituting the cloud
+    // value, which is the address the cloud-of-record has on file, not where
+    // the bridge is actually connected. A public cloud IP never reaches here —
+    // Device.from_dict normalizes it to "Auto" — so a shown cloud IP is a LAN
+    // address.
     const tip =
       "IP is dynamic (DHCP/auto)." +
-      (cloudIp && cloudIp !== "Auto" ? `\nCloud reports: ${cloudIp} (typically external/NAT, not LAN)` : "");
+      (cloudIp && cloudIp !== "Auto" ? `\nCloud has it on file at ${cloudIp}.` : "");
     return { value: "Auto", tooltip: tip };
   }
   // Device not in bridge — cloud is all we have.

@@ -134,16 +134,25 @@ class TestRealWorldBalconyLightswitch:
     device is fully synced — no phantom IP/VER mismatch."""
 
     def test_synced_no_phantom_mismatch(self):
-        bridge = Device.from_dict({
-            "id": "ebe9f29529dc499ed4bptk", "ip": "10.10.129.151",
-            "key": "D-v|+7#1ci2t?EV;", "name": "balcony_lightswitch",
-            "status": "0", "version": "3.4",
-        })
-        cloud = Device.from_dict({
-            "id": "ebe9f29529dc499ed4bptk", "ip": "121.167.240.111",
-            "local_key": "D-v|+7#1ci2t?EV;", "name": "balcony_lightswitch",
-            # no "version" key
-        })
-        assert cloud.ip == "Auto"          # public cloud IP normalized away
-        assert cloud.version == "Auto"     # cloud omitted version
+        bridge = Device.from_dict(
+            {
+                "id": "ebe9f29529dc499ed4bptk",
+                "ip": "10.10.129.151",
+                "key": "D-v|+7#1ci2t?EV;",
+                "name": "balcony_lightswitch",
+                "status": "0",
+                "version": "3.4",
+            }
+        )
+        cloud = Device.from_dict(
+            {
+                "id": "ebe9f29529dc499ed4bptk",
+                "ip": "121.167.240.111",
+                "local_key": "D-v|+7#1ci2t?EV;",
+                "name": "balcony_lightswitch",
+                # no "version" key
+            }
+        )
+        assert cloud.ip == "Auto"  # public cloud IP normalized away
+        assert cloud.version == "Auto"  # cloud omitted version
         assert cloud.compare(bridge) == []  # → synced, not mismatch

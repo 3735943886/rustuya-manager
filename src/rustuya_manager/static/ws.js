@@ -30,12 +30,33 @@ export function setConn(label) {
 
 let backoffMs = 500;
 
+// Boot id from the last snapshot we saw. The server stamps a per-process id on
+// every frame; a different id on a fresh frame means a new manager process is
+// serving us (re-exec via "Restart manager", or a container restart). null
+// until the first frame, so the initial connect never triggers a reload.
+let lastBootId = null;
+
 export function connect() {
   setConn("connecting");
   const ws = new WebSocket(wsUrl());
   ws.onopen = () => { backoffMs = 500; setConn("live"); };
   ws.onmessage = (ev) => {
-    state.snapshot = JSON.parse(ev.data);
+    const snap = JSON.parse(ev.data);
+    // Auto-F5 on a manager restart. The tab bar is built once at page load
+    // (initPluginHost) and isn't rebuilt on a WS reconnect alone, so a restart
+    // that adds or removes a plugin would otherwise need a manual refresh to
+    // show up. A full reload re-runs the boot path, picking up new/removed/
+    // edited plugin tabs and any changed HTML/JS — exactly what F5 would. A
+    // transient reconnect keeps the same id and is left untouched.
+    const bootId = snap.boot_id;
+    if (bootId != null) {
+      if (lastBootId != null && bootId !== lastBootId) {
+        location.reload();
+        return;
+      }
+      lastBootId = bootId;
+    }
+    state.snapshot = snap;
     render();
     // Fan the frame out to plugin pages (no-op when no plugins are installed).
     notifyPluginState(state.snapshot);

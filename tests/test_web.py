@@ -94,6 +94,20 @@ class TestHTTP:
             assert body["templates"]["root"] == "rustuya"
             assert "diff" in body and "synced" in body["diff"]
 
+    def test_snapshot_carries_stable_boot_id(self):
+        # boot_id is stamped per process, so every frame within one process
+        # carries the same non-empty value. The client uses a *change* across a
+        # reconnect to detect a restart and reload; an unchanging id within a
+        # process must never trigger that, so stability here is the contract.
+        state, client = _fixture_state()
+        with TestClient(build_app(state, client)) as tc:
+            a = tc.get("/api/state").json()
+            assert isinstance(a.get("boot_id"), str) and a["boot_id"]
+            with tc.websocket_connect("/ws") as ws:
+                assert ws.receive_json()["boot_id"] == a["boot_id"]
+            # A second call in the same process is identical.
+            assert tc.get("/api/state").json()["boot_id"] == a["boot_id"]
+
     def test_api_state_reports_external_bridge_mode_by_default(self):
         state, client = _fixture_state()
         with TestClient(build_app(state, client)) as tc:

@@ -18,6 +18,7 @@ import base64
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,16 @@ _TEMPLATES_DIR = _PKG_ROOT / "templates"
 _STATIC_DIR = _PKG_ROOT / "static"
 
 logger = logging.getLogger(__name__)
+
+# Process-unique id, regenerated every time this module is imported — i.e. once
+# per manager process, including after a re-exec (POST /api/restart) or a
+# container restart, both of which start a fresh interpreter. Rides the WS
+# snapshot so the client can tell a transient reconnect (same id) from a real
+# restart (new id) and reload itself on the latter — the tab bar is built once
+# at page load and isn't rebuilt on reconnect alone, so a restart that adds or
+# removes a plugin would otherwise need a manual F5. PID is unsuitable here:
+# os.execvp keeps the same PID, so a re-exec would look unchanged.
+_BOOT_ID = uuid.uuid4().hex
 
 
 def _device_to_dict(d: Device) -> dict[str, Any]:
@@ -77,6 +88,9 @@ def serialize_state(state: State) -> dict[str, Any]:
     tpl = state.templates
     snapshot: dict[str, Any] = {
         "version": state.version,
+        # Per-process id; a change across a reconnect tells the client the
+        # manager restarted, so it reloads to pick up new/removed plugin tabs.
+        "boot_id": _BOOT_ID,
         "templates": (
             {
                 "root": tpl.root,

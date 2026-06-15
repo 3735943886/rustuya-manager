@@ -314,15 +314,7 @@ def test_collapsed_missing_card_scan_dot_reflects_visibility(page: Page, server_
             },
         },
     }
-    page.evaluate(
-        """async (snap) => {
-            const s = await import('/static/state.js');
-            const r = await import('/static/render.js');
-            s.state.snapshot = snap;
-            r.render();
-        }""",
-        snap,
-    )
+    _apply_snapshot(page, snap)
 
     # Seen-by-scan card: filled sky dot exists, and the wrap's title
     # carries the observed IP so a hover explains the signal.
@@ -376,16 +368,7 @@ def test_drag_select_inside_expanded_card_does_not_collapse(page: Page, server_u
         "diff": {"synced": [], "mismatched": [], "missing": ["dev-drag"], "orphaned": []},
         "scan_results": {},
     }
-    page.evaluate(
-        """async (snap) => {
-            const s = await import('/static/state.js');
-            const r = await import('/static/render.js');
-            s.expandedIds.add('dev-drag');
-            s.state.snapshot = snap;
-            r.render();
-        }""",
-        snap,
-    )
+    _apply_snapshot(page, snap, expanded=("dev-drag",))
 
     card = page.locator("#device-list > div").first
     key_value = card.locator("div").filter(has_text="KEY").last.locator("span.font-mono")

@@ -105,6 +105,29 @@ function resolveIp(bridge, cloud) {
   return { value: cloudIp || "—", tooltip: "" };
 }
 
+function resolveVer(bridge, cloud) {
+  // Mirror resolveIp for the protocol version: the bridge's negotiated version
+  // is operational truth, so prefer it over the cloud's value. The cloud often
+  // omits version entirely (→ "Auto"), so showing primary.version would print
+  // "Auto" even when the bridge knows the real version — inconsistent with the
+  // IP cell, which already prefers the bridge value.
+  const cloudVer = cloud?.version;
+  if (bridge) {
+    if (bridge.version && bridge.version !== "Auto") {
+      if (cloudVer && cloudVer !== "Auto" && cloudVer !== bridge.version) {
+        return {
+          value: bridge.version,
+          tooltip: `Bridge negotiated ${bridge.version}; cloud reports ${cloudVer}`,
+        };
+      }
+      return { value: bridge.version, tooltip: "" };
+    }
+    // bridge.version === "Auto" → auto-negotiated; fall back to any cloud hint.
+    return { value: cloudVer || "Auto", tooltip: "" };
+  }
+  return { value: cloudVer || "—", tooltip: "" };
+}
+
 function expandCaret(id, isExpanded) {
   const b = document.createElement("button");
   b.type = "button";
@@ -171,6 +194,7 @@ export function deviceCard(id, cls, isChild) {
   const bridge = snap.bridge[id];
   const primary = cloud || bridge;
   const ipInfo = resolveIp(bridge, cloud);
+  const verInfo = resolveVer(bridge, cloud);
   const dps = snap.dps[id] || {};
   const lastSeen = snap.last_seen[id];
   const live = snap.live_status?.[id];
@@ -299,7 +323,7 @@ export function deviceCard(id, cls, isChild) {
     // row 2) because col-span without an md: prefix applies everywhere.
     fields = [
       ["IP", ipInfo.value, ipInfo.tooltip, "md:col-span-1"],
-      ["VER", primary.version, "", "md:col-span-1"],
+      ["VER", verInfo.value, verInfo.tooltip, "md:col-span-1"],
       ["KEY", primary.key || "—", "", "col-span-2 md:col-span-2"],
     ];
     if (live?.message) fields.push(["MSG", live.message, "", "col-span-2 md:col-span-4"]);

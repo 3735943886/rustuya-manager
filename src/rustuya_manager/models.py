@@ -6,8 +6,24 @@ against bridge-reported entries without per-source branching elsewhere.
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass, field
 from typing import Any
+
+
+def _is_lan_ip(value: str) -> bool:
+    """True when `value` is a LAN-local IP the bridge can reach directly.
+
+    Mirrors the bridge's `normalize_config`: private, loopback, link-local and
+    unspecified addresses count as LAN; a public/WAN/NAT address does not. A
+    non-IP string (hostname, the "Auto" sentinel) is left untouched — the caller
+    keeps it. Used to drop a meaningless public cloud IP to auto-discovery.
+    """
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        return True
+    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified
 
 
 @dataclass
@@ -45,6 +61,17 @@ class Device:
         # raw_ip == "" or missing is shown as "Auto" by convention.
         ip = raw_ip or "Auto"
 
+        # A public/external IP is meaningless for LAN-local Tuya control: the
+        # cloud reports a device's NAT'd WAN address, not its LAN address. The
+        # bridge already drops a non-private IP to auto-discovery
+        # (normalize_config), so mirror that here — keeping it would only
+        # surface a non-actionable IP "mismatch" against the bridge's
+        # auto-resolved LAN IP (and Update couldn't fix it; the bridge would
+        # just re-drop the WAN value). Classification above already ran on the
+        # raw ip, so this never changes WiFi/sub.
+        if ip != "Auto" and not _is_lan_ip(ip):
+            ip = "Auto"
+
         return cls(
             id=did,
             name=data.get("name", "N/A"),
@@ -78,9 +105,20 @@ class Device:
         if self.type == "WiFi":
             if self.key and other.key and self.key != other.key:
                 mismatches.append(f"KEY: {self.shorten(other.key)} -> {self.shorten(self.key)}")
-            if other.ip != "Auto" and self.ip != other.ip:
+            # "Auto" is a wildcard on EITHER side: the cloud authority not
+            # pinning an IP (self) means there's nothing to enforce, and the
+            # bridge in auto-discovery (other) can resolve to anything. Only two
+            # concrete, differing IPs are a real, actionable mismatch — this also
+            # keeps a normalized-away public cloud IP (now "Auto") from showing a
+            # phantom "-> Auto" diff against the bridge's discovered LAN IP.
+            if self.ip != "Auto" and other.ip != "Auto" and self.ip != other.ip:
                 mismatches.append(f"IP: {other.ip} -> {self.ip}")
-            if other.version != "Auto" and self.version != other.version:
+            # Same "Auto"-is-wildcard rule as IP above: the cloud not pinning a
+            # protocol version (common — cloud JSON often omits it) is not a
+            # conflict with whatever version the bridge negotiated, and Update
+            # couldn't push "Auto" anyway. Only two concrete, differing versions
+            # are a real mismatch.
+            if self.version != "Auto" and other.version != "Auto" and self.version != other.version:
                 mismatches.append(f"VER: {other.version} -> {self.version}")
         else:
             if self.cid != other.cid:

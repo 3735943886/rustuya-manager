@@ -174,10 +174,24 @@ function buildTabBarShell() {
 
   $tabs = document.createElement("nav");
   $tabs.id = "page-tabs";
-  $tabs.className = "flex items-end gap-1 border-b border-slate-200 dark:border-slate-700 mb-1";
-  addTab("devices", "Devices");
-  main.insertBefore($tabs, main.firstChild);
-  // deviceSections was captured before inserting the tab bar, so it's excluded.
+  // Live as a full-width second row INSIDE the sticky header, flush to its
+  // bottom border, so the tab strip stays pinned under the title/badge/menu
+  // row instead of scrolling away with the device list. `w-full` makes it wrap
+  // onto its own line within the header's flex row; `-mb-3` cancels the header
+  // container's bottom padding so the active tab's -mb-px connects to the
+  // header's existing border-b. Falls back to the top of <main> if the header
+  // shell isn't the shape we expect.
+  const headerRow = document.querySelector("header > div");
+  if (headerRow) {
+    $tabs.className =
+      "flex items-end gap-1 w-full -mb-3 pt-1 border-b border-slate-200 dark:border-slate-700";
+    addTab("devices", "Devices");
+    headerRow.appendChild($tabs);
+  } else {
+    $tabs.className = "flex items-end gap-1 border-b border-slate-200 dark:border-slate-700 mb-1";
+    addTab("devices", "Devices");
+    main.insertBefore($tabs, main.firstChild);
+  }
 
   $pluginRoot = document.createElement("div");
   $pluginRoot.id = "plugin-page-root";

@@ -8,6 +8,9 @@ export function init(ctx) {
     id: "hello-ping", // namespaced so it can't clash with a built-in id
     iconHtml: "⚡",
     labelHtml: "Ping (hello)",
+    // No `scope` → defaults to this plugin's own tab ("hello"), so the item
+    // shows only while the Hello tab is active. Pass `scope: "global"` to show
+    // it on every tab instead.
     onClick: async () => {
       try {
         const res = await ctx.api("/api/hello/ping", { method: "GET" });

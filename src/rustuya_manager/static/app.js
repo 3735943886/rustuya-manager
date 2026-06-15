@@ -232,20 +232,23 @@ async function doRestartManager() {
   }
 }
 
-// Built-in items — ids/scopes/order preserved so the menu (and the e2e suite)
-// looks and behaves exactly as before.
+// Built-in items — ids/order preserved so the menu (and the e2e suite) looks and
+// behaves as before. `scope` is explicit so the manager's own actions split the
+// same way plugins' do: "devices" = manager's Devices view only; "global" = every
+// tab. Device-specific actions are manager-only; process/app-level ones global.
 registerHeaderAction({ id: "device-add-btn", iconHtml: "+", labelHtml: "Add device", scope: "devices", order: 10, onClick: doAddDevice });
-registerHeaderAction({ id: "wizard-header-btn", iconHtml: "☁", labelHtml: "Fetch from cloud", order: 20, onClick: openWizardModal });
+registerHeaderAction({ id: "wizard-header-btn", iconHtml: "☁", labelHtml: "Fetch from cloud", scope: "global", order: 20, onClick: openWizardModal });
 registerHeaderAction({ id: "scan-btn", iconHtml: "📡", labelHtml: "Scan LAN", scope: "devices", order: 30, onClick: doScan });
 registerHeaderAction({
   id: "theme-btn",
   iconHtml: `<span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span>`,
   labelHtml: `<span class="dark:hidden">Dark mode</span><span class="hidden dark:inline">Light mode</span>`,
+  scope: "global",
   order: 40,
   onClick: doThemeToggle,
 });
 registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: "Refresh", scope: "devices", order: 50, onClick: doRefresh });
-registerHeaderAction({ id: "plugin-scan-btn", iconHtml: "🧩", labelHtml: "Load new plugins", order: 60, onClick: doLoadNewPlugins });
+registerHeaderAction({ id: "plugin-scan-btn", iconHtml: "🧩", labelHtml: "Load new plugins", scope: "global", order: 60, onClick: doLoadNewPlugins });
 registerHeaderAction({
   id: "reconfigure-btn",
   iconHtml: "🔧",
@@ -261,6 +264,7 @@ registerHeaderAction({
   id: "restart-btn",
   iconHtml: "♻",
   labelHtml: "Restart manager",
+  scope: "global",
   order: 110,
   danger: true,
   title: "Restart the manager process to fully reload plugins",

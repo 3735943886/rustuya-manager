@@ -35,8 +35,19 @@ export function notifyPluginState(snapshot) {
   }
 }
 
-// The context handed to every plugin page's mount(rootEl, ctx).
-function pluginCtx() {
+// Map a plugin asset URL (/plugins/<id>/…) back to its plugin id, so a header
+// action can default to scoping itself to that plugin's tab.
+function pluginIdFromUrl(url) {
+  const m = /^\/plugins\/([^/]+)\//.exec(url);
+  return m ? m[1] : null;
+}
+
+// The context handed to a plugin's init(ctx) / page mount(rootEl, ctx).
+// `defaultScope` is the scope an addHeaderAction gets when it doesn't set its
+// own: a plugin's tab id (so its items live on its tab) for plugins that have a
+// tab, or "global" for header-only plugins (no tab to live on).
+function pluginCtx(opts = {}) {
+  const defaultScope = opts.defaultScope;
   return {
     getState: () => state.snapshot,
     onState: (cb) => {
@@ -67,9 +78,12 @@ function pluginCtx() {
     // Contribute a hamburger-menu item through the same registry the built-in
     // actions use. Plugins default into the 200+ order band (after the app's
     // own items) and should namespace their `id` (e.g. "myplugin-thing") to
-    // avoid clobbering a built-in. Re-renders the menu immediately.
+    // avoid clobbering a built-in. Unless the action sets its own `scope`, it
+    // defaults to this plugin's tab (or "global" for header-only plugins) — pass
+    // `scope: "global"` to show it on every tab. Re-renders the menu.
     addHeaderAction: (action) => {
-      registerHeaderAction({ order: 200, ...action });
+      const scope = action.scope ?? defaultScope;
+      registerHeaderAction({ order: 200, ...action, scope });
       renderActionsMenu();
     },
   };
@@ -92,12 +106,12 @@ function updateTabStyles() {
 function showPage(page) {
   state.currentPage = page;
   updateTabStyles();
-  // Header actions scoped to the devices view (Add device / Scan LAN) are
-  // meaningless on a plugin tab — hide them there. Both the desktop icons and
-  // their hamburger twins carry data-page-scope, so this covers narrow screens
-  // too. Global actions (cloud refresh, theme, refresh) stay visible.
-  for (const el of document.querySelectorAll('[data-page-scope="devices"]')) {
-    el.classList.toggle("hidden", page !== "devices");
+  // Per-tab header actions: an item with data-page-scope shows only on the tab
+  // whose page id it names. "devices" = the manager's own view (manager-only),
+  // "<pluginId>" = that plugin's tab. Global items carry no data-page-scope, so
+  // they're never touched here and stay visible everywhere.
+  for (const el of document.querySelectorAll("[data-page-scope]")) {
+    el.classList.toggle("hidden", el.dataset.pageScope !== page);
   }
   if (page === "devices") {
     for (const el of deviceSections) el.classList.remove("hidden");
@@ -128,7 +142,8 @@ async function mountPlugin(id) {
   try {
     const mod = await import(entry.js_url);
     if (typeof mod.mount === "function") {
-      await mod.mount(page.rootEl, pluginCtx());
+      // A page plugin's own tab id is its default header-action scope.
+      await mod.mount(page.rootEl, pluginCtx({ pluginId: id, defaultScope: id }));
     } else {
       page.rootEl.textContent = `plugin "${id}" has no mount() export`;
     }
@@ -184,9 +199,14 @@ async function loadInitScripts(urls) {
   for (const url of urls) {
     if (importedInit.has(url)) continue;
     importedInit.add(url);
+    // Header actions from this init default to the plugin's own tab when it has
+    // one; header-only plugins (no page) default to global.
+    const pluginId = pluginIdFromUrl(url);
+    const hasTab = manifest.some((p) => p.id === pluginId);
+    const defaultScope = hasTab ? pluginId : "global";
     try {
       const mod = await import(url);
-      if (typeof mod.init === "function") await mod.init(pluginCtx());
+      if (typeof mod.init === "function") await mod.init(pluginCtx({ pluginId, defaultScope }));
     } catch (e) {
       console.error("plugin init script failed", url, e);
     }

@@ -12,13 +12,19 @@
 //     labelHtml     text/HTML for the label (HTML allowed: the theme toggle uses
 //                   dark:/light: spans)
 //     iconHtml      text/HTML for the leading icon glyph
-//     scope         "devices" | undefined → sets data-page-scope so plugins.js
-//                   hides the item on plugin tabs
-//     order         sort key (built-ins 10..60, reconfigure 100; plugins 200+)
+//     scope         which tab(s) the item shows on (symmetric for manager + plugins):
+//                     "global" / undefined → every tab
+//                     "devices"            → the manager's Devices view only
+//                     "<pluginId>"         → that plugin's tab only
+//                   Any non-global scope sets data-page-scope=<scope>; plugins.js
+//                   shows the item only when the current page id matches.
+//     order         sort key (built-ins 10..110; plugins default 200+)
 //     dividerBefore insert a separator above this item
-//     danger        amber styling (used by Reconfigure)
+//     danger        amber styling (used by Reconfigure / Restart)
 //     title         tooltip
 //     onClick       (ev, btn) => void
+
+import { state } from "./state.js";
 
 const actions = [];
 
@@ -56,7 +62,13 @@ export function renderActionsMenu() {
     btn.id = a.id;
     btn.type = "button";
     btn.className = a.danger ? DANGER_CLS : ITEM_CLS;
-    if (a.scope) btn.dataset.pageScope = a.scope;
+    // Non-global scope → tag with data-page-scope and hide unless we're already
+    // on the matching page (showPage re-applies this on every tab switch).
+    const scope = a.scope && a.scope !== "global" ? a.scope : null;
+    if (scope) {
+      btn.dataset.pageScope = scope;
+      if (scope !== (state.currentPage || "devices")) btn.classList.add("hidden");
+    }
     if (a.title) btn.title = a.title;
     btn.innerHTML =
       `<span class="w-5 text-center">${a.iconHtml || ""}</span>` +

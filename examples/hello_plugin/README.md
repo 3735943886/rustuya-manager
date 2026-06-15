@@ -27,8 +27,10 @@ Then:
 1. Open the UI → click the **Hello** tab → the state block renders.
 2. Click **Call /api/hello/ping** → toast shows the incrementing counter, and the
    state block updates live (namespace → WS → `onState`).
-   - Or, without leaving Devices: open the ☰ menu → **Ping (hello)** (added by
-     the plugin's eager `init.js`) → same toast, no tab switch.
+   - On the Hello tab, open the ☰ menu → **Ping (hello)** (added by the plugin's
+     eager `init.js`) → same toast. The item is scoped to the Hello tab by
+     default; it's hidden on other tabs. Pass `scope: "global"` in
+     `addHeaderAction` to show it everywhere.
 3. Publish an MQTT message and watch the tab update live:
    ```bash
    mosquitto_pub -t 'hello/world' -m '{"msg":"hi"}'

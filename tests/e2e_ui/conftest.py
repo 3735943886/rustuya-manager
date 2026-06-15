@@ -142,3 +142,29 @@ def server_url_with_plugin(tmp_path_factory: pytest.TempPathFactory) -> str:
     url, server, thread = _start_server(build_app(State(), _StubBridgeClient(), plugins=[register]))
     yield url
     _stop_server(server, thread)
+
+
+@pytest.fixture(scope="session")
+def server_url_with_tab_plugin(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A plugin with BOTH a tab page and a header action that takes the default
+    scope — so the action should live on the plugin's own tab only. Used to prove
+    per-plugin-tab scoping (and, alongside it, manager-only vs global built-ins)."""
+    static_dir = tmp_path_factory.mktemp("e2e_tab_plugin_static")
+    (static_dir / "index.js").write_text(
+        "export function mount(el) { el.textContent = 'tabby'; }\n"
+    )
+    (static_dir / "init.js").write_text(
+        "export function init(ctx) {\n"
+        "  ctx.addHeaderAction({\n"
+        "    id: 'tabby-action', iconHtml: '★', labelHtml: 'Tabby action', onClick: () => {},\n"
+        "  });\n"
+        "}\n"
+    )
+
+    def register(ctx: Any) -> None:
+        ctx.add_page("tabby", "Tabby", static_dir=str(static_dir))
+        ctx.add_header_init("tabby", static_dir=str(static_dir))
+
+    url, server, thread = _start_server(build_app(State(), _StubBridgeClient(), plugins=[register]))
+    yield url
+    _stop_server(server, thread)

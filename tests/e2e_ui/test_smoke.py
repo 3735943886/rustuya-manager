@@ -497,6 +497,31 @@ def test_plugin_contributes_header_menu_item(page: Page, server_url_with_plugin:
     expect(page).to_have_title("plugin-action-fired")
 
 
+def test_header_action_scoping_manager_only_vs_plugin_tab(
+    page: Page, server_url_with_tab_plugin: str
+) -> None:
+    """Header-action scope is symmetric across manager and plugins:
+    - "devices" built-ins (Reconfigure) show only on the manager's Devices view;
+    - "global" built-ins (Restart) show on every tab;
+    - a plugin action with the default scope shows only on that plugin's tab."""
+    page.goto(server_url_with_tab_plugin)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+
+    # On the manager's Devices view.
+    page.locator("#actions-menu > summary").click()
+    expect(page.locator("#reconfigure-btn")).to_be_visible()  # manager-only
+    expect(page.locator("#restart-btn")).to_be_visible()  # global
+    expect(page.locator("#tabby-action")).to_be_hidden()  # plugin-tab-scoped
+    page.locator("#actions-menu > summary").click()  # close menu
+
+    # Switch to the plugin's tab.
+    page.locator('#page-tabs button[data-page="tabby"]').click()
+    page.locator("#actions-menu > summary").click()
+    expect(page.locator("#tabby-action")).to_be_visible()  # now on its own tab
+    expect(page.locator("#restart-btn")).to_be_visible()  # global everywhere
+    expect(page.locator("#reconfigure-btn")).to_be_hidden()  # manager-only, hidden here
+
+
 def test_plugin_reload_menu_items_present(page: Page, server_url: str) -> None:
     """The hamburger menu exposes both reload paths: add-only "Load new plugins"
     and the full-reload "Restart manager". (We don't click Restart — it would

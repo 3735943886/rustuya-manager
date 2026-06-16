@@ -10,6 +10,7 @@ internal `_client` to an aiomqtt mock and pre-flag `_connected` so
 from __future__ import annotations
 
 import json
+from urllib.parse import urlparse
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -50,7 +51,12 @@ class TestHTTP:
             assert r.headers["content-type"].startswith("text/html")
             assert "<title>rustuya-manager</title>" in r.text
             # Tailwind is pulled from CDN — no build step is the explicit goal
-            assert "cdn.tailwindcss.com" in r.text
+            script_srcs = [
+                match.group(1)
+                for match in __import__("re").finditer(r'<script[^>]+src=["\']([^"\']+)["\']', r.text)
+            ]
+            script_hosts = {urlparse(src).hostname for src in script_srcs}
+            assert "cdn.tailwindcss.com" in script_hosts
             assert "/static/app.js" in r.text
 
     def test_static_app_js_served(self):

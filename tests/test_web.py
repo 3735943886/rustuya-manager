@@ -55,8 +55,13 @@ class TestHTTP:
                 match.group(1)
                 for match in __import__("re").finditer(r'<script[^>]+src=["\']([^"\']+)["\']', r.text)
             ]
-            script_hosts = {urlparse(src).hostname for src in script_srcs}
-            assert "cdn.tailwindcss.com" in script_hosts
+            allowed_hosts = {"cdn.tailwindcss.com"}
+            script_hosts = {
+                host.lower()
+                for src in script_srcs
+                if (host := urlparse(src).hostname)
+            }
+            assert bool(script_hosts & allowed_hosts)
             assert "/static/app.js" in r.text
 
     def test_static_app_js_served(self):

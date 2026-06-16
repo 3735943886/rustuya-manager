@@ -63,6 +63,38 @@ export async function postScan() {
   }
 }
 
+// ── Plugin catalog / management ────────────────────────────────────────────
+// All return parsed JSON on success, or {ok:false, error} on failure, so the
+// management modal can render the error inline rather than throwing.
+async function _postJson(path, body) {
+  try {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return { ok: false, error: await res.text() };
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+export async function getCatalog() {
+  try {
+    const res = await fetch("/api/plugins/catalog");
+    if (!res.ok) return { ok: false, error: await res.text() };
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+export const installPlugin = (id) => _postJson("/api/plugins/install", { id });
+export const updatePlugin = (id) => _postJson("/api/plugins/update", { id });
+export const uninstallPlugin = (id) => _postJson("/api/plugins/uninstall", { id });
+export const togglePlugin = (id, enabled) => _postJson("/api/plugins/toggle", { id, enabled });
+
 export async function uploadCloud(file) {
   try {
     const text = await file.text();

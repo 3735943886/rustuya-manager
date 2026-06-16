@@ -253,6 +253,7 @@ class PluginContext:
 
 def _discover_dir_plugins(
     plugin_dirs: list[str],
+    skip_packages: frozenset[str] = frozenset(),
 ) -> list[Callable[[PluginContext], None]]:
     """Import `register` callables from plugin packages/modules dropped into
     `plugin_dirs` (e.g. a mounted Docker `/data/plugins`) — no pip install
@@ -289,6 +290,10 @@ def _discover_dir_plugins(
                 mod_name = child.stem
             else:
                 continue
+            if mod_name in skip_packages:
+                # Disabled via the install ledger — present on disk but not loaded.
+                logger.info("skipping disabled dir plugin %r in %s", mod_name, root)
+                continue
             try:
                 module = importlib.import_module(mod_name)
                 reg = getattr(module, "register", None)
@@ -308,6 +313,7 @@ def discover_plugins(
     *,
     register_callables: list[Callable[[PluginContext], None]] | None = None,
     plugin_dirs: list[str] | None = None,
+    skip_packages: frozenset[str] = frozenset(),
 ) -> list[Callable[[PluginContext], None]]:
     """Return all `register(ctx)` callables from the three sources, without
     calling them. Split out from `load_plugins` so a runtime rescan can diff the
@@ -336,7 +342,7 @@ def discover_plugins(
             )
 
     if plugin_dirs:
-        registers.extend(_discover_dir_plugins(plugin_dirs))
+        registers.extend(_discover_dir_plugins(plugin_dirs, skip_packages))
 
     return registers
 

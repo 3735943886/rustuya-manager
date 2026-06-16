@@ -23,6 +23,7 @@ import { initSyncModal } from "./modal-sync.js";
 import { initWizardModal, openWizardModal } from "./modal-wizard.js";
 import { initDeviceModal, openAddModal } from "./modal-device.js";
 import { initConfirmModal, confirm } from "./modal-confirm.js";
+import { initPluginsModal, openPluginsModal } from "./modal-plugins.js";
 import { initPluginHost, scanForPlugins } from "./plugins.js";
 import { registerHeaderAction, renderActionsMenu } from "./header-actions.js";
 
@@ -248,7 +249,8 @@ registerHeaderAction({
   onClick: doThemeToggle,
 });
 registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: "Refresh", scope: "devices", order: 50, onClick: doRefresh });
-registerHeaderAction({ id: "plugin-scan-btn", iconHtml: "🧩", labelHtml: "Load new plugins", scope: "global", order: 60, onClick: doLoadNewPlugins });
+registerHeaderAction({ id: "manage-plugins-btn", iconHtml: "🧩", labelHtml: "Manage plugins", scope: "global", order: 55, title: "Browse the catalog and install / update / remove plugins", onClick: openPluginsModal });
+registerHeaderAction({ id: "plugin-scan-btn", iconHtml: "📂", labelHtml: "Load new plugins", scope: "global", order: 60, title: "Load plugins dropped into the plugin directory by hand (no restart)", onClick: doLoadNewPlugins });
 registerHeaderAction({
   id: "reconfigure-btn",
   iconHtml: "🔧",
@@ -293,6 +295,7 @@ initSyncModal();
 initWizardModal();
 initDeviceModal();
 initConfirmModal();
+initPluginsModal();
 connect();
 // Boot the plugin host. No-op (no tab bar, no DOM change) when no plugins
 // are installed — GET /api/plugins returns [].

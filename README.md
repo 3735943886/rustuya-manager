@@ -257,46 +257,78 @@ The entrypoint then renumbers its internal `manager` user to that
 UID/GID and `chown`s `/data` on startup, so any host owner works. With
 named volumes Docker handles ownership and the defaults are fine.
 
-### Drop-in plugins
+### Plugins
 
-Plugins normally ship as pip-installed packages (the
-`rustuya_manager.plugins` entry-point group). For Docker — where you'd
-otherwise rebuild the image — you can instead **drop a plugin into a
-directory** and have it loaded at startup. The image defaults
-`PLUGIN_DIR=/data/plugins`; mount a folder there and drop in either a
-package (a directory with `__init__.py` exposing `register(ctx)`) or a
-single `*.py` file:
+A plugin can add a UI tab, REST routes, an MQTT subscription, and its
+own slice of state. They arrive three ways:
+
+1. **From the in-UI catalog** (recommended) — the **Manage plugins** (🧩)
+   item in the ☰ menu lists a curated catalog you install from with one
+   click, no shell or `pip`.
+2. **As a pip-installed package** under the `rustuya_manager.plugins`
+   entry-point group.
+3. **Hand-dropped** into the plugin directory (handy for development or
+   Docker, where you'd otherwise rebuild the image).
+
+All three run **in-process with no sandbox**, so the trust anchor is the
+same in every case: only install plugins you trust. The catalog is
+curated for exactly this reason — there is no arbitrary-URL field.
+
+#### Installing from the catalog
+
+**Manage plugins** (☰ → 🧩) opens a modal listing each catalog plugin
+with its install state and actions:
+
+- **Install** downloads the plugin into the managed plugin directory,
+  verifies its checksum, and wires it up **live** — the new tab appears
+  with no restart.
+- **Update**, **Enable/Disable**, and **Uninstall** act on an installed
+  plugin. These need a manager restart to take effect (already-loaded
+  code can't be swapped or unloaded at runtime), so the modal offers a
+  **Restart now** button when an action requires it.
+
+Installs need a writable plugin directory (see below). Under Docker that
+means a mounted `PLUGIN_DIR`.
+
+#### The plugin directory
+
+The managed plugin directory is where the catalog installs plugins and
+where you can also hand-drop your own. It defaults to a `plugins/` folder
+next to the cloud file; override it with `--plugin-dir DIR` (env
+`RUSTUYA_MANAGER_PLUGIN_DIR`). Under Docker the image defaults
+`PLUGIN_DIR=/data/plugins` — mount a folder there so installs persist.
+
+To hand-drop a plugin, place a package (a directory with `__init__.py`
+exposing `register(ctx)`) or a single `*.py` file in that directory:
 
 ```
-/data/plugins/
+<plugin-dir>/
   rustuya_hello/        # package plugin
     __init__.py         #   defines register(ctx)
     static/             #   its UI assets (served automatically)
   quicktweak.py         # single-file plugin: just register(ctx)
 ```
 
-Outside Docker, point the manager at any directory with
-`--plugin-dir DIR` (or `RUSTUYA_MANAGER_PLUGIN_DIR`); it's opt-in, so
-nothing is scanned unless set. Two caveats: a drop-in plugin **can't
-install its own dependencies** (it gets the standard library plus what
-the manager already provides — for anything heavier, install it as an
-entry-point package instead), and loading code from this directory
-**executes it in-process**, so only point it at plugins you trust. See
+One caveat for hand-dropped plugins: they **can't install their own
+dependencies** (they get the standard library plus what the manager
+already provides — for anything heavier, install it as an entry-point
+package or via the catalog instead). See
 [`examples/hello_plugin`](examples/hello_plugin) for a complete plugin.
 
 #### Loading without a restart
 
-Two hamburger-menu (☰) items handle reloads:
+Two more ☰-menu items handle reloads for hand-dropped plugins:
 
-- **Load new plugins** — scans the plugin dir and loads any *newly
+- **Load new plugins** (📂) — scans the plugin dir and loads any *newly
   added* plugin live, no restart. Add-only: it can't pick up edits to an
   already-loaded plugin or unload one (live routes/mounts can't be
-  cleanly removed).
-- **Restart manager** — restarts the manager process in place (same PID,
-  via re-exec). This is the full reload: it picks up edited plugin code,
-  drops removed plugins, and respawns an embedded bridge — lighter than a
-  container restart and works outside Docker too. The UI reconnects
-  automatically; an embedded bridge briefly disconnects its devices.
+  cleanly removed). Catalog installs already do this for you.
+- **Restart manager** (♻) — restarts the manager process in place (same
+  PID, via re-exec). This is the full reload: it picks up edited plugin
+  code, drops removed/disabled plugins, and respawns an embedded bridge —
+  lighter than a container restart and works outside Docker too. The UI
+  reconnects automatically; an embedded bridge briefly disconnects its
+  devices.
 
 ## License
 MIT

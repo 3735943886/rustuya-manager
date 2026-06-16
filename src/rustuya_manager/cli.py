@@ -612,16 +612,22 @@ async def run(args: argparse.Namespace) -> int:
                 from .web import build_app
 
                 creds_path = args.creds or str(cloud_path.parent / "tuyacreds.json")
-                # Drop-in plugins: a directory of plugin packages/modules to load
-                # without pip install (e.g. a mounted Docker /data/plugins).
-                # Opt-in — only scanned when --plugin-dir or its env is set.
-                plugin_dir = args.plugin_dir or os.environ.get("RUSTUYA_MANAGER_PLUGIN_DIR") or None
+                # The managed plugin dir is both the drop-in scan target and where
+                # the in-UI catalog installs plugins, so it's always set (unlike the
+                # old opt-in behaviour): an explicit --plugin-dir / env relocates it,
+                # otherwise it defaults next to the cloud file. The dir is created
+                # lazily on first install; build_app skips scanning it until it exists.
+                managed_plugin_dir = (
+                    args.plugin_dir
+                    or os.environ.get("RUSTUYA_MANAGER_PLUGIN_DIR")
+                    or str(cloud_path.parent / "plugins")
+                )
                 app = build_app(
                     state,
                     client,
                     creds_path=creds_path,
                     auth=args.auth,
-                    plugin_dirs=[plugin_dir] if plugin_dir else None,
+                    managed_plugin_dir=managed_plugin_dir,
                 )
                 for url in _web_urls(args.host, args.port):
                     print(f"Serving web UI on {url}")
@@ -744,14 +750,15 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         metavar="DIR",
         help=(
-            "Directory of drop-in plugins to load without pip install (--web "
-            "only). Each child that is a package (has __init__.py) or a "
-            "top-level .py file exposing register(ctx) is loaded, in addition "
-            "to any pip-installed entry-point plugins. Handy for Docker: mount "
-            "a folder at /data/plugins and drop plugins in. Env fallback: "
-            "RUSTUYA_MANAGER_PLUGIN_DIR. Note: drop-in plugins can't install "
-            "their own dependencies, and loading code from this dir executes it "
-            "in-process — only point it at plugins you trust."
+            "The managed plugin directory (--web only): drop-in plugins here are "
+            "loaded without pip install, AND it's where the in-UI catalog installs "
+            "plugins. Each child that is a package (has __init__.py) or a top-level "
+            ".py file exposing register(ctx) is loaded, alongside any pip-installed "
+            "entry-point plugins. Default: a 'plugins' folder next to the cloud "
+            "file; for Docker, point it at a mounted volume e.g. /data/plugins. Env "
+            "fallback: RUSTUYA_MANAGER_PLUGIN_DIR. Note: drop-in plugins can't "
+            "install their own dependencies, and loading code from this dir executes "
+            "it in-process — only install plugins you trust."
         ),
     )
     parser.add_argument(

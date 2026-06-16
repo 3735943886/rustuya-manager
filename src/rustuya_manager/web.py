@@ -27,10 +27,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from . import catalog as plugin_catalog
 from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
 from .models import Device
 from .mqtt import BridgeClient
-from .plugins import PluginContext, PluginRegistry, discover_plugins
+from .plugins import PLUGIN_API_VERSION, PluginContext, PluginRegistry, discover_plugins
 from .scan import LanScanCoordinator
 from .state import State
 from .wizard import WizardManager
@@ -221,6 +222,7 @@ def build_app(
     auth: str | None = None,
     plugins: list[Any] | None = None,
     plugin_dirs: list[str] | None = None,
+    managed_plugin_dir: str | None = None,
 ) -> FastAPI:
     app = FastAPI(title="rustuya-manager", version=__version__)
     if auth:
@@ -494,7 +496,25 @@ def build_app(
                 )
         return added
 
-    _apply_new_plugins(discover_plugins(register_callables=plugins, plugin_dirs=plugin_dirs))
+    def _scan_dirs() -> list[str]:
+        """Existing directories to scan for drop-in plugins: the managed install
+        dir (where the catalog drops things) plus any explicit `plugin_dirs`.
+        Non-existent dirs are filtered out so an as-yet-uncreated managed dir
+        doesn't log a spurious 'not a directory' warning every boot."""
+        candidates = [managed_plugin_dir, *(plugin_dirs or [])]
+        return [d for d in candidates if d and Path(d).is_dir()]
+
+    def _discover(register_callables: list[Any] | None = None) -> list[Any]:
+        """discover_plugins over the live scan dirs, skipping packages the ledger
+        marks disabled. The ledger is read fresh each call so a disable/enable
+        takes effect on the next restart's discovery without restarting twice."""
+        return discover_plugins(
+            register_callables=register_callables,
+            plugin_dirs=_scan_dirs(),
+            skip_packages=plugin_catalog.disabled_packages(managed_plugin_dir),
+        )
+
+    _apply_new_plugins(_discover(register_callables=plugins))
 
     def _plugin_manifest() -> dict[str, Any]:
         return {
@@ -529,9 +549,152 @@ def build_app(
         """Load plugins newly dropped into the plugin dir, without a restart.
         Add-only: returns `{ok, added, pages, init_scripts}`. Cannot reload
         edited plugin code or unload a plugin — that needs POST /api/restart."""
-        added = _apply_new_plugins(discover_plugins(plugin_dirs=plugin_dirs))
+        added = _apply_new_plugins(_discover())
         logger.info("plugin scan: %d new plugin(s) loaded", added)
         return {"ok": True, "added": added, **_plugin_manifest()}
+
+    @app.get("/api/plugins/catalog")
+    async def get_plugin_catalog() -> dict[str, Any]:
+        """The curated install catalog, each entry annotated with install state.
+
+        Drives the host-owned "Manage plugins" UI. `api_version` lets the UI grey
+        out entries whose `min_api` exceeds this host. `managed` is False when
+        there's no writable install dir, so the UI can explain why Install is
+        unavailable. Reads the on-disk ledger fresh each call so state reflects
+        installs/uninstalls done since boot."""
+        ledger = plugin_catalog.read_ledger(managed_plugin_dir)
+        return {
+            "api_version": PLUGIN_API_VERSION,
+            "managed": managed_plugin_dir is not None,
+            "plugins": plugin_catalog.annotate_catalog(
+                plugin_catalog.load_bundled_catalog(), ledger
+            ),
+        }
+
+    @app.post("/api/plugins/install")
+    async def install_plugin_endpoint(request: Request) -> dict[str, Any]:
+        """Install a catalog plugin by id into the managed dir, then wire it live.
+
+        Body: `{"id": "<catalog id>"}`. The flow is: validate (managed dir
+        present, id known, min_api compatible, not already installed) → download
+        + sha256-verify + unpack off the event loop → existing add-only scan. A
+        fresh install needs no restart (routes/pages/mounts are only ever added),
+        so the new tab appears on the next manifest fetch. Update/uninstall —
+        which must drop already-imported code — are separate, restart-required
+        endpoints."""
+        if managed_plugin_dir is None:
+            raise HTTPException(400, "no managed plugin directory; install is unavailable")
+        body = await request.json()
+        plugin_id = body.get("id") if isinstance(body, dict) else None
+        if not plugin_id:
+            raise HTTPException(400, "missing plugin id")
+        entry = next(
+            (e for e in plugin_catalog.load_bundled_catalog() if e["id"] == plugin_id),
+            None,
+        )
+        if entry is None:
+            raise HTTPException(404, f"unknown plugin id {plugin_id!r}")
+        if entry.get("min_api", 1) > PLUGIN_API_VERSION:
+            raise HTTPException(
+                409,
+                f"{plugin_id} requires plugin API v{entry['min_api']}; "
+                f"this manager provides v{PLUGIN_API_VERSION} — upgrade the manager",
+            )
+        if plugin_id in plugin_catalog.read_ledger(managed_plugin_dir):
+            raise HTTPException(409, f"{plugin_id} is already installed")
+        try:
+            record = await asyncio.to_thread(
+                plugin_catalog.install_plugin, entry, managed_plugin_dir
+            )
+        except plugin_catalog.CatalogError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        added = _apply_new_plugins(_discover())
+        logger.info("installed plugin %r; %d new plugin(s) wired", plugin_id, added)
+        return {
+            "ok": True,
+            "id": plugin_id,
+            "installed_version": record["version"],
+            "added": added,
+            **_plugin_manifest(),
+        }
+
+    def _require_managed() -> None:
+        if managed_plugin_dir is None:
+            raise HTTPException(400, "no managed plugin directory; management is unavailable")
+
+    async def _read_id(request: Request) -> str:
+        body = await request.json()
+        plugin_id = body.get("id") if isinstance(body, dict) else None
+        if not plugin_id:
+            raise HTTPException(400, "missing plugin id")
+        return plugin_id
+
+    @app.post("/api/plugins/update")
+    async def update_plugin_endpoint(request: Request) -> dict[str, Any]:
+        """Re-install an installed catalog plugin at the catalog's current version.
+
+        Unlike install, an update can't take effect live — the old module is
+        already imported and its routes/pages/mounts can't be cleanly swapped —
+        so the files + ledger are replaced on disk and the response carries
+        `restart_required: true` for the UI to act on (POST /api/restart)."""
+        _require_managed()
+        plugin_id = await _read_id(request)
+        entry = next(
+            (e for e in plugin_catalog.load_bundled_catalog() if e["id"] == plugin_id), None
+        )
+        if entry is None:
+            raise HTTPException(404, f"unknown plugin id {plugin_id!r}")
+        if plugin_id not in plugin_catalog.read_ledger(managed_plugin_dir):
+            raise HTTPException(409, f"{plugin_id} is not installed")
+        if entry.get("min_api", 1) > PLUGIN_API_VERSION:
+            raise HTTPException(409, f"{plugin_id} requires a newer manager")
+        try:
+            record = await asyncio.to_thread(
+                plugin_catalog.install_plugin, entry, managed_plugin_dir, replace=True
+            )
+        except plugin_catalog.CatalogError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {
+            "ok": True,
+            "id": plugin_id,
+            "installed_version": record["version"],
+            "restart_required": True,
+        }
+
+    @app.post("/api/plugins/uninstall")
+    async def uninstall_plugin_endpoint(request: Request) -> dict[str, Any]:
+        """Remove an installed catalog plugin's files and ledger entry.
+
+        Only catalog/drop-in plugins in the managed dir can be uninstalled this
+        way; pip-installed entry-point plugins aren't tracked here. The running
+        process keeps the old module until restart, so `restart_required: true`."""
+        _require_managed()
+        plugin_id = await _read_id(request)
+        if plugin_id not in plugin_catalog.read_ledger(managed_plugin_dir):
+            raise HTTPException(404, f"{plugin_id} is not installed")
+        await asyncio.to_thread(plugin_catalog.uninstall_plugin, plugin_id, managed_plugin_dir)
+        logger.info("uninstalled plugin %r", plugin_id)
+        return {"ok": True, "id": plugin_id, "restart_required": True}
+
+    @app.post("/api/plugins/toggle")
+    async def toggle_plugin_endpoint(request: Request) -> dict[str, Any]:
+        """Enable/disable an installed plugin without removing it.
+
+        Body: `{"id": ..., "enabled": bool}`. Sets the ledger's `disabled` flag;
+        discovery honours it on the next scan/restart. A live plugin keeps
+        running until then, and a re-enabled one isn't loaded until then either,
+        so `restart_required: true`."""
+        _require_managed()
+        body = await request.json()
+        plugin_id = body.get("id") if isinstance(body, dict) else None
+        enabled = body.get("enabled") if isinstance(body, dict) else None
+        if not plugin_id or not isinstance(enabled, bool):
+            raise HTTPException(400, "body must be {id: str, enabled: bool}")
+        try:
+            plugin_catalog.set_disabled(plugin_id, managed_plugin_dir, not enabled)
+        except plugin_catalog.CatalogError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"ok": True, "id": plugin_id, "enabled": enabled, "restart_required": True}
 
     # Restart hook is indirected through app.state so tests can stub it (the real
     # one replaces the process). Scheduled a beat after responding so the HTTP

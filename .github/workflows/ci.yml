@@ -17,6 +17,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Explicit least-privilege token scope for all jobs in this workflow.
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   test:
     uses: ./.github/workflows/_test.yml

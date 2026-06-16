@@ -8,6 +8,10 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   # Same checks as CI — gates the image build so a broken tag can't reach
   # Docker Hub.

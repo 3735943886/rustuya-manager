@@ -1,5 +1,7 @@
 # Sensitive data files
 *.json
+# …but the bundled plugin catalog ships with the package and must be tracked.
+!src/rustuya_manager/data/plugins.json
 
 # Python
 **/__pycache__/

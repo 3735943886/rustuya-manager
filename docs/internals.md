@@ -12,129 +12,112 @@
 
 ---
 
-## 1. Embedded bridge: why a thread, not an asyncio task
+## 1. Embedded bridge: an asyncio task on the bridge's own tokio runtime
 
 When started with `--embed-bridge`, the manager runs a
 `pyrustuyabridge.PyBridgeServer` *inside its own process* instead of
-talking to a separate bridge over MQTT. The spawn happens in
-[_spawn_embedded_bridge](../src/rustuya_manager/cli.py) on a plain
-`threading.Thread(daemon=True)`. At first glance this design appears
-questionable: the manager is otherwise pure asyncio (FastAPI + uvicorn +
-aiomqtt), and mixing threads into an asyncio application is generally
-indicative of a structural problem. The hazard underlying that heuristic —
-concurrent access to shared mutable Python state from both the loop and
-the thread — does not arise here: the embedded bridge shares no Python
-state with the manager. The only channel between them is the MQTT broker,
-the same one used when the bridge runs in a separate process. §1.2
-develops the point; the rest of this section explains why the bridge
-runs as a blocking call on a thread rather than as an awaited
-`start_async()` task on the loop.
+talking to a separate bridge over MQTT.
+[_spawn_embedded_bridge](../src/rustuya_manager/cli.py) schedules it as an
+`asyncio.Task` that `await`s the binding's `start_async()`. The manager is
+otherwise pure asyncio (FastAPI + uvicorn + aiomqtt), so an asyncio task is
+the native fit — but the choice rests on more than heuristic tidiness, and
+the reasoning below is worth keeping because the obvious objection ("an
+awaited bridge couples to the manager's loop") turns out to be false.
+
+The embedded bridge shares **no Python state** with the manager. The only
+channel between them is the MQTT broker — the same one used when the bridge
+runs in a separate process. That fact carries most of this section: it is
+why the bridge runs on its own tokio threads regardless of how it is hosted
+(§1.1), and why the hosting choice does not change MQTT behaviour (§1.2).
 
 ### 1.1 Two runtimes in one process
 
-`PyBridgeServer.start()` is **not** a coroutine — it's a blocking call that
-spins up the bridge's own **tokio** (Rust async) runtime and runs until the
-server exits. From the binding's docstring:
+`start_async()` is **not** a thin coroutine that runs the bridge on the
+Python loop. It uses `future_into_py` to spawn the bridge onto
+`pyo3-async-runtimes`' own **multi-threaded tokio** (Rust async) runtime and
+bridges only a *single completion future* back to the manager's asyncio loop —
+that future resolves when the server shuts down. So two runtimes coexist: the
+manager's asyncio loop, and the bridge's tokio runtime on its own OS threads.
+The PyO3 layer releases the GIL while the bridge runs, so the two execute
+truly in parallel.
 
-> Start the server and block the current thread until it exits. The Python
-> GIL is released while running.
+The consequence that matters: **the bridge's MQTT and device work runs on
+tokio's own threads, not on the manager's loop.** Blocking or stalling the
+manager's loop — a slow request handler, a briefly un-pumped loop — does not
+starve the bridge. As the bridge's own internals put it (rustuya-bridge
+`docs/internals.md` §11.3), "the shared resource is the GIL, not the asyncio
+loop." The only steady-state Python re-entry is log forwarding, which
+reacquires the GIL per record; a host that pins the GIL with a CPU-bound
+Python burst can make log delivery jittery, but device handling keeps
+running.
 
-Two facts follow:
+This is also why the *other* entry point, `start()` — a blocking,
+thread-hosted call that builds its own dedicated tokio runtime — would have
+**identical steady-state throughput**. Both run the bridge on tokio threads
+with the GIL released; the hosting choice is about lifecycle and integration,
+not bridge speed. §1.2 makes that comparison concrete.
 
-1. **It cannot be awaited as-is.** `start()` is a blocking synchronous
-   call, not a coroutine; it cannot be scheduled on the manager's asyncio
-   loop directly, and running it on the main thread would freeze the loop
-   entirely. The binding does expose `start_async()` as an awaitable
-   counterpart — §1.2 below explains why we nonetheless choose `start()`.
-2. **It releases the GIL.** Because the PyO3 layer detaches the GIL for the
-   whole run, a daemon thread hosting `start()` runs the bridge *truly in
-   parallel* with the Python asyncio loop — the two do not contend for the
-   GIL.
+### 1.2 Why `start_async()` over `start()`
 
-Once `start()` is chosen (per §1.2), a dedicated thread is not an arbitrary
-host; it is the natural one for a blocking, GIL-releasing foreign runtime.
-This is the scenario asyncio's own `run_in_executor` / `asyncio.to_thread`
-exist to serve — except those target *bounded* blocking work and draw from
-a shared pool. An indefinitely-running server would permanently occupy a
-pool slot, so a purpose-built `threading.Thread` is the more appropriate
-tool than the executor helpers.
+The binding exposes both entry points. `start()` blocks the calling thread
+and must be hosted on a `threading.Thread`; `start_async()` is awaited on the
+manager's existing loop. Because §1.1 establishes that **both run the bridge
+on its own tokio threads**, the comparison is *not* about MQTT isolation or
+throughput — those are identical either way. It is purely about how the
+manager hosts and tears down the bridge:
 
-### 1.2 Why not `start_async()`?
-
-The binding also exposes `start_async()` — "Start the server asynchronously
-in the Python asyncio event loop." It's tempting as the single-loop,
-heuristic-satisfying option. We deliberately don't use it.
-
-The key observation: `start_async()` does **not** yield a single event loop. It
-bridges the bridge's tokio futures onto the Python loop via
-`pyo3-async-runtimes`, so tokio is still there — it's just driven in
-lockstep with the Python loop instead of on its own threads.
-
-| | `start()` (thread — what we use) | `start_async()` |
+| | `start_async()` (asyncio task — what we use) | `start()` (thread) |
 | --- | --- | --- |
-| tokio runtime | dedicated, multi-threaded, isolated | shared (`pyo3-async-runtimes`), pumped with the Python loop |
-| If a Python handler stalls the loop | bridge MQTT continues to run (other thread, GIL released) | bridge progress stalls too |
-| Worker parallelism | scanner + mqtt + listeners on their own threads | coupled to the single Python thread |
-| Integration surface | minimal — independent of the Python loop | depends on `pyo3-async-runtimes` runtime init/teardown |
-| Cancellation / lifecycle | manual: `stop()` + `join` (see §1.3) | `await` / cancel from asyncio (cleaner) |
+| tokio runtime | shared `pyo3-async-runtimes` runtime, multi-thread | fresh dedicated multi-thread runtime per server |
+| Footprint | shares the one `pyo3-async-runtimes` runtime | a full tokio runtime per embedded bridge |
+| If the manager's loop stalls | bridge MQTT/device work unaffected (own tokio threads); only *observation* of shutdown completion is deferred until the loop runs again — the Rust cleanup still executes | bridge unaffected (own threads, GIL released) |
+| Cancellation / lifecycle | `await` / cancel on the loop; `run()` exceptions propagate directly to the supervisor task | manual: `stop()` + `thread.join` |
+| Integration surface | one paradigm; depends on `pyo3-async-runtimes` init/teardown | manager must own a thread plus a join barrier |
 
-The deciding factor is **MQTT correctness, which is this project's top
-priority.** A dedicated tokio runtime means that a stall anywhere in the
-manager's web/asyncio layer — a slow request handler, a blocked coroutine,
-a loop that briefly stops being pumped — cannot starve the bridge's MQTT
-loop. `start_async()` would couple the two: the same stall would delay
-bridge publishing. We trade the cleaner asyncio lifecycle for runtime
-isolation, deliberately.
+The deciding factors, in order:
 
-**The one residual advantage of `start_async()`** is programmatic
-failure routing: an awaited task surfaces an unexpected `run()`
-exception directly to the manager's asyncio loop, where the thread
-route would otherwise drop it inside the daemon. The thread route
-narrows that gap with `_EmbeddedBridgeSupervisor`
-([../src/rustuya_manager/cli.py](../src/rustuya_manager/cli.py)): the
-supervisor wraps every iteration of `PyBridgeServer.start()` in a
-`try`, logs the traceback via the manager's logger, backs off, and
-respawns under a rate limit. What it does NOT do is hand the exception
-object back to the asyncio loop for a structured reaction, so a future
-"manager fails closed if the bridge crashes" feature would still be a
-few lines lighter on the async route. For everything else —
-operator-visible logs, automated restart, restart-on-reconfigure (see
-§1.3) — the supervisor closes the observability gap that originally
-favoured `start_async()`. Wedged-but-alive bridges remain the
-`bridge_offline` MQTT-presence path's job, on either route.
+1. **One concurrency paradigm.** The manager is asyncio end to end; an
+   `asyncio.Task` needs no thread, no cross-thread `join`, and no lock to
+   guard the live-server reference — the supervisor's `run()` and `stop()`
+   run on the same loop and never preempt each other mid-statement.
+2. **Direct failure routing.** An awaited task surfaces an unexpected
+   `run()` exception straight to the supervisor on the loop instead of
+   dropping it inside a daemon thread. `_EmbeddedBridgeSupervisor`
+   ([../src/rustuya_manager/cli.py](../src/rustuya_manager/cli.py)) catches
+   it there, logs it, backs off, and respawns under a rate limit — and a
+   future "manager fails closed if the bridge dies" feature would already
+   have the exception in hand on the right thread.
+3. **No per-bridge runtime footprint.** `start()` would build a full
+   multi-threaded tokio runtime for the one embedded bridge; the async
+   route shares the single `pyo3-async-runtimes` runtime.
 
-**Conditions under which `start_async()` would be preferable** — noted so
-the trade-off is presented honestly rather than as dogma: embedding *many*
-bridges in one process (the thread route spins up a full multi-threaded
-tokio runtime per server; the async route shares one
-`pyo3-async-runtimes` runtime), running short-lived bridges that start and
-stop frequently inside the loop (the awaitable lifecycle is cleaner there),
-or simply not ranking MQTT isolation first. The manager satisfies none of
-these conditions: it embeds exactly one bridge for the whole process lifetime.
+What we give up by **not** hosting on a thread is minor for one long-lived
+bridge: a fully isolated dedicated runtime, independence from
+`pyo3-async-runtimes`' init/teardown, and the property that shutdown
+*observation* never waits on loop health (the Rust cleanup runs regardless;
+only our awaiting of it waits). The bridge internals name one host profile
+where those would matter — "a host that must run CPU-bound sync work on its
+loop is better served by `.start()` or the binary" — but the manager is
+I/O-bound (FastAPI + aiomqtt), so it is not that host. Embedding *many*
+bridges, or short-lived ones cycling fast, would also still favour the async
+route, not the thread.
 
-**Why the thread aligns with the manager's model.** The embedded bridge is
-the *secondary* mode. The manager's primary, default role is to manage a
-`rustuya-bridge` running as a **separate process**, communicating with it
-only over MQTT — fully isolated, with no shared memory and no shared
-runtime. The embedded thread is the same arrangement folded into one
-process: a daemon that conceptually should be a subprocess, hosted on a
-thread purely as a deployment convenience (one fewer process to
-supervise, no separate binary on disk). The manager reaches it through
-the broker, never via shared Python state.
-
-This is also what makes the asyncio-plus-thread mixing safe here. The
-hazard the heuristic guards against — concurrent access to shared mutable
-Python state from the asyncio loop and a worker thread — depends on
-shared state existing. None does: the only channel between the two sides
-is the MQTT broker, which is process-external and serialises every
-exchange. The thread route is therefore not an exception to the manager's
-design but a mirror of it; `start_async()` would be the anomalous choice,
-fusing two layers that the manager otherwise deliberately keeps decoupled.
+**Why this mirrors the manager's primary model.** The embedded bridge is the
+*secondary* mode. The manager's default role is to manage a `rustuya-bridge`
+running as a **separate process**, reached only over MQTT — no shared memory,
+no shared runtime. Embedding folds that arrangement into one process without
+changing the channel: the manager still reaches the bridge through the
+broker, never via shared Python state. That is also what makes mixing a
+foreign tokio runtime into an asyncio app safe here — the hazard the
+heuristic guards against, a loop and worker threads racing over shared
+mutable Python state, has no shared state to race over. The broker is
+process-external and serialises every exchange.
 
 ### 1.3 Shutdown: `no_signals=True` + `stop()`
 
-The flip side of running the bridge on its own thread is that shutdown has
-to cross the thread boundary cleanly. Two rules make it deterministic:
+Running the bridge as a supervised task still needs a deterministic
+shutdown across two runtimes — the manager's asyncio loop and the bridge's
+tokio runtime. Two rules make it so:
 
 **The manager owns signals.** [run](../src/rustuya_manager/cli.py) installs
 the process's SIGINT/SIGTERM handlers (`loop.add_signal_handler` →
@@ -145,7 +128,7 @@ now flows down exactly one path:
 
 ```
 SIGINT  →  manager loop handler  →  stop_event.set()
-        →  run() unblocks  →  finally:  _close_embedded_bridge(server)
+        →  run() unblocks  →  finally:  _close_embedded_bridge(supervisor)
 ```
 
 **`stop()`, not `close()`.** [_close_embedded_bridge](../src/rustuya_manager/cli.py)
@@ -155,12 +138,13 @@ pyrustuyabridge 0.2.0rc5). It trips the bridge's internal
 `CancellationToken`, which lives *outside* the `BridgeServer` mutex, so
 `run()` observes the cancel, returns, and performs graceful MQTT cleanup
 (retained-config clear + state flush) on its way out. The caller's
-`thread.join(timeout=5)` is the barrier that waits for that to finish.
+`await asyncio.wait_for(task, timeout=5)` is the barrier that waits for that
+to finish — and cancels a wedged cleanup rather than hanging shutdown.
 
 This replaced an earlier `server.close()` followed by a fixed
 `asyncio.sleep(0.1)`. That arrangement contained a subtle defect:
-`close()` required the `BridgeServer` mutex that a running `start()` holds
-for the entire duration of `run()`. With an OS signal the bridge's own
+`close()` required the `BridgeServer` mutex that a running `run()` holds
+for its entire duration. With an OS signal the bridge's own
 handler would return `run()` first and release the lock, so `close()`
 succeeded incidentally — but on a **non-signal** shutdown (e.g. the web
 server raising an exception) nothing released the lock, `close()` could
@@ -176,20 +160,21 @@ Since rustuya-bridge `b98e152` (Python 0.2.0-rc.9) the bridge's
 process supervisor will bring it back — standalone deploys put
 `Restart=always` on systemd; the embedded case has to do the equivalent
 in-process. From the outside, a reconfigure exit and a stop exit are
-indistinguishable on the bridge side: both leave `start()` returning
+indistinguishable on the bridge side: both leave `start_async()` resolving
 without an exception. The manager-side supervisor resolves the ambiguity
-with its own `threading.Event`:
+with its own `asyncio.Event`:
 
 - Bridge cancels its token (reconfigure, or any clean self-termination)
-  → `start()` returns → supervisor sees its stop-Event clear → constructs
-  a fresh `PyBridgeServer` and loops.
+  → `start_async()` resolves → supervisor sees its stop-Event clear →
+  constructs a fresh `PyBridgeServer` and loops.
 - Manager calls `supervisor.stop()` → sets stop-Event AND trips the live
-  server's token → `start()` returns → supervisor sees stop-Event set →
-  exits the loop.
+  server's token → `start_async()` resolves → supervisor sees stop-Event
+  set → exits the loop.
 
-Crashes (`start()` raises) take a third path: log the traceback, wait
-`_CRASH_BACKOFF_SEC` on the same Event (so a stop request during backoff
-returns immediately rather than always waiting the full window), then
+Crashes (`start_async()` raises) take a third path: log the traceback, wait
+`_CRASH_BACKOFF_SEC` on the same Event via `wait_for` (so a stop request
+during backoff returns immediately rather than always waiting the full
+window), then
 respawn unless the rate limit
 (`_MAX_RESTARTS_IN_WINDOW` exits in `_WINDOW_SEC`) has tripped — at
 which point the supervisor surfaces an error log and gives up, leaving
@@ -210,6 +195,8 @@ previous version of this section noted that "the manager never restarts
 an embedded bridge in-process", which is no longer true — the
 `reconfigure` action explicitly depends on the supervisor doing exactly
 that — but the underlying single-use constraint is unchanged. The
-restart cost is bounded: tokio runtime spin-up + retained-config
-re-subscribe, on the order of a few hundred milliseconds, which is the
-implicit budget any user of `reconfigure` already accepts.
+restart cost is bounded: a fresh `PyBridgeServer` setup + retained-config
+re-subscribe (the shared `pyo3-async-runtimes` tokio runtime is *not*
+rebuilt per restart, unlike the old thread route's per-server runtime), on
+the order of a few hundred milliseconds, which is the implicit budget any
+user of `reconfigure` already accepts.

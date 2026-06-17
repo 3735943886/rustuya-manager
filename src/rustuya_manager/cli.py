@@ -19,7 +19,6 @@ import logging
 import os
 import signal
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -276,13 +275,14 @@ class _EmbeddedBridgeSupervisor:
          in `_WINDOW_SEC`) has been hit, in which case the supervisor
          gives up.
 
-    Thread safety:
-      `stop()` may be called from any thread (typically the asyncio
-      shutdown path). A `threading.Lock` serialises the read of the
-      current server reference against the loop replacing it between
-      iterations. PyBridgeServer's `stop()` itself is lock-free
-      (out-of-mutex cancellation token, §1.3), so the supervisor's
-      lock only protects the Python reference — not the bridge state.
+    Concurrency:
+      The supervisor runs as an `asyncio.Task` on the manager's event
+      loop, so `run()` and `stop()` execute on the same loop thread and
+      never preempt each other mid-statement — no lock is needed to guard
+      the live-server reference. `stop()` is called from the asyncio
+      shutdown path (`_close_embedded_bridge`). PyBridgeServer's `stop()`
+      itself is sync and lock-free (out-of-mutex cancellation token,
+      §1.3), so tripping it from the loop never blocks.
     """
 
     # If the bridge exits more than this many times within the window,
@@ -300,9 +300,8 @@ class _EmbeddedBridgeSupervisor:
         # SIGINT/SIGTERM and the embedded bridge must not install
         # competing handlers).
         self._kwargs = {**kwargs, "no_signals": True}
-        self._stop = threading.Event()
+        self._stop = asyncio.Event()
         self._server: Any = None
-        self._lock = threading.Lock()
         self._restart_count = 0  # public via the .restart_count attribute
 
     @property
@@ -312,18 +311,23 @@ class _EmbeddedBridgeSupervisor:
         crash-driven restarts; counted AFTER the spawn completes."""
         return self._restart_count
 
-    def run(self) -> None:
-        """Daemon-thread entry. Returns when `stop()` has been called
-        or the rate limit has been exceeded."""
+    async def run(self) -> None:
+        """Supervisor-task entry. Returns when `stop()` has been called
+        or the rate limit has been exceeded.
+
+        `start_async()` runs the bridge on `pyo3-async-runtimes`' own
+        multi-threaded tokio runtime and resolves only when the server
+        shuts down; awaiting it blocks this task exactly as `start()`
+        blocked the daemon thread before (internals.md §1.2). A
+        Rust-side failure surfaces here as a raised exception; cancellation
+        of this task (a `CancelledError`, a `BaseException`) is NOT caught,
+        so it propagates and lets the bridge's own cleanup run."""
         exits: list[float] = []
         while not self._stop.is_set():
             crashed = False
             try:
-                with self._lock:
-                    if self._stop.is_set():
-                        return
-                    self._server = pb.PyBridgeServer(**self._kwargs)
-                self._server.start()
+                self._server = pb.PyBridgeServer(**self._kwargs)
+                await self._server.start_async()
             except Exception:  # noqa: BLE001 - any failure flows through respawn
                 crashed = True
                 logger.exception("embedded bridge: error during construction or start")
@@ -348,12 +352,15 @@ class _EmbeddedBridgeSupervisor:
                 logger.warning(
                     "embedded bridge will be respawned in %.1fs", self._CRASH_BACKOFF_SEC
                 )
-                # Event.wait() returns True if .set() was called during
-                # the timeout — that lets stop() interrupt the backoff
-                # for a fast shutdown instead of always waiting the
-                # full 5 seconds.
-                if self._stop.wait(timeout=self._CRASH_BACKOFF_SEC):
+                # wait_for resolves as soon as stop() sets the event,
+                # letting shutdown interrupt the backoff for a fast exit
+                # instead of always waiting the full window; on timeout
+                # the backoff elapsed and we respawn.
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=self._CRASH_BACKOFF_SEC)
                     return
+                except asyncio.TimeoutError:
+                    pass
             else:
                 logger.info(
                     "embedded bridge exited cleanly (reconfigure or self-terminate); respawning"
@@ -362,10 +369,10 @@ class _EmbeddedBridgeSupervisor:
     def stop(self) -> None:
         """Signal the supervisor to exit. Trips the live server's
         cancellation token (if any) and prevents the loop from
-        starting a fresh one. Idempotent and safe from any thread."""
+        starting a fresh one. Idempotent; called on the event loop
+        (no preemption against `run()`, so no lock needed)."""
         self._stop.set()
-        with self._lock:
-            srv = self._server
+        srv = self._server
         if srv is None:
             return
         try:
@@ -376,14 +383,16 @@ class _EmbeddedBridgeSupervisor:
 
 def _spawn_embedded_bridge(
     args: argparse.Namespace,
-) -> tuple[_EmbeddedBridgeSupervisor, threading.Thread]:
-    """Build the embedded-bridge supervisor and start its daemon thread.
+) -> tuple[_EmbeddedBridgeSupervisor, asyncio.Task]:
+    """Build the embedded-bridge supervisor and start its supervisor task.
 
     The supervisor (see `_EmbeddedBridgeSupervisor`) owns the per-iteration
     `PyBridgeServer` lifecycle so the bridge's `reconfigure` action — which
     self-terminates the bridge to apply a fresh config — gets a fresh
-    process equivalent in-process. Returns `(supervisor, thread)`; the
-    caller drives shutdown via `supervisor.stop()` + `thread.join(...)`.
+    process equivalent in-process. Returns `(supervisor, task)`; the
+    caller drives shutdown via `supervisor.stop()` + `await`-ing the task.
+    Must be called from within the running event loop (it schedules the
+    supervisor with `asyncio.create_task`).
     """
     default_state = Path(args.cloud).resolve().parent / "rustuya.json"
     state_file = args.bridge_state or str(default_state)
@@ -416,9 +425,8 @@ def _spawn_embedded_bridge(
         kwargs["mqtt_password"] = args.mqtt_pass
 
     supervisor = _EmbeddedBridgeSupervisor(**kwargs)
-    thread = threading.Thread(target=supervisor.run, daemon=True)
-    thread.start()
-    return supervisor, thread
+    task = asyncio.create_task(supervisor.run())
+    return supervisor, task
 
 
 async def _close_embedded_bridge(supervisor: _EmbeddedBridgeSupervisor) -> None:
@@ -430,7 +438,7 @@ async def _close_embedded_bridge(supervisor: _EmbeddedBridgeSupervisor) -> None:
     `run()` returns. The token is the same out-of-mutex one (>= 0.2.0rc5)
     that the bridge's own `reconfigure` action uses, so the cleanup
     path runs identically on both the signal and non-signal shutdowns.
-    The caller's `thread.join()` is the barrier that waits for the
+    The caller's `await`-on-the-task is the barrier that waits for the
     last iteration's cleanup to finish; no fixed sleep is needed.
     """
     supervisor.stop()
@@ -438,7 +446,7 @@ async def _close_embedded_bridge(supervisor: _EmbeddedBridgeSupervisor) -> None:
 
 async def _resolve_embedded_bridge(
     state: State, args: argparse.Namespace
-) -> tuple[Any, threading.Thread] | None:
+) -> tuple[Any, asyncio.Task] | None:
     """Decide whether to spawn an embedded bridge, and if so spawn it.
 
     Logic mirrored from a single source of truth so unit tests can exercise
@@ -447,7 +455,7 @@ async def _resolve_embedded_bridge(
       - Flag set + external bridge already on this root (templates landed
         within 1s) → set `embedded_bridge_aborted` warning, do not spawn.
       - Flag set + no external → spawn.
-    Returns (server, thread) on spawn, None otherwise.
+    Returns (supervisor, task) on spawn, None otherwise.
     """
     # Record the request up front so the UI can flag the conflict case even when
     # we end up aborting the embed below.
@@ -653,13 +661,17 @@ async def run(args: argparse.Namespace) -> int:
         # Embedded bridge tear-down — runs even on exception so a manager
         # crash doesn't leave a retained bridge/config behind.
         if embedded_bridge is not None:
-            server, thread = embedded_bridge
-            await _close_embedded_bridge(server)
+            supervisor, task = embedded_bridge
+            await _close_embedded_bridge(supervisor)
             # 5s headroom over the bridge's graceful MQTT cleanup (broker
             # disconnect + retained-config clear) which runs inside run()
             # once stop() trips the token. Local cleanup is ~ms; the slack
-            # is for a slow/remote broker.
-            thread.join(timeout=5)
+            # is for a slow/remote broker. wait_for cancels the task on
+            # timeout, so a wedged cleanup can't hang manager shutdown.
+            try:
+                await asyncio.wait_for(task, timeout=5)
+            except asyncio.TimeoutError:
+                logger.warning("embedded bridge supervisor did not exit within 5s")
 
     return 0
 

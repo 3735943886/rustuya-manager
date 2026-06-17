@@ -193,8 +193,10 @@ table below) is easier to keep straight when one place owns the value.
 
 `--restart unless-stopped` is intentional: with `--embed-bridge` on (the
 image default), the manager process is the de-facto supervisor for the
-in-process bridge thread, and the manager has no in-process watchdog if
-that thread dies (see [docs/internals.md §1.2](docs/internals.md)).
+in-process bridge task. `_EmbeddedBridgeSupervisor` respawns it across
+reconfigure and crashes, but once that gives up (rate limit) only a
+manager-process restart recovers it (see
+[docs/internals.md §1.2–1.3](docs/internals.md)).
 Restarting the manager container respawns a fresh embedded bridge with
 it, so docker's restart policy covers both. Drop the flag only if you
 deliberately want a one-shot, non-resilient run.

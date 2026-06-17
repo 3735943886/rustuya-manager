@@ -451,9 +451,12 @@ async def _run_embed_test(tmp_path, root: str, *, bridge_config: str | None = No
     finally:
         # Caller's assertions ran (or raised); shut everything down regardless.
         if embedded is not None:
-            server, thread = embedded
-            await _close_embedded_bridge(server)
-            thread.join(timeout=3)
+            supervisor, task = embedded
+            await _close_embedded_bridge(supervisor)
+            try:
+                await asyncio.wait_for(task, timeout=3)
+            except asyncio.TimeoutError:
+                pass
         subprocess.run(
             ["mosquitto_pub", "-h", "localhost", "-t", f"{root}/bridge/config", "-r", "-n"],
             check=False,
@@ -583,9 +586,12 @@ async def test_embed_bridge_inherits_broker_and_root_from_bridge_config(tmp_path
             assert state.templates.root == root_in_cfg
     finally:
         if embedded is not None:
-            server, thread = embedded
-            await _close_embedded_bridge(server)
-            thread.join(timeout=3)
+            supervisor, task = embedded
+            await _close_embedded_bridge(supervisor)
+            try:
+                await asyncio.wait_for(task, timeout=3)
+            except asyncio.TimeoutError:
+                pass
         subprocess.run(
             ["mosquitto_pub", "-h", "localhost", "-t", f"{root_in_cfg}/bridge/config", "-r", "-n"],
             check=False,

@@ -6,10 +6,10 @@
       "name": "Home Assistant Discovery",
       "description": "Generate and sync Home Assistant MQTT discovery for your Tuya devices, so they appear in Home Assistant automatically.",
       "homepage": "https://github.com/3735943886/rustuya-homeassistant",
-      "version": "0.0.1rc4",
+      "version": "0.0.1rc5",
       "min_api": 1,
-      "url": "https://github.com/3735943886/rustuya-homeassistant/releases/download/v0.0.1rc4/rustuya_ha-0.0.1rc4-dropin.zip",
-      "sha256": "7bbec87676f00127036dc016a709d63a49e757f12610296b61c3323744c80c79"
+      "url": "https://github.com/3735943886/rustuya-homeassistant/releases/download/v0.0.1rc5/rustuya_ha-0.0.1rc5-dropin.zip",
+      "sha256": "54ae8152defa0a39937dadad83a9cb158f3522d0da5077e559cf010404b07b9b"
     }
   ]
 }

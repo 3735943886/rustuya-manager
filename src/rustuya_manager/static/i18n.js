@@ -19,6 +19,10 @@ let current = "en";
 let available = ["en"];
 let defaultLang = "en";
 
+// Subscribers notified after a language switch (see onLangChange) — lets a
+// plugin re-render its own JS-built UI, which applyDom() can't reach.
+const langSubs = new Set();
+
 async function fetchLocale(code) {
   const res = await fetch(`/static/locales/${code}.json`, { cache: "no-store" });
   if (!res.ok) throw new Error(`locale ${code}: HTTP ${res.status}`);
@@ -72,6 +76,15 @@ export function t(key, vars) {
   return s;
 }
 
+// Subscribe to language switches; returns an unsubscribe fn. The callback runs
+// with the new code AFTER setLang() has swapped the active dictionary and
+// re-applied the static markup, so a plugin can re-render its own JS-built UI
+// (which applyDom only reaches via [data-i18n] nodes) in the new language.
+export function onLangChange(cb) {
+  langSubs.add(cb);
+  return () => langSubs.delete(cb);
+}
+
 export function getLocales() {
   return available.slice();
 }
@@ -90,6 +103,15 @@ export async function setLang(code) {
   localStorage.setItem("lang", code);
   document.documentElement.lang = code;
   applyDom();
+  // Notify plugins so they can re-render their own JS-built UI. Isolated so one
+  // bad handler can't break the switch or the other subscribers.
+  for (const cb of langSubs) {
+    try {
+      cb(current);
+    } catch (e) {
+      console.error("onLangChange handler threw", e);
+    }
+  }
 }
 
 // Walk the markup and localize it in place:

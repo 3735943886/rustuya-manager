@@ -11,7 +11,7 @@ import { render } from "./render.js";
 import { toast } from "./dom.js";
 import { confirm } from "./modal-confirm.js";
 import { registerHeaderAction, renderActionsMenu } from "./header-actions.js";
-import { t } from "./i18n.js";
+import { t, getLang, onLangChange } from "./i18n.js";
 
 let manifest = [];
 const stateSubs = new Set();
@@ -76,10 +76,18 @@ function pluginCtx(opts = {}) {
     },
     toast,
     confirm,
-    // Translate a key through the manager's i18n layer. Plugins can ship their
-    // own keys in the manager locale files (or fall back to the key itself);
-    // this gives plugin UIs the same language switch as the shell.
+    // Translate a key through the manager's i18n layer (for shared/built-in
+    // keys). A plugin that ships its own strings typically keeps its own
+    // dictionary and re-renders on onLangChange — see getLang below.
     t,
+    // The active language code (e.g. "en", "ko"), so a plugin can pick its own
+    // dictionary at mount time.
+    getLang,
+    // Subscribe to language switches (returns an unsubscribe fn). Fires after the
+    // shell has switched, so a plugin can re-render its own JS-built UI in the
+    // new language — applyDom() only re-localizes [data-i18n] nodes, not
+    // imperatively built markup.
+    onLangChange,
     // Contribute a hamburger-menu item through the same registry the built-in
     // actions use. Plugins default into the 200+ order band (after the app's
     // own items) and should namespace their `id` (e.g. "myplugin-thing") to

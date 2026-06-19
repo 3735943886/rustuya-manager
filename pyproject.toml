@@ -40,7 +40,7 @@ version = { attr = "rustuya_manager.__version__" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-rustuya_manager = ["templates/*.html", "static/*.js", "static/*.css", "data/*.json"]
+rustuya_manager = ["templates/*.html", "static/*.js", "static/*.css", "static/locales/*.json", "data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

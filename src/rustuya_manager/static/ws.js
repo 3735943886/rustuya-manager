@@ -5,6 +5,7 @@
 import { state } from "./state.js";
 import { render } from "./render.js";
 import { notifyPluginState } from "./plugins.js";
+import { t } from "./i18n.js";
 
 const $conn = document.getElementById("conn-badge");
 
@@ -19,11 +20,12 @@ export function setConn(label) {
   // and keeps the dot visually centered alongside the word — a dot-only
   // shrunk badge ended up looking off-center against the title text.
   const styles = {
-    connecting: ["bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600", "connecting", true],
-    live:       ["bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700", "live", false],
-    lost:       ["bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700", "lost", true],
+    connecting: ["bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600", true],
+    live:       ["bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700", false],
+    lost:       ["bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700", true],
   };
-  const [cls, text, pulse] = styles[label];
+  const [cls, pulse] = styles[label];
+  const text = t(`conn.${label}`);
   $conn.className = `text-xs px-2 py-1 rounded-full border ${cls} inline-flex items-center justify-center w-[96px] whitespace-nowrap gap-1`;
   $conn.innerHTML = `<span class="${pulse ? "pulse-dot " : ""}leading-none">●</span><span>${text}</span>`;
 }

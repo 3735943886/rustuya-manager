@@ -2,6 +2,8 @@
 // reusable element factories. Anything stateless that two or more modules
 // need lives here.
 
+import { t } from "./i18n.js";
+
 export const ICON_BASE = "w-5 h-5 inline-flex items-center justify-center";
 
 export function escapeHtml(s) {
@@ -21,11 +23,11 @@ export function formatDpsValue(v) {
 
 export function formatAgo(ts) {
   const sec = Math.max(0, Date.now() / 1000 - ts);
-  if (sec < 1)     return "just now";
-  if (sec < 60)    return `${Math.floor(sec)}s ago`;
-  if (sec < 3600)  return `${Math.floor(sec / 60)}m ago`;
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
-  return `${Math.floor(sec / 86400)}d ago`;
+  if (sec < 1)     return t("time.justNow");
+  if (sec < 60)    return t("time.secondsAgo", { n: Math.floor(sec) });
+  if (sec < 3600)  return t("time.minutesAgo", { n: Math.floor(sec / 60) });
+  if (sec < 86400) return t("time.hoursAgo", { n: Math.floor(sec / 3600) });
+  return t("time.daysAgo", { n: Math.floor(sec / 86400) });
 }
 
 // Stateless icon factories. Each returns an element that is sized to h-5 so
@@ -40,14 +42,14 @@ export function liveDot(live) {
   const dot = document.createElement("span");
   if (!live) {
     dot.className = "w-2 h-2 rounded-full border-2 border-slate-300 dark:border-slate-600";
-    wrap.title = "no status received";
+    wrap.title = t("status.noStatus");
     wrap.appendChild(dot);
     return wrap;
   }
   const map = {
-    online:  ["bg-emerald-500", "online", false],
-    offline: ["border-2 border-slate-400 dark:border-slate-500", "offline", true],
-    unknown: ["border-2 border-slate-300 dark:border-slate-600", "unknown", true],
+    online:  ["bg-emerald-500", t("status.online"), false],
+    offline: ["border-2 border-slate-400 dark:border-slate-500", t("status.offline"), true],
+    unknown: ["border-2 border-slate-300 dark:border-slate-600", t("status.unknown"), true],
   };
   const [cls, label, ring] = map[live.state] || ["bg-rose-500", String(live.state), false];
   dot.className = `w-2 h-2 rounded-full ${cls}${ring ? " bg-transparent" : ""}`;
@@ -72,14 +74,14 @@ export function scanDot(sighting) {
     dot.className = "w-2 h-2 rounded-full border-2 border-slate-300 dark:border-slate-600";
     // Honest about ambiguity — without a backend "scan ever ran" flag we
     // can't tell "no scan yet" apart from "scan ran, didn't see it".
-    wrap.title = "not in last LAN scan (or scan has not run yet)";
+    wrap.title = t("scan.notSeen");
     wrap.appendChild(dot);
     return wrap;
   }
   dot.className = "w-2 h-2 rounded-full bg-sky-500";
-  const ip = sighting.ip ? ` at ${sighting.ip}` : "";
+  const ip = sighting.ip ? t("scan.atIp", { ip: sighting.ip }) : "";
   const ago = sighting.observed_at ? `, ${formatAgo(sighting.observed_at)}` : "";
-  wrap.title = `LAN scan saw this device${ip}${ago}`;
+  wrap.title = `${t("scan.sawDevice")}${ip}${ago}`;
   wrap.appendChild(dot);
   return wrap;
 }
@@ -127,11 +129,11 @@ export function statusPill(cls) {
   // Used by the synthetic missing-parent card; device cards use the left-edge
   // color strip + liveDot for the same information without labels.
   const map = {
-    synced:    ["bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700", "synced"],
-    mismatch:  ["bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700", "mismatch"],
-    missing:   ["bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-700", "missing"],
-    orphan:    ["bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-700", "orphan"],
-    ungrouped: ["bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600", "ungrouped"],
+    synced:    ["bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700", t("pill.synced")],
+    mismatch:  ["bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700", t("pill.mismatch")],
+    missing:   ["bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-700", t("pill.missing")],
+    orphan:    ["bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-700", t("pill.orphan")],
+    ungrouped: ["bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600", t("pill.ungrouped")],
   };
   const [s, label] = map[cls];
   return `<span class="text-[10px] px-1.5 py-0.5 rounded-full border ${s} uppercase tracking-wide">${label}</span>`;

@@ -82,12 +82,38 @@ class TestHTTP:
             "modal-wizard.js": "applyWizardSession",
             "modal-device.js": "openAddModal",
             "modal-confirm.js": "initConfirmModal",
+            "i18n.js": "initI18n",
         }
         with TestClient(build_app(state, client)) as tc:
             for name, marker in modules.items():
                 r = tc.get(f"/static/{name}")
                 assert r.status_code == 200, f"{name} not served"
                 assert marker in r.text, f"{name} missing expected marker {marker!r}"
+
+    def test_api_locales_lists_available(self):
+        # The client's language picker is data-driven off this endpoint: every
+        # locale JSON bundled under static/locales/ must show up, English is
+        # always offered, and the default is English.
+        state, client = _fixture_state()
+        with TestClient(build_app(state, client)) as tc:
+            r = tc.get("/api/locales")
+            assert r.status_code == 200
+            body = r.json()
+            assert body["default"] == "en"
+            assert "en" in body["available"]
+            assert "ko" in body["available"]
+            assert body["available"] == sorted(body["available"])
+
+    def test_locale_files_served_and_parse(self):
+        # Each advertised locale must be fetchable from /static/locales/ and be
+        # valid JSON — otherwise the picker offers a language that 404s or breaks.
+        state, client = _fixture_state()
+        with TestClient(build_app(state, client)) as tc:
+            available = tc.get("/api/locales").json()["available"]
+            for code in available:
+                r = tc.get(f"/static/locales/{code}.json")
+                assert r.status_code == 200, f"{code}.json not served"
+                assert isinstance(r.json(), dict), f"{code}.json is not a JSON object"
 
     def test_api_state_returns_full_snapshot(self):
         state, client = _fixture_state()
@@ -335,3 +361,37 @@ class TestBasicAuth:
 
         with pytest.raises(ValueError, match="user:password"):
             self._make_app("missing-colon")
+
+
+class TestLocales:
+    """The bundled UI translation catalogs are a first-party asset; these guard
+    their integrity independently of the HTTP layer."""
+
+    def _locales_dir(self):
+        from pathlib import Path
+
+        import rustuya_manager
+
+        return Path(rustuya_manager.__file__).parent / "static" / "locales"
+
+    def test_english_catalog_exists_and_parses(self):
+        en = self._locales_dir() / "en.json"
+        assert en.is_file(), "en.json (the fallback catalog) must be bundled"
+        data = json.loads(en.read_text(encoding="utf-8"))
+        assert isinstance(data, dict) and data, "en.json must be a non-empty object"
+        assert data.get("lang.name"), "every locale must name itself via lang.name"
+
+    def test_every_locale_matches_english_keys(self):
+        # English is the source of truth + fallback layer. Every other locale
+        # must define exactly the same keys — a missing key would silently fall
+        # back to English, an extra key is dead weight / a typo.
+        locales_dir = self._locales_dir()
+        en_keys = set(json.loads((locales_dir / "en.json").read_text(encoding="utf-8")))
+        for path in sorted(locales_dir.glob("*.json")):
+            if path.stem == "en":
+                continue
+            keys = set(json.loads(path.read_text(encoding="utf-8")))
+            assert keys == en_keys, (
+                f"{path.name} key set diverges from en.json — "
+                f"missing={sorted(en_keys - keys)} extra={sorted(keys - en_keys)}"
+            )

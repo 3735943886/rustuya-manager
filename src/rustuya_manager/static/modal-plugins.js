@@ -16,6 +16,7 @@
 
 import { escapeHtml, toast, button } from "./dom.js";
 import { confirm } from "./modal-confirm.js";
+import { t } from "./i18n.js";
 import {
   getCatalog,
   installPlugin,
@@ -49,15 +50,15 @@ function statusBadges(p, apiVersion) {
   if (p.installed) {
     out.push(
       p.enabled
-        ? badge("installed", "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300")
-        : badge("disabled", "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300")
+        ? badge(t("plugins.installed"), "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300")
+        : badge(t("plugins.disabled"), "bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300")
     );
     if (p.update_available) {
-      out.push(badge("update available", "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"));
+      out.push(badge(t("plugins.updateAvailable"), "bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300"));
     }
   }
   if ((p.min_api || 1) > apiVersion) {
-    out.push(badge("needs newer manager", "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300"));
+    out.push(badge(t("plugins.needsNewer"), "bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300"));
   }
   return out.join(" ");
 }
@@ -67,18 +68,18 @@ function statusBadges(p, apiVersion) {
 async function refresh() {
   const data = await getCatalog();
   if (data.ok === false) {
-    $body.innerHTML = `<div class="text-sm text-rose-600 dark:text-rose-400">Could not load catalog: ${escapeHtml(data.error || "unknown")}</div>`;
+    $body.innerHTML = `<div class="text-sm text-rose-600 dark:text-rose-400">${escapeHtml(t("plugins.catalogError", { error: data.error || t("common.unknown") }))}</div>`;
     return;
   }
   const plugins = data.plugins || [];
   const apiVersion = data.api_version || 1;
-  $subtitle.textContent = `${plugins.length} available · plugin API v${apiVersion}`;
+  $subtitle.textContent = t("plugins.subtitle", { count: plugins.length, version: apiVersion });
   $note.textContent = data.managed
-    ? "Plugins run in-process, unsandboxed — only install ones you trust."
-    : "No writable plugin directory — install is unavailable. Set --plugin-dir.";
+    ? t("plugins.noteManaged")
+    : t("plugins.noteUnmanaged");
 
   if (plugins.length === 0) {
-    $body.innerHTML = `<div class="text-sm text-slate-500 dark:text-slate-400">The catalog is empty.</div>`;
+    $body.innerHTML = `<div class="text-sm text-slate-500 dark:text-slate-400">${escapeHtml(t("plugins.empty"))}</div>`;
     return;
   }
 
@@ -94,7 +95,7 @@ function renderRow(p, apiVersion, managed) {
 
   const ver = p.installed && p.installed_version ? p.installed_version : p.version;
   const home = p.homepage
-    ? `<a href="${escapeHtml(p.homepage)}" target="_blank" rel="noopener" class="text-xs text-sky-600 dark:text-sky-400 hover:underline">homepage ↗</a>`
+    ? `<a href="${escapeHtml(p.homepage)}" target="_blank" rel="noopener" class="text-xs text-sky-600 dark:text-sky-400 hover:underline">${escapeHtml(t("plugins.homepage"))}</a>`
     : "";
   row.innerHTML = `
     <div class="flex items-start gap-2">
@@ -116,7 +117,7 @@ function renderRow(p, apiVersion, managed) {
   if (!p.installed) {
     actions.appendChild(
       disableIf(
-        button("Install", () => act(() => installPlugin(p.id), p.id, "Installed"), "sky"),
+        button(t("plugins.install"), () => act(() => installPlugin(p.id), p.id, t("plugins.verbInstalled")), "sky"),
         !managed || incompatible
       )
     );
@@ -124,18 +125,18 @@ function renderRow(p, apiVersion, managed) {
     if (p.update_available) {
       actions.appendChild(
         disableIf(
-          button("Update", () => act(() => updatePlugin(p.id), p.id, "Updated"), "amber"),
+          button(t("plugins.update"), () => act(() => updatePlugin(p.id), p.id, t("plugins.verbUpdated")), "amber"),
           incompatible
         )
       );
     }
     actions.appendChild(
       p.enabled
-        ? button("Disable", () => act(() => togglePlugin(p.id, false), p.id, "Disabled"))
-        : button("Enable", () => act(() => togglePlugin(p.id, true), p.id, "Enabled"))
+        ? button(t("plugins.disable"), () => act(() => togglePlugin(p.id, false), p.id, t("plugins.verbDisabled")))
+        : button(t("plugins.enable"), () => act(() => togglePlugin(p.id, true), p.id, t("plugins.verbEnabled")))
     );
     actions.appendChild(
-      button("Uninstall", () => uninstall(p.id, p.name || p.id), "danger")
+      button(t("plugins.uninstall"), () => uninstall(p.id, p.name || p.id), "danger")
     );
   }
   row.appendChild(actions);
@@ -155,47 +156,46 @@ function disableIf(btn, disabled) {
 async function act(fn, id, verb) {
   const res = await fn();
   if (res.ok === false) {
-    toast(`${id}: ${res.error || "failed"}`, "error");
+    toast(t("plugins.actionFailed", { id, error: res.error || t("common.failed") }), "error");
     return;
   }
-  toast(`${verb}: ${id}`, "ok");
+  toast(t("plugins.actionOk", { verb, id }), "ok");
   if (res.restart_required) setRestart();
   await refresh();
 }
 
 async function uninstall(id, label) {
   const ok = await confirm({
-    title: "Uninstall plugin",
-    message: `Remove ${label}? Its files are deleted from the plugin directory. ` +
-      "The manager must restart to fully unload it.",
-    okLabel: "Uninstall",
+    title: t("plugins.uninstallTitle"),
+    message: t("plugins.uninstallMsg", { label }),
+    okLabel: t("plugins.uninstall"),
     danger: true,
   });
   if (!ok) return;
-  await act(() => uninstallPlugin(id), id, "Uninstalled");
+  await act(() => uninstallPlugin(id), id, t("plugins.verbUninstalled"));
 }
 
 function setRestart() {
   needsRestart = true;
   $restart.classList.remove("hidden");
-  $note.textContent = "Restart required to apply changes.";
+  $note.textContent = t("plugins.restartRequired");
 }
 
 async function doRestart() {
   try {
     const res = await fetch("/api/restart", { method: "POST" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    toast("Restarting manager… reconnecting shortly", "ok");
+    toast(t("toast.restarting"), "ok");
     close();
   } catch (e) {
-    toast(`Restart failed: ${e.message}`, "error");
+    toast(t("toast.restartFailed", { error: e.message }), "error");
   }
 }
 
 export function openPluginsModal() {
   needsRestart = false;
   $restart.classList.add("hidden");
-  $body.innerHTML = `<div class="text-sm text-slate-500 dark:text-slate-400">Loading…</div>`;
+  $body.innerHTML = `<div class="text-sm text-slate-500 dark:text-slate-400">${escapeHtml(t("plugins.loading"))}</div>`;
   $modal.classList.remove("hidden");
   refresh();
 }

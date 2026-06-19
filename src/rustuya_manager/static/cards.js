@@ -9,6 +9,7 @@ import {
 import { sync, publishCommand } from "./api.js";
 import { openEditModal } from "./modal-device.js";
 import { confirm } from "./modal-confirm.js";
+import { t } from "./i18n.js";
 // Cycle: render.js imports deviceCard from this module. The import is fine
 // because ES module bindings are live — by the time toggleExpand fires from
 // a click handler, both modules are fully evaluated.
@@ -88,7 +89,7 @@ function resolveIp(bridge, cloud) {
       if (cloudIp && cloudIp !== "Auto" && cloudIp !== bridge.ip) {
         return {
           value: bridge.ip,
-          tooltip: `Bridge connects to ${bridge.ip}; cloud reports ${cloudIp}`,
+          tooltip: t("card.ipConflict", { bridge: bridge.ip, cloud: cloudIp }),
         };
       }
       return { value: bridge.ip, tooltip: "" };
@@ -100,8 +101,8 @@ function resolveIp(bridge, cloud) {
     // Device.from_dict normalizes it to "Auto" — so a shown cloud IP is a LAN
     // address.
     const tip =
-      "IP is dynamic (DHCP/auto)." +
-      (cloudIp && cloudIp !== "Auto" ? `\nCloud has it on file at ${cloudIp}.` : "");
+      t("card.ipDynamic") +
+      (cloudIp && cloudIp !== "Auto" ? t("card.ipCloudFile", { ip: cloudIp }) : "");
     return { value: "Auto", tooltip: tip };
   }
   // Device not in bridge — cloud is all we have.
@@ -120,7 +121,7 @@ function resolveVer(bridge, cloud) {
       if (cloudVer && cloudVer !== "Auto" && cloudVer !== bridge.version) {
         return {
           value: bridge.version,
-          tooltip: `Bridge negotiated ${bridge.version}; cloud reports ${cloudVer}`,
+          tooltip: t("card.verConflict", { bridge: bridge.version, cloud: cloudVer }),
         };
       }
       return { value: bridge.version, tooltip: "" };
@@ -136,7 +137,7 @@ function expandCaret(id, isExpanded) {
   b.type = "button";
   b.className = `${ICON_BASE} text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 text-xs`;
   b.textContent = isExpanded ? "▾" : "▸";
-  b.title = isExpanded ? "Collapse" : "Expand";
+  b.title = isExpanded ? t("card.collapse") : t("card.expand");
   b.addEventListener("click", (ev) => {
     ev.stopPropagation();
     toggleExpand(id);
@@ -147,9 +148,9 @@ function expandCaret(id, isExpanded) {
 async function removeWithConfirm(id, name) {
   const display = name && name !== "N/A" ? `${name} (${id})` : id;
   const ok = await confirm({
-    title: "Remove device?",
-    message: `Remove ${display} from the bridge?\nThis publishes a 'remove' command and cannot be undone by the manager.`,
-    okLabel: "Remove",
+    title: t("confirm.removeTitle"),
+    message: t("confirm.removeMsg", { device: display }),
+    okLabel: t("common.remove"),
     danger: true,
   });
   if (ok) await publishCommand({ action: "remove", id });
@@ -159,9 +160,9 @@ function appendInlineActions(container, id, cls, cloud, bridge, primary) {
   // Tint the per-class action to its sync-class color so the button and
   // the device's edge stripe / filter tab read as one signal.
   if (cls === "missing") {
-    container.appendChild(button("Add", () => sync("add", primary), "sky"));
+    container.appendChild(button(t("card.add"), () => sync("add", primary), "sky"));
   } else if (cls === "mismatch") {
-    container.appendChild(button("Update", () => sync("add", cloud), "amber"));
+    container.appendChild(button(t("card.update"), () => sync("add", cloud), "amber"));
   }
   // Orphan no longer gets a dedicated "Remove" text button — the 🗑 icon
   // below covers it (with a confirm) and avoids two ways to do the same
@@ -172,7 +173,7 @@ function appendInlineActions(container, id, cls, cloud, bridge, primary) {
   // the add-from-scratch flow for those.
   if (cls !== "missing") {
     container.appendChild(
-      iconButton("✎", () => openEditModal(id), "Edit device"),
+      iconButton("✎", () => openEditModal(id), t("card.editDevice")),
     );
     // Orphan's primary (really, only) action is delete — promote the trash
     // icon to a filled rose tile so it reads as THE action on that card,
@@ -181,12 +182,12 @@ function appendInlineActions(container, id, cls, cloud, bridge, primary) {
       iconButton(
         "🗑",
         () => removeWithConfirm(id, primary.name),
-        "Remove device",
+        t("card.removeDevice"),
         cls === "orphan" ? "danger-fill" : "danger",
       ),
     );
     container.appendChild(
-      iconButton("↻", () => publishCommand({ action: "get", id }), "Query status from bridge"),
+      iconButton("↻", () => publishCommand({ action: "get", id }), t("card.queryStatus")),
     );
   }
 }
@@ -272,8 +273,8 @@ export function deviceCard(id, cls, isChild) {
   } else if (snap.retained_only?.includes(id)) {
     const ls = document.createElement("span");
     ls.className = "ml-auto text-[10px] italic text-slate-400 dark:text-slate-500 shrink-0";
-    ls.title = "Last value is from a retained MQTT message; freshness unknown until a live event arrives.";
-    ls.textContent = "cached";
+    ls.title = t("card.cachedTitle");
+    ls.textContent = t("card.cached");
     headerBottom.appendChild(ls);
   }
   card.appendChild(headerBottom);
@@ -315,8 +316,8 @@ export function deviceCard(id, cls, isChild) {
     // CID stays a single line — visually unbalanced. Force one-per-row
     // on mobile; desktop keeps them paired in a single row.
     fields = [
-      ["CID", primary.cid || "—", "", "col-span-2 md:col-span-2"],
-      ["PARENT", primary.parent_id || "—", "", "col-span-2 md:col-span-2"],
+      [t("field.cid"), primary.cid || "—", "", "col-span-2 md:col-span-2"],
+      [t("field.parent"), primary.parent_id || "—", "", "col-span-2 md:col-span-2"],
     ];
   } else {
     // Desktop: IP (1/4) + VER (1/4) + KEY (1/2) fit on one row. The KEY
@@ -325,11 +326,11 @@ export function deviceCard(id, cls, isChild) {
     // Mobile keeps the existing 2-row layout (IP|VER on row 1, KEY on
     // row 2) because col-span without an md: prefix applies everywhere.
     fields = [
-      ["IP", ipInfo.value, ipInfo.tooltip, "md:col-span-1"],
-      ["VER", verInfo.value, verInfo.tooltip, "md:col-span-1"],
-      ["KEY", primary.key || "—", "", "col-span-2 md:col-span-2"],
+      [t("field.ip"), ipInfo.value, ipInfo.tooltip, "md:col-span-1"],
+      [t("field.ver"), verInfo.value, verInfo.tooltip, "md:col-span-1"],
+      [t("field.key"), primary.key || "—", "", "col-span-2 md:col-span-2"],
     ];
-    if (live?.message) fields.push(["MSG", live.message, "", "col-span-2 md:col-span-4"]);
+    if (live?.message) fields.push([t("field.msg"), live.message, "", "col-span-2 md:col-span-4"]);
   }
   // For missing-class cards (cloud-only — bridge doesn't know them), if
   // the latest LAN scan saw the device, surface the observed IP/VER in
@@ -344,8 +345,8 @@ export function deviceCard(id, cls, isChild) {
   const sighting = snap.scan_results?.[id];
   if (cls === "missing" && sighting) {
     fields.push(
-      ["SCAN IP", sighting.ip || "—", "Bridge LAN scan result", "md:col-span-2", scanFieldClass(primary.ip, sighting.ip)],
-      ["SCAN VER", sighting.version || "—", "Bridge LAN scan result", "md:col-span-2", scanFieldClass(primary.version, sighting.version)],
+      [t("field.scanIp"), sighting.ip || "—", t("field.scanTooltip"), "md:col-span-2", scanFieldClass(primary.ip, sighting.ip)],
+      [t("field.scanVer"), sighting.version || "—", t("field.scanTooltip"), "md:col-span-2", scanFieldClass(primary.version, sighting.version)],
     );
   }
   for (const entry of fields) {
@@ -404,10 +405,10 @@ export function missingParentCard(parent_id) {
     <div class="flex flex-wrap items-center gap-2">
       <span class="font-mono text-sm text-slate-700 dark:text-slate-200">${escapeHtml(parent_id)}</span>
       ${statusPill("missing")}
-      <span class="text-[10px] px-1.5 py-0.5 rounded-full border bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600">missing parent</span>
+      <span class="text-[10px] px-1.5 py-0.5 rounded-full border bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600">${escapeHtml(t("card.missingParent"))}</span>
     </div>
     <div class="text-xs text-slate-500 dark:text-slate-400 mt-1">
-      Sub-device(s) reference this parent, but the parent is not in cloud or bridge.
+      ${escapeHtml(t("card.missingParentDesc"))}
     </div>
   `;
   return card;

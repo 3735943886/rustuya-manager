@@ -57,7 +57,7 @@
   <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
     <h1 class="text-lg font-semibold tracking-tight">rustuya-manager</h1>
     <div id="conn-badge" class="text-xs px-2 py-1 rounded-full border bg-slate-100 text-slate-600 border-slate-300 inline-flex items-center justify-center w-[96px] whitespace-nowrap gap-1">
-      <span class="pulse-dot leading-none">●</span><span>connecting</span>
+      <span class="pulse-dot leading-none">●</span><span data-i18n="conn.connecting">connecting</span>
     </div>
     <div class="ml-auto">
       <!-- One actions menu on every viewport. These are all occasional actions
@@ -71,7 +71,7 @@
            the plugin host (plugins.js) when a plugin tab is active. The
            disclosure triangle is stripped from <summary> globally in <head>. -->
       <details id="actions-menu" class="relative">
-        <summary class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none cursor-pointer select-none" title="Menu">
+        <summary class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none cursor-pointer select-none" title="Menu" data-i18n-attr="title:header.menuTitle">
           ☰
         </summary>
         <div data-actions-panel class="absolute right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-lg p-1 z-20 min-w-[200px]"></div>
@@ -95,18 +95,18 @@
   <!-- Cloud source picker — visible when no cloud loaded -->
   <section id="cloud-banner" class="hidden">
     <div id="cloud-dropzone" class="rounded-lg border-2 border-dashed border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 p-4 md:p-5 text-sm text-amber-900 dark:text-amber-200 space-y-3">
-      <div class="font-medium">No <code class="bg-amber-100 dark:bg-amber-900/60 px-1 rounded">tuyadevices.json</code> loaded</div>
-      <p class="text-xs text-amber-800 dark:text-amber-300">
+      <div class="font-medium" data-i18n-html="cloud.noFileTitle">No <code class="bg-amber-100 dark:bg-amber-900/60 px-1 rounded">tuyadevices.json</code> loaded</div>
+      <p class="text-xs text-amber-800 dark:text-amber-300" data-i18n-html="cloud.pickPrompt">
         Bridge devices are listed below as <em>Ungrouped</em>. Pick a source to enable diff and sync:
       </p>
       <div class="flex flex-wrap gap-2">
-        <button type="button" id="wizard-open-btn" class="text-xs px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-medium">
+        <button type="button" id="wizard-open-btn" class="text-xs px-3 py-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white font-medium" data-i18n="cloud.connect">
           Connect Tuya Cloud
         </button>
-        <button type="button" id="cloud-pick-btn" class="text-xs px-3 py-1.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 text-amber-800 dark:text-amber-200">
+        <button type="button" id="cloud-pick-btn" class="text-xs px-3 py-1.5 rounded border border-amber-400 dark:border-amber-700 bg-white dark:bg-slate-800 hover:bg-amber-100 dark:hover:bg-slate-700 text-amber-800 dark:text-amber-200" data-i18n="cloud.upload">
           Upload tuyadevices.json
         </button>
-        <span class="text-[11px] text-amber-700 dark:text-amber-300 self-center">…or drop the file here</span>
+        <span class="text-[11px] text-amber-700 dark:text-amber-300 self-center" data-i18n="cloud.dropHint">…or drop the file here</span>
       </div>
       <input type="file" id="cloud-file-input" class="hidden" accept="application/json,.json">
     </div>
@@ -118,16 +118,16 @@
        fitting on one line on narrow mobile widths. -->
   <section id="sync-bar" class="hidden">
     <div class="flex flex-wrap items-center gap-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5">
-      <button data-sync-scope="missing" class="hidden text-xs px-2 py-1 rounded border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/40 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-200 whitespace-nowrap" title="Add missing">
-        Add<span class="hidden sm:inline"> missing</span>
+      <button data-sync-scope="missing" class="hidden text-xs px-2 py-1 rounded border border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/40 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-200 whitespace-nowrap" title="Add missing" data-i18n-attr="title:syncbar.missingTitle">
+        <span data-i18n="syncbar.missingShort">Add</span><span class="hidden sm:inline" data-i18n="syncbar.missingSuffix"> missing</span>
       </button>
-      <button data-sync-scope="orphan" class="hidden text-xs px-2 py-1 rounded border border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-200 whitespace-nowrap" title="Remove orphan">
-        Remove<span class="hidden sm:inline"> orphan</span>
+      <button data-sync-scope="orphan" class="hidden text-xs px-2 py-1 rounded border border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-200 whitespace-nowrap" title="Remove orphan" data-i18n-attr="title:syncbar.orphanTitle">
+        <span data-i18n="syncbar.orphanShort">Remove</span><span class="hidden sm:inline" data-i18n="syncbar.orphanSuffix"> orphan</span>
       </button>
-      <button data-sync-scope="mismatch" class="hidden text-xs px-2 py-1 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 whitespace-nowrap" title="Update mismatch">
-        Update<span class="hidden sm:inline"> mismatch</span>
+      <button data-sync-scope="mismatch" class="hidden text-xs px-2 py-1 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 whitespace-nowrap" title="Update mismatch" data-i18n-attr="title:syncbar.mismatchTitle">
+        <span data-i18n="syncbar.mismatchShort">Update</span><span class="hidden sm:inline" data-i18n="syncbar.mismatchSuffix"> mismatch</span>
       </button>
-      <button data-sync-scope="all" class="ml-auto text-xs px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white font-medium whitespace-nowrap">
+      <button data-sync-scope="all" class="ml-auto text-xs px-2 py-1 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white font-medium whitespace-nowrap" data-i18n="syncbar.applyAll">
         Apply all
       </button>
     </div>
@@ -146,9 +146,9 @@
            so the custom button is the only cancel affordance on every
            browser. -->
       <div class="relative flex-1 min-w-[180px]">
-        <input id="search-input" type="search" placeholder="search id / name / ip / cid"
+        <input id="search-input" type="search" placeholder="search id / name / ip / cid" data-i18n-attr="placeholder:search.placeholder"
                class="w-full text-sm pl-3 pr-8 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500">
-        <button type="button" id="search-clear" aria-label="Clear search" title="Clear" class="absolute right-1.5 top-1/2 -translate-y-1/2 hidden w-5 h-5 inline-flex items-center justify-center rounded-full text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs leading-none">
+        <button type="button" id="search-clear" aria-label="Clear search" title="Clear" data-i18n-attr="aria-label:search.clearAria;title:search.clearTitle" class="absolute right-1.5 top-1/2 -translate-y-1/2 hidden w-5 h-5 inline-flex items-center justify-center rounded-full text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs leading-none">
           ✕
         </button>
       </div>
@@ -162,28 +162,28 @@
            otherwise it would steal flex-grow space from search and shrink
            the search input. -->
       <div class="flex flex-wrap gap-1 text-xs order-last sm:order-none ml-auto sm:ml-0" id="filter-tabs">
-        <button data-filter="all"      class="px-2 py-1 rounded border border-slate-300 bg-white">all <span data-count class="hidden sm:inline"></span></button>
-        <button data-filter="missing"  class="px-2 py-1 rounded border border-slate-300 bg-white">missing <span data-count class="hidden sm:inline"></span></button>
-        <button data-filter="orphan"   class="px-2 py-1 rounded border border-slate-300 bg-white">orphan <span data-count class="hidden sm:inline"></span></button>
-        <button data-filter="mismatch" class="px-2 py-1 rounded border border-slate-300 bg-white">mismatch <span data-count class="hidden sm:inline"></span></button>
-        <button data-filter="synced"   class="px-2 py-1 rounded border border-slate-300 bg-white">synced <span data-count class="hidden sm:inline"></span></button>
+        <button data-filter="all"      class="px-2 py-1 rounded border border-slate-300 bg-white"><span data-i18n="filter.all">all</span> <span data-count class="hidden sm:inline"></span></button>
+        <button data-filter="missing"  class="px-2 py-1 rounded border border-slate-300 bg-white"><span data-i18n="filter.missing">missing</span> <span data-count class="hidden sm:inline"></span></button>
+        <button data-filter="orphan"   class="px-2 py-1 rounded border border-slate-300 bg-white"><span data-i18n="filter.orphan">orphan</span> <span data-count class="hidden sm:inline"></span></button>
+        <button data-filter="mismatch" class="px-2 py-1 rounded border border-slate-300 bg-white"><span data-i18n="filter.mismatch">mismatch</span> <span data-count class="hidden sm:inline"></span></button>
+        <button data-filter="synced"   class="px-2 py-1 rounded border border-slate-300 bg-white"><span data-i18n="filter.synced">synced</span> <span data-count class="hidden sm:inline"></span></button>
       </div>
       <!-- The external "sort" label is folded into the select itself via
            <optgroup label="sort by">. Native browsers render the optgroup
            label as a non-selectable italic header when the dropdown is
            open, so the context is preserved without spending a row on a
            separate label. Closed state shows only the current value. -->
-      <select id="sort-select" title="Sort devices" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
-        <optgroup label="sort by">
-          <option value="id">id</option>
-          <option value="name">name</option>
-          <option value="status">status</option>
-          <option value="category">category</option>
+      <select id="sort-select" title="Sort devices" data-i18n-attr="title:sort.title" class="text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+        <optgroup label="sort by" data-i18n-attr="label:sort.groupLabel">
+          <option value="id" data-i18n="sort.id">id</option>
+          <option value="name" data-i18n="sort.name">name</option>
+          <option value="status" data-i18n="sort.status">status</option>
+          <option value="category" data-i18n="sort.category">category</option>
         </optgroup>
       </select>
     </div>
     <div id="device-list" class="space-y-2"></div>
-    <div id="empty-state" class="hidden bg-white dark:bg-slate-800 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-6 text-center text-slate-500 dark:text-slate-400 text-sm">
+    <div id="empty-state" class="hidden bg-white dark:bg-slate-800 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 p-6 text-center text-slate-500 dark:text-slate-400 text-sm" data-i18n="empty.none">
       No devices.
     </div>
   </section>
@@ -195,11 +195,11 @@
   <section>
     <details class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
       <summary class="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-center gap-2">
-        <span>Bridge info</span>
+        <span data-i18n="bridge.infoTitle">Bridge info</span>
         <span id="bridge-info-badge" class="hidden text-xs px-2 py-0.5 rounded-full border"></span>
       </summary>
       <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-700 dark:text-slate-300 space-y-1" id="templates-block">
-        <div class="text-slate-400 dark:text-slate-500">(waiting for bootstrap)</div>
+        <div class="text-slate-400 dark:text-slate-500" data-i18n="bridge.waiting">(waiting for bootstrap)</div>
       </div>
     </details>
   </section>
@@ -213,40 +213,40 @@
 <div id="wizard-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
   <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg flex flex-col">
     <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
-      <h2 class="text-base font-semibold">Connect to Tuya Cloud</h2>
+      <h2 class="text-base font-semibold" data-i18n="wizard.title">Connect to Tuya Cloud</h2>
       <button id="wizard-close" class="ml-auto text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl leading-none">×</button>
     </div>
     <div class="p-4 space-y-3" id="wizard-body">
       <div data-wizard-pane="idle" class="space-y-3">
         <p class="text-sm text-slate-700 dark:text-slate-300">
-          Sign in with the Smart Life or Tuya Smart app on your phone. Get your <strong>User Code</strong> from the app:
-          <span class="text-xs text-slate-500 dark:text-slate-400">Me → Settings → Account and Security.</span>
+          <span data-i18n-html="wizard.idleIntro">Sign in with the Smart Life or Tuya Smart app on your phone. Get your <strong>User Code</strong> from the app:</span>
+          <span class="text-xs text-slate-500 dark:text-slate-400" data-i18n="wizard.idlePath">Me → Settings → Account and Security.</span>
         </p>
         <label class="block">
-          <span class="text-xs text-slate-500 dark:text-slate-400">User code</span>
-          <input id="wizard-user-code" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" placeholder="e.g. XXXXXXXX">
+          <span class="text-xs text-slate-500 dark:text-slate-400" data-i18n="wizard.userCodeLabel">User code</span>
+          <input id="wizard-user-code" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" placeholder="e.g. XXXXXXXX" data-i18n-attr="placeholder:wizard.userCodePlaceholder">
         </label>
-        <p class="text-[11px] text-slate-500 dark:text-slate-400">
+        <p class="text-[11px] text-slate-500 dark:text-slate-400" data-i18n-html="wizard.credsNote">
           Credentials are cached in <code>tuyacreds.json</code> on the manager host. Future runs will reuse them automatically.
         </p>
         <div class="relative pt-1">
           <div class="flex items-center gap-2">
             <label class="inline-flex items-center gap-2 cursor-pointer select-none">
               <input id="wizard-scan-toggle" type="checkbox" class="rounded">
-              <span class="text-sm text-slate-700 dark:text-slate-300">Scan device IPs after fetch</span>
+              <span class="text-sm text-slate-700 dark:text-slate-300" data-i18n="wizard.scanToggle">Scan device IPs after fetch</span>
             </label>
-            <button id="wizard-scan-info" type="button" aria-label="About scan option" class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-slate-300 dark:border-slate-600 text-[10px] text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">?</button>
+            <button id="wizard-scan-info" type="button" aria-label="About scan option" data-i18n-attr="aria-label:wizard.scanInfoAria" class="w-4 h-4 inline-flex items-center justify-center rounded-full border border-slate-300 dark:border-slate-600 text-[10px] text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">?</button>
           </div>
           <!-- Popover. Anchored beneath the row; closed by clicking the icon
                again or anywhere outside it. Stays inside the modal so it
                disappears with the modal on cancel/done. -->
           <div id="wizard-scan-popover" class="hidden absolute left-0 right-0 mt-2 z-10 p-3 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed shadow-lg space-y-2">
-            <div>
+            <div data-i18n-html="wizard.scanOn">
               <strong class="text-slate-800 dark:text-slate-100">On</strong> —
               Best performance (bridge never scans the LAN) when every
               device has a pinned IP (manual static or DHCP reservation).
             </div>
-            <div>
+            <div data-i18n-html="wizard.scanOff">
               <strong class="text-slate-800 dark:text-slate-100">Off</strong> (default) —
               Normal case. Bridge handles IPs at runtime and catches DHCP
               changes automatically.
@@ -256,33 +256,33 @@
       </div>
 
       <div data-wizard-pane="requesting_qr" class="hidden text-center text-slate-600 dark:text-slate-300 py-6">
-        <div class="text-sm">Connecting to Tuya…</div>
-        <div class="text-[11px] text-slate-400 dark:text-slate-500 mt-1">Trying saved credentials first; will request a fresh QR if needed.</div>
+        <div class="text-sm" data-i18n="wizard.connecting">Connecting to Tuya…</div>
+        <div class="text-[11px] text-slate-400 dark:text-slate-500 mt-1" data-i18n="wizard.connectingHint">Trying saved credentials first; will request a fresh QR if needed.</div>
       </div>
 
       <div data-wizard-pane="awaiting_scan" class="hidden text-center space-y-3">
-        <img id="wizard-qr-image" src="" alt="QR code" class="mx-auto w-56 h-56 border border-slate-200 dark:border-slate-600 rounded bg-white">
-        <div class="text-sm text-slate-700 dark:text-slate-300">Open <strong>Smart Life</strong> or <strong>Tuya Smart</strong> and scan this QR.</div>
-        <div class="text-xs text-slate-500 dark:text-slate-400"><span class="pulse-dot">●</span> Waiting for scan…</div>
+        <img id="wizard-qr-image" src="" alt="QR code" data-i18n-attr="alt:wizard.qrAlt" class="mx-auto w-56 h-56 border border-slate-200 dark:border-slate-600 rounded bg-white">
+        <div class="text-sm text-slate-700 dark:text-slate-300" data-i18n-html="wizard.scanQr">Open <strong>Smart Life</strong> or <strong>Tuya Smart</strong> and scan this QR.</div>
+        <div class="text-xs text-slate-500 dark:text-slate-400"><span class="pulse-dot">●</span> <span data-i18n="wizard.waitingScan">Waiting for scan…</span></div>
       </div>
 
       <div data-wizard-pane="working" class="hidden text-center text-slate-700 dark:text-slate-300 py-4">
-        <div class="text-sm break-words" id="wizard-working-message">Logged in. Fetching devices…</div>
+        <div class="text-sm break-words" id="wizard-working-message" data-i18n="wizard.working">Logged in. Fetching devices…</div>
       </div>
 
       <div data-wizard-pane="done" class="hidden text-center text-emerald-700 dark:text-emerald-400 py-4 space-y-2">
         <div class="text-lg">✓</div>
-        <div class="text-sm break-words" id="wizard-done-message">Done.</div>
+        <div class="text-sm break-words" id="wizard-done-message" data-i18n="wizard.done">Done.</div>
       </div>
 
       <div data-wizard-pane="error" class="hidden text-center py-4 space-y-2">
         <div class="text-lg text-rose-600 dark:text-rose-400">✘</div>
-        <div class="text-sm text-rose-700 dark:text-rose-300 break-words" id="wizard-error-message">Failed.</div>
+        <div class="text-sm text-rose-700 dark:text-rose-300 break-words" id="wizard-error-message" data-i18n="wizard.failed">Failed.</div>
       </div>
     </div>
     <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
-      <button id="wizard-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200">Cancel</button>
-      <button id="wizard-start" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white disabled:opacity-50 disabled:cursor-not-allowed">Start</button>
+      <button id="wizard-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200" data-i18n="common.cancel">Cancel</button>
+      <button id="wizard-start" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white disabled:opacity-50 disabled:cursor-not-allowed" data-i18n="wizard.start">Start</button>
     </div>
   </div>
 </div>
@@ -291,7 +291,7 @@
 <div id="sync-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
   <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
     <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
-      <h2 class="text-base font-semibold" id="sync-modal-title">Sync changes</h2>
+      <h2 class="text-base font-semibold" id="sync-modal-title" data-i18n="sync.title">Sync changes</h2>
       <span class="text-xs text-slate-500 dark:text-slate-400" id="sync-modal-subtitle"></span>
       <button id="sync-modal-close" class="ml-auto text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl leading-none">×</button>
     </div>
@@ -302,10 +302,10 @@
     <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center gap-2">
       <span id="sync-modal-progress" class="text-xs text-slate-500 dark:text-slate-400"></span>
       <div class="ml-auto flex gap-2">
-        <button id="sync-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200">
+        <button id="sync-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200" data-i18n="common.cancel">
           Cancel
         </button>
-        <button id="sync-modal-apply" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white disabled:opacity-50 disabled:cursor-not-allowed">
+        <button id="sync-modal-apply" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white disabled:opacity-50 disabled:cursor-not-allowed" data-i18n="sync.apply">
           Apply
         </button>
       </div>
@@ -318,7 +318,7 @@
 <div id="plugins-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
   <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
     <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
-      <h2 class="text-base font-semibold">Plugins</h2>
+      <h2 class="text-base font-semibold" data-i18n="plugins.title">Plugins</h2>
       <span class="text-xs text-slate-500 dark:text-slate-400" id="plugins-modal-subtitle"></span>
       <button id="plugins-modal-close" class="ml-auto text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl leading-none">×</button>
     </div>
@@ -326,10 +326,10 @@
     <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center gap-2">
       <span id="plugins-modal-note" class="text-xs text-slate-500 dark:text-slate-400"></span>
       <div class="ml-auto flex gap-2">
-        <button id="plugins-modal-restart" class="hidden text-sm px-4 py-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white">
+        <button id="plugins-modal-restart" class="hidden text-sm px-4 py-1.5 rounded bg-amber-600 hover:bg-amber-700 text-white" data-i18n="plugins.restartNow">
           Restart now
         </button>
-        <button id="plugins-modal-done" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200">
+        <button id="plugins-modal-done" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200" data-i18n="common.done">
           Done
         </button>
       </div>
@@ -341,57 +341,57 @@
 <div id="device-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
   <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md flex flex-col">
     <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
-      <h2 class="text-base font-semibold" id="device-modal-title">Add device</h2>
+      <h2 class="text-base font-semibold" id="device-modal-title" data-i18n="device.addTitle">Add device</h2>
       <button id="device-modal-close" class="ml-auto text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl leading-none">×</button>
     </div>
     <div class="p-4 space-y-3 text-sm">
       <label class="block">
-        <span class="text-xs text-slate-500 dark:text-slate-400">Device ID</span>
+        <span class="text-xs text-slate-500 dark:text-slate-400" data-i18n="device.id">Device ID</span>
         <input id="device-form-id" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
       </label>
       <label class="block">
-        <span class="text-xs text-slate-500 dark:text-slate-400">Name</span>
+        <span class="text-xs text-slate-500 dark:text-slate-400" data-i18n="device.name">Name</span>
         <input id="device-form-name" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400">
       </label>
       <div class="flex items-center gap-4 text-sm">
-        <span class="text-xs text-slate-500 dark:text-slate-400">Type</span>
+        <span class="text-xs text-slate-500 dark:text-slate-400" data-i18n="device.type">Type</span>
         <label class="inline-flex items-center gap-1 cursor-pointer">
           <input id="device-form-type-wifi" type="radio" name="device-form-type" value="WiFi" checked>
-          <span>WiFi</span>
+          <span data-i18n="device.wifi">WiFi</span>
         </label>
         <label class="inline-flex items-center gap-1 cursor-pointer">
           <input id="device-form-type-sub" type="radio" name="device-form-type" value="SubDevice">
-          <span>Sub-device</span>
+          <span data-i18n="device.sub">Sub-device</span>
         </label>
       </div>
       <div id="device-form-block-wifi" class="space-y-2">
         <label class="block">
-          <span class="text-xs text-slate-500 dark:text-slate-400">IP</span>
-          <input id="device-form-ip" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" placeholder="leave blank for Auto (DHCP)">
+          <span class="text-xs text-slate-500 dark:text-slate-400" data-i18n="device.ip">IP</span>
+          <input id="device-form-ip" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" placeholder="leave blank for Auto (DHCP)" data-i18n-attr="placeholder:device.ipPlaceholder">
         </label>
         <label class="block">
-          <span class="text-xs text-slate-500 dark:text-slate-400">Key</span>
+          <span class="text-xs text-slate-500 dark:text-slate-400" data-i18n="device.key">Key</span>
           <input id="device-form-key" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
         </label>
         <label class="block">
-          <span class="text-xs text-slate-500 dark:text-slate-400">Version</span>
-          <input id="device-form-version" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" placeholder="e.g. 3.3 — leave blank for Auto">
+          <span class="text-xs text-slate-500 dark:text-slate-400" data-i18n="device.version">Version</span>
+          <input id="device-form-version" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" placeholder="e.g. 3.3 — leave blank for Auto" data-i18n-attr="placeholder:device.versionPlaceholder">
         </label>
       </div>
       <div id="device-form-block-sub" class="hidden space-y-2">
         <label class="block">
-          <span class="text-xs text-slate-500 dark:text-slate-400">CID (sub-device node id)</span>
+          <span class="text-xs text-slate-500 dark:text-slate-400" data-i18n="device.cid">CID (sub-device node id)</span>
           <input id="device-form-cid" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
         </label>
         <label class="block">
-          <span class="text-xs text-slate-500 dark:text-slate-400">Parent device id</span>
+          <span class="text-xs text-slate-500 dark:text-slate-400" data-i18n="device.parent">Parent device id</span>
           <input id="device-form-parent" type="text" class="mt-1 w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-400">
         </label>
       </div>
     </div>
     <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
-      <button id="device-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200">Cancel</button>
-      <button id="device-modal-submit" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white">Add</button>
+      <button id="device-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200" data-i18n="common.cancel">Cancel</button>
+      <button id="device-modal-submit" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white" data-i18n="device.add">Add</button>
     </div>
   </div>
 </div>
@@ -400,13 +400,13 @@
 <div id="confirm-modal" class="hidden fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-3">
   <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-sm flex flex-col">
     <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
-      <h2 class="text-base font-semibold" id="confirm-modal-title">Confirm</h2>
+      <h2 class="text-base font-semibold" id="confirm-modal-title" data-i18n="confirm.title">Confirm</h2>
       <button id="confirm-modal-close" class="ml-auto text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl leading-none">×</button>
     </div>
     <div class="p-4 text-sm text-slate-700 dark:text-slate-200" id="confirm-modal-body"></div>
     <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
-      <button id="confirm-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200">Cancel</button>
-      <button id="confirm-modal-ok" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white">OK</button>
+      <button id="confirm-modal-cancel" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200" data-i18n="common.cancel">Cancel</button>
+      <button id="confirm-modal-ok" class="text-sm px-4 py-1.5 rounded bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white" data-i18n="common.ok">OK</button>
     </div>
   </div>
 </div>

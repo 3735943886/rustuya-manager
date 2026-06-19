@@ -5,6 +5,7 @@
 import { state, ALL_CATEGORIES } from "./state.js";
 import { escapeHtml } from "./dom.js";
 import { deviceCard, missingParentCard, classifyDevice, primaryDevice } from "./cards.js";
+import { t } from "./i18n.js";
 
 const $list = document.getElementById("device-list");
 const $empty = document.getElementById("empty-state");
@@ -154,8 +155,7 @@ export function renderTemplates() {
     const warnMsg = snap.warnings && snap.warnings.embedded_bridge_aborted;
     note.textContent =
       "⚠ " +
-      ((warnMsg && warnMsg.message) ||
-        "--embed-bridge was requested, but an external bridge already owns this root — talking to the external one.");
+      ((warnMsg && warnMsg.message) || t("bridge.conflictNote"));
     $templates.appendChild(note);
   }
 }
@@ -167,15 +167,15 @@ function renderBridgeModeBadge(mode, conflict) {
   if (!el) return;
   el.classList.remove("hidden");
   if (conflict) {
-    el.textContent = "external ⚠";
+    el.textContent = `${t("bridge.modeExternal")} ⚠`;
     el.className =
       "text-xs px-2 py-0.5 rounded-full border bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700 font-medium";
   } else if (mode === "embedded") {
-    el.textContent = "embedded";
+    el.textContent = t("bridge.modeEmbedded");
     el.className =
       "text-xs px-2 py-0.5 rounded-full border bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700";
   } else {
-    el.textContent = "external";
+    el.textContent = t("bridge.modeExternal");
     el.className =
       "text-xs px-2 py-0.5 rounded-full border bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600";
   }
@@ -355,12 +355,12 @@ function describeEmptyReason() {
   // The most common case used to be hidden behind a snap-back; now the
   // empty-state owns that explanation.
   if (state.filters.size === 0) {
-    return "No category enabled — click a filter above (or “all”) to show devices.";
+    return t("empty.noCategory");
   }
   if (state.query) {
-    return `No devices match “${state.query}”.`;
+    return t("empty.noMatchQuery", { query: state.query });
   }
-  return "No devices match the active filter.";
+  return t("empty.noMatchFilter");
 }
 
 export function renderDevices() {

@@ -11,6 +11,7 @@ import { render } from "./render.js";
 import { toast } from "./dom.js";
 import { confirm } from "./modal-confirm.js";
 import { registerHeaderAction, renderActionsMenu } from "./header-actions.js";
+import { t } from "./i18n.js";
 
 let manifest = [];
 const stateSubs = new Set();
@@ -75,6 +76,10 @@ function pluginCtx(opts = {}) {
     },
     toast,
     confirm,
+    // Translate a key through the manager's i18n layer. Plugins can ship their
+    // own keys in the manager locale files (or fall back to the key itself);
+    // this gives plugin UIs the same language switch as the shell.
+    t,
     // Contribute a hamburger-menu item through the same registry the built-in
     // actions use. Plugins default into the 200+ order band (after the app's
     // own items) and should namespace their `id` (e.g. "myplugin-thing") to
@@ -145,20 +150,23 @@ async function mountPlugin(id) {
       // A page plugin's own tab id is its default header-action scope.
       await mod.mount(page.rootEl, pluginCtx({ pluginId: id, defaultScope: id }));
     } else {
-      page.rootEl.textContent = `plugin "${id}" has no mount() export`;
+      page.rootEl.textContent = t("plugins.noMount", { id });
     }
   } catch (e) {
     page.mounted = false;
-    page.rootEl.textContent = `failed to load plugin "${id}": ${e.message}`;
+    page.rootEl.textContent = t("plugins.loadFailed", { id, error: e.message });
     console.error("plugin mount failed", id, e);
   }
 }
 
-function addTab(page, label) {
+function addTab(page, label, i18nKey) {
   if ($tabs.querySelector(`button[data-page="${page}"]`)) return; // already present
   const btn = document.createElement("button");
   btn.type = "button";
   btn.dataset.page = page;
+  // Tag the manager's own "Devices" tab with its i18n key so a later language
+  // switch (applyDom) re-localizes it; plugin tabs carry their manifest label.
+  if (i18nKey) btn.dataset.i18n = i18nKey;
   btn.textContent = label;
   btn.className = tabClass(page === state.currentPage);
   btn.addEventListener("click", () => showPage(page));
@@ -185,11 +193,11 @@ function buildTabBarShell() {
   if (headerRow) {
     $tabs.className =
       "flex items-end gap-1 w-full -mb-3 pt-1 border-b border-slate-200 dark:border-slate-700";
-    addTab("devices", "Devices");
+    addTab("devices", t("tabs.devices"), "tabs.devices");
     headerRow.appendChild($tabs);
   } else {
     $tabs.className = "flex items-end gap-1 border-b border-slate-200 dark:border-slate-700 mb-1";
-    addTab("devices", "Devices");
+    addTab("devices", t("tabs.devices"), "tabs.devices");
     main.insertBefore($tabs, main.firstChild);
   }
 
@@ -260,10 +268,15 @@ export async function scanForPlugins() {
     if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
     data = await res.json();
   } catch (e) {
-    toast(`Plugin scan failed: ${e.message}`, "error");
+    toast(t("toast.pluginScanFailed", { error: e.message }), "error");
     return;
   }
   await applyManifest(data);
   const n = data.added ?? 0;
-  toast(n > 0 ? `Loaded ${n} new plugin${n === 1 ? "" : "s"}` : "No new plugins found", "ok");
+  toast(
+    n > 0
+      ? t(n === 1 ? "toast.pluginsLoadedOne" : "toast.pluginsLoaded", { count: n })
+      : t("toast.noNewPlugins"),
+    "ok",
+  );
 }

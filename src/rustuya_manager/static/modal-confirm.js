@@ -3,6 +3,7 @@
 // warrants a beat of friction (currently: device remove).
 
 import { escapeHtml } from "./dom.js";
+import { t } from "./i18n.js";
 
 const $modal = document.getElementById("confirm-modal");
 const $title = document.getElementById("confirm-modal-title");
@@ -22,7 +23,7 @@ function close(result) {
   }
 }
 
-export function confirm({ title = "Confirm", message = "", okLabel = "OK", danger = false } = {}) {
+export function confirm({ title = t("confirm.title"), message = "", okLabel = t("common.ok"), danger = false } = {}) {
   // Reject the previous outstanding prompt if any (the new one supersedes it).
   if (activeResolver) {
     const prev = activeResolver;

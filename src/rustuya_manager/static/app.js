@@ -26,6 +26,7 @@ import { initConfirmModal, confirm } from "./modal-confirm.js";
 import { initPluginsModal, openPluginsModal } from "./modal-plugins.js";
 import { initPluginHost, scanForPlugins } from "./plugins.js";
 import { registerHeaderAction, renderActionsMenu } from "./header-actions.js";
+import { initI18n, applyDom, t, getLocales, getLang, setLang } from "./i18n.js";
 
 // ── Cloud upload (drop zone + file picker) ─────────────────────────────────
 const $dropzone = document.getElementById("cloud-dropzone");
@@ -144,9 +145,9 @@ async function doRefresh(_ev, btn) {
     const snap = state.snapshot;
     const bridgeCount = Object.keys(snap.bridge).length;
     const cloudCount = Object.keys(snap.cloud).length;
-    toast(`Refreshed — bridge ${bridgeCount}, cloud ${cloudCount}`, "ok");
+    toast(t("toast.refreshed", { bridge: bridgeCount, cloud: cloudCount }), "ok");
   } catch (e) {
-    toast(`Refresh failed: ${e.message}`, "error");
+    toast(t("toast.refreshFailed", { error: e.message }), "error");
   } finally {
     btn.disabled = false;
   }
@@ -164,9 +165,10 @@ async function doScan(_ev, btn) {
   try {
     const result = await postScan();
     if (result.ok) {
-      toast(`Scan complete — ${result.count} device${result.count === 1 ? "" : "s"} seen on LAN`, "ok");
+      const unit = t(result.count === 1 ? "unit.device" : "unit.devices");
+      toast(t("toast.scanComplete", { count: result.count, unit }), "ok");
     } else {
-      toast(`Scan failed: ${result.error || "unknown"}`, "error");
+      toast(t("toast.scanFailed", { error: result.error || t("common.unknown") }), "error");
     }
   } finally {
     btn.disabled = false;
@@ -182,7 +184,7 @@ function doThemeToggle() {
 
 function doAddDevice() {
   if (!state.snapshot) {
-    toast("waiting for bridge state…", "error");
+    toast(t("toast.waitingBridge"), "error");
     return;
   }
   openAddModal();
@@ -194,11 +196,9 @@ function doAddDevice() {
 // resulting bridge/config clear + re-resolve, and an embedded bridge respawns.
 async function doReconfigure() {
   const ok = await confirm({
-    title: "Reconfigure bridge",
-    message:
-      "The bridge will re-read its configuration and briefly disconnect. " +
-      "Devices are not removed.",
-    okLabel: "Reconfigure",
+    title: t("confirm.reconfigureTitle"),
+    message: t("confirm.reconfigureMsg"),
+    okLabel: t("confirm.reconfigureOk"),
   });
   if (!ok) return;
   await publishCommand({ action: "reconfigure", id: "bridge" });
@@ -214,65 +214,87 @@ async function doLoadNewPlugins() {
 // and restarts an embedded bridge.
 async function doRestartManager() {
   const ok = await confirm({
-    title: "Restart manager",
-    message:
-      "Restart the manager process to fully reload plugins — this picks up " +
-      "edited or removed plugins, which 'Load new plugins' can't. The UI " +
-      "reconnects automatically in a few seconds; an embedded bridge restarts " +
-      "too, briefly disconnecting devices.",
-    okLabel: "Restart",
+    title: t("confirm.restartTitle"),
+    message: t("confirm.restartMsg"),
+    okLabel: t("confirm.restartOk"),
     danger: true,
   });
   if (!ok) return;
   try {
     const res = await fetch("/api/restart", { method: "POST" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    toast("Restarting manager… reconnecting shortly", "ok");
+    toast(t("toast.restarting"), "ok");
   } catch (e) {
-    toast(`Restart failed: ${e.message}`, "error");
+    toast(t("toast.restartFailed", { error: e.message }), "error");
   }
+}
+
+// Cycle to the next available locale, persist + re-localize everything. With
+// only en+ko this is a simple toggle; with more locales it walks the list.
+async function doLanguageCycle() {
+  const locales = getLocales();
+  if (locales.length < 2) return;
+  const next = locales[(locales.indexOf(getLang()) + 1) % locales.length];
+  await setLang(next);     // swaps the active dictionary + applyDom() over the static markup
+  applyI18n();             // re-localize the JS-rendered surfaces (menu labels, cards, …)
 }
 
 // Built-in items — ids/order preserved so the menu (and the e2e suite) looks and
 // behaves as before. `scope` is explicit so the manager's own actions split the
 // same way plugins' do: "devices" = manager's Devices view only; "global" = every
 // tab. Device-specific actions are manager-only; process/app-level ones global.
-registerHeaderAction({ id: "device-add-btn", iconHtml: "+", labelHtml: "Add device", scope: "devices", order: 10, onClick: doAddDevice });
-registerHeaderAction({ id: "wizard-header-btn", iconHtml: "☁", labelHtml: "Fetch from cloud", scope: "global", order: 20, onClick: openWizardModal });
-registerHeaderAction({ id: "scan-btn", iconHtml: "📡", labelHtml: "Scan LAN", scope: "devices", order: 30, onClick: doScan });
-registerHeaderAction({
-  id: "theme-btn",
-  iconHtml: `<span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span>`,
-  labelHtml: `<span class="dark:hidden">Dark mode</span><span class="hidden dark:inline">Light mode</span>`,
-  scope: "global",
-  order: 40,
-  onClick: doThemeToggle,
-});
-registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: "Refresh", scope: "devices", order: 50, onClick: doRefresh });
-registerHeaderAction({ id: "manage-plugins-btn", iconHtml: "🧩", labelHtml: "Manage plugins", scope: "global", order: 55, title: "Browse the catalog and install / update / remove plugins", onClick: openPluginsModal });
-registerHeaderAction({ id: "plugin-scan-btn", iconHtml: "📂", labelHtml: "Load new plugins", scope: "global", order: 60, title: "Load plugins dropped into the plugin directory by hand (no restart)", onClick: doLoadNewPlugins });
-registerHeaderAction({
-  id: "reconfigure-btn",
-  iconHtml: "🔧",
-  labelHtml: "Reconfigure bridge",
-  scope: "devices",
-  order: 100,
-  dividerBefore: true,
-  danger: true,
-  title: "Tell the bridge to re-read its config and restart",
-  onClick: doReconfigure,
-});
-registerHeaderAction({
-  id: "restart-btn",
-  iconHtml: "♻",
-  labelHtml: "Restart manager",
-  scope: "global",
-  order: 110,
-  danger: true,
-  title: "Restart the manager process to fully reload plugins",
-  onClick: doRestartManager,
-});
-renderActionsMenu();
+// Labels/titles come from the i18n layer; this is wrapped in a function so a
+// language switch can re-register the built-ins with freshly translated text.
+function registerBuiltinActions() {
+  registerHeaderAction({ id: "device-add-btn", iconHtml: "+", labelHtml: t("header.addDevice"), scope: "devices", order: 10, onClick: doAddDevice });
+  registerHeaderAction({ id: "wizard-header-btn", iconHtml: "☁", labelHtml: t("header.fetchCloud"), scope: "global", order: 20, onClick: openWizardModal });
+  registerHeaderAction({ id: "scan-btn", iconHtml: "📡", labelHtml: t("header.scanLan"), scope: "devices", order: 30, onClick: doScan });
+  registerHeaderAction({
+    id: "theme-btn",
+    iconHtml: `<span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span>`,
+    labelHtml: `<span class="dark:hidden">${t("header.darkMode")}</span><span class="hidden dark:inline">${t("header.lightMode")}</span>`,
+    scope: "global",
+    order: 40,
+    onClick: doThemeToggle,
+  });
+  registerHeaderAction({ id: "lang-btn", iconHtml: "🌐", labelHtml: `${t("header.language")} · ${t("lang.name")}`, scope: "global", order: 45, onClick: doLanguageCycle });
+  registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: t("header.refresh"), scope: "devices", order: 50, onClick: doRefresh });
+  registerHeaderAction({ id: "manage-plugins-btn", iconHtml: "🧩", labelHtml: t("header.managePlugins"), scope: "global", order: 55, title: t("header.managePluginsTitle"), onClick: openPluginsModal });
+  registerHeaderAction({ id: "plugin-scan-btn", iconHtml: "📂", labelHtml: t("header.loadPlugins"), scope: "global", order: 60, title: t("header.loadPluginsTitle"), onClick: doLoadNewPlugins });
+  registerHeaderAction({
+    id: "reconfigure-btn",
+    iconHtml: "🔧",
+    labelHtml: t("header.reconfigure"),
+    scope: "devices",
+    order: 100,
+    dividerBefore: true,
+    danger: true,
+    title: t("header.reconfigureTitle"),
+    onClick: doReconfigure,
+  });
+  registerHeaderAction({
+    id: "restart-btn",
+    iconHtml: "♻",
+    labelHtml: t("header.restart"),
+    scope: "global",
+    order: 110,
+    danger: true,
+    title: t("header.restartTitle"),
+    onClick: doRestartManager,
+  });
+}
+
+// Re-localize everything after a language switch. setLang() already ran
+// applyDom() over the static markup; here we refresh the surfaces built in JS:
+// re-register the header items with translated labels, re-render the menu, and
+// re-render the device view (cheap — the snapshot drives a full re-render
+// anyway). Plugin-contributed menu items keep their own labels.
+function applyI18n() {
+  applyDom();
+  registerBuiltinActions();
+  renderActionsMenu();
+  render();
+}
 
 // Re-render the "Xs ago" labels every 5 seconds without a full re-render.
 setInterval(() => {
@@ -290,13 +312,26 @@ $actionsMenu?.addEventListener("click", (e) => {
   if (e.target.closest("button")) $actionsMenu.removeAttribute("open");
 });
 
-// ── Init modals + open the socket ──────────────────────────────────────────
-initSyncModal();
-initWizardModal();
-initDeviceModal();
-initConfirmModal();
-initPluginsModal();
-connect();
-// Boot the plugin host. No-op (no tab bar, no DOM change) when no plugins
-// are installed — GET /api/plugins returns [].
-initPluginHost();
+// ── Boot ─────────────────────────────────────────────────────────────────
+// i18n loads first so every label / toast / render below resolves in the
+// chosen language; it's best-effort (falls back to English / raw keys) and
+// never blocks the boot. The static markup is already English, so the brief
+// moment before applyDom() runs is at worst an un-translated flash.
+async function boot() {
+  await initI18n();
+  applyDom();                  // localize the static markup in index.html
+  registerBuiltinActions();    // header items with translated labels
+  renderActionsMenu();
+
+  initSyncModal();
+  initWizardModal();
+  initDeviceModal();
+  initConfirmModal();
+  initPluginsModal();
+  connect();
+  // Boot the plugin host. No-op (no tab bar, no DOM change) when no plugins
+  // are installed — GET /api/plugins returns [].
+  initPluginHost();
+}
+
+boot();

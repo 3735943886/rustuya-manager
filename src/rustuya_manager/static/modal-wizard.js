@@ -5,6 +5,7 @@
 // Cached user_code lives in localStorage so repeat runs are one click.
 
 import { toast } from "./dom.js";
+import { t } from "./i18n.js";
 
 const $wizardOpen = document.getElementById("wizard-open-btn");
 const $wizardModal = document.getElementById("wizard-modal");
@@ -30,7 +31,7 @@ export async function openWizardModal() {
   showWizardPane("idle");
   $wizardModal.classList.remove("hidden");
   $wizardStart.disabled = false;
-  $wizardStart.textContent = "Start";
+  $wizardStart.textContent = t("wizard.start");
   // Prefill priority: server's tuyacreds.json (cross-browser) > localStorage
   // (this-browser fallback). The server read is best-effort and shouldn't
   // block the modal — open first, populate when the response lands.
@@ -69,7 +70,7 @@ function applyWizardSession(s) {
     case "idle":
       showWizardPane("idle");
       $wizardStart.disabled = false;
-      $wizardStart.textContent = "Start";
+      $wizardStart.textContent = t("wizard.start");
       break;
     case "requesting_qr":
       showWizardPane("requesting_qr");
@@ -83,13 +84,13 @@ function applyWizardSession(s) {
     case "logged_in":
     case "fetching":
       showWizardPane("working");
-      $wizardWorkingMsg.textContent = s.message || "Working…";
+      $wizardWorkingMsg.textContent = s.message || t("wizard.workingDefault");
       $wizardStart.disabled = true;
       break;
     case "done":
       showWizardPane("done");
-      $wizardDoneMsg.textContent = s.message || `Loaded ${s.devices_count} devices`;
-      $wizardStart.textContent = "Close";
+      $wizardDoneMsg.textContent = s.message || t("wizard.loadedDevices", { count: s.devices_count });
+      $wizardStart.textContent = t("wizard.close");
       $wizardStart.disabled = false;
       stopWizardPoll();
       // Surface any non-fatal warning the backend attached (e.g. "Bridge
@@ -107,9 +108,9 @@ function applyWizardSession(s) {
       break;
     case "error":
       showWizardPane("error");
-      $wizardErrorMsg.textContent = s.error || s.message || "Unknown error";
+      $wizardErrorMsg.textContent = s.error || s.message || t("wizard.unknownError");
       $wizardStart.disabled = false;
-      $wizardStart.textContent = "Try again";
+      $wizardStart.textContent = t("wizard.tryAgain");
       stopWizardPoll();
       break;
   }
@@ -143,7 +144,7 @@ async function startWizard() {
       applyWizardSession(session);
       startWizardPoll();
     } catch (e) {
-      $wizardErrorMsg.textContent = `network error: ${e.message}`;
+      $wizardErrorMsg.textContent = t("wizard.networkError", { error: e.message });
       showWizardPane("error");
     }
   }

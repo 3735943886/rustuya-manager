@@ -6,6 +6,7 @@
 import { state } from "./state.js";
 import { escapeHtml, toast } from "./dom.js";
 import { postCommand, buildCommandBody } from "./api.js";
+import { t } from "./i18n.js";
 
 const $modal = document.getElementById("sync-modal");
 const $modalBody = document.getElementById("sync-modal-body");
@@ -67,19 +68,19 @@ export function openSyncModal(scope) {
   if (!state.snapshot) return;
   currentPlan = buildPlan(scope);
   if (currentPlan.length === 0) {
-    toast("Nothing to sync in that category", "ok");
+    toast(t("toast.nothingToSync"), "ok");
     return;
   }
   const titles = {
-    all: "Apply all changes",
-    mismatch: "Update mismatches",
-    missing: "Add missing devices",
-    orphan: "Remove orphans",
+    all: t("sync.titleAll"),
+    mismatch: t("sync.titleMismatch"),
+    missing: t("sync.titleMissing"),
+    orphan: t("sync.titleOrphan"),
   };
-  $modalTitle.textContent = titles[scope] || "Sync changes";
+  $modalTitle.textContent = titles[scope] || t("sync.title");
   applying = false;
   $modalApply.disabled = false;
-  $modalApply.textContent = "Apply";
+  $modalApply.textContent = t("sync.apply");
   $modalCancel.disabled = false;
   $modalClose.disabled = false;
   $modalProgress.textContent = "";
@@ -100,9 +101,9 @@ function renderModal() {
   for (const item of currentPlan) groups[item.scope].push(item);
 
   const titles = {
-    mismatch: ["Update mismatched", "border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200"],
-    missing:  ["Add missing",       "border-sky-200 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/30 text-sky-800 dark:text-sky-200"],
-    orphan:   ["Remove orphans",    "border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/30 text-rose-800 dark:text-rose-200"],
+    mismatch: [t("sync.groupMismatch"), "border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200"],
+    missing:  [t("sync.groupMissing"), "border-sky-200 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/30 text-sky-800 dark:text-sky-200"],
+    orphan:   [t("sync.groupOrphan"), "border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/30 text-rose-800 dark:text-rose-200"],
   };
 
   for (const scope of ["mismatch", "missing", "orphan"]) {
@@ -123,7 +124,7 @@ function renderModal() {
         <span class="text-xs">${items.length}</span>
         <label class="ml-auto text-xs flex items-center gap-1 cursor-pointer">
           <input type="checkbox" data-toggle-all="${scope}"${allChecked ? " checked" : ""} class="rounded">
-          <span>select all</span>
+          <span>${escapeHtml(t("sync.selectAll"))}</span>
         </label>
       </div>
     `;
@@ -149,7 +150,7 @@ function renderModal() {
 // bridge expect — re-publishing "add" on a mismatch is how field drift is
 // reconciled, so we surface that intent as "update" to the user without
 // touching the wire payload.
-const ROW_LABELS = { mismatch: "update", missing: "add", orphan: "remove" };
+const ROW_LABELS = { mismatch: "sync.verbUpdate", missing: "sync.verbAdd", orphan: "sync.verbRemove" };
 
 function renderPlanRow(item, index) {
   const li = document.createElement("li");
@@ -167,7 +168,7 @@ function renderPlanRow(item, index) {
       <div class="flex flex-wrap items-center gap-2">
         <span class="font-mono text-xs break-all">${escapeHtml(item.id)}</span>
         <span class="text-xs text-slate-500 dark:text-slate-400 break-words">${escapeHtml(item.dev.name || "—")}</span>
-        <span class="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">${ROW_LABELS[item.scope]}</span>
+        <span class="text-[10px] uppercase tracking-wide text-slate-500 dark:text-slate-400">${escapeHtml(t(ROW_LABELS[item.scope]))}</span>
       </div>
       ${item.reasons.length ? `<div class="text-[11px] text-slate-600 dark:text-slate-300 mt-1 break-all">${item.reasons.map(escapeHtml).join("<br>")}</div>` : ""}
     </label>
@@ -178,7 +179,7 @@ function renderPlanRow(item, index) {
 
 function statusLabel(item) {
   switch (item.status) {
-    case "pending":     return '<span class="text-slate-400 dark:text-slate-500">pending</span>';
+    case "pending":     return `<span class="text-slate-400 dark:text-slate-500">${escapeHtml(t("sync.pending"))}</span>`;
     case "in_progress": return '<span class="text-slate-700 dark:text-slate-200">…</span>';
     case "ok":          return '<span class="text-emerald-600 dark:text-emerald-400">✓</span>';
     case "error":       return `<span class="text-rose-600 dark:text-rose-400" title="${escapeHtml(item.error || "")}">✘</span>`;
@@ -189,10 +190,13 @@ function statusLabel(item) {
 function updateApplyButton() {
   const selected = currentPlan?.filter((i) => i.checked).length ?? 0;
   $modalApply.textContent = applying
-    ? `Applying… (${currentPlan.filter((i) => i.status === "ok" || i.status === "error").length}/${selected})`
+    ? t("sync.applying", {
+        done: currentPlan.filter((i) => i.status === "ok" || i.status === "error").length,
+        total: selected,
+      })
     : selected === 0
-      ? "Apply"
-      : `Apply ${selected} change${selected === 1 ? "" : "s"}`;
+      ? t("sync.apply")
+      : t(selected === 1 ? "sync.applyOne" : "sync.applyMany", { count: selected });
   $modalApply.disabled = applying || selected === 0;
 }
 
@@ -228,12 +232,17 @@ async function applyBatch() {
 
   applying = false;
   $modalProgress.textContent = errCount === 0
-    ? `All ${okCount} change${okCount === 1 ? "" : "s"} applied`
-    : `${okCount} succeeded, ${errCount} failed`;
-  toast(errCount === 0 ? `Synced ${okCount}` : `Synced ${okCount}, failed ${errCount}`, errCount === 0 ? "ok" : "error");
+    ? t(okCount === 1 ? "sync.allAppliedOne" : "sync.allAppliedMany", { count: okCount })
+    : t("sync.partial", { ok: okCount, err: errCount });
+  toast(
+    errCount === 0
+      ? t("toast.synced", { count: okCount })
+      : t("toast.syncedFailed", { ok: okCount, err: errCount }),
+    errCount === 0 ? "ok" : "error",
+  );
   $modalCancel.disabled = false;
   $modalClose.disabled = false;
-  $modalApply.textContent = "Done";
+  $modalApply.textContent = t("common.done");
   $modalApply.disabled = false;
   // Repurpose the apply button to "close" once done — reverted below on reopen
   $modalApply.onclick = () => { closeSyncModal(); $modalApply.onclick = applyBatch; };

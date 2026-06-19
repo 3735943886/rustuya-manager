@@ -5,6 +5,7 @@
 //   - publishCommand: toasts on completion. Used by the per-card buttons.
 
 import { toast } from "./dom.js";
+import { t } from "./i18n.js";
 
 export function buildCommandBody(action, dev) {
   const body = { action, id: dev.id, name: dev.name };
@@ -38,9 +39,9 @@ export async function postCommand(body) {
 export async function publishCommand(body) {
   const result = await postCommand(body);
   if (result.ok) {
-    toast(`${body.action} → ${body.id || "bridge"} sent`, "ok");
+    toast(t("toast.commandSent", { action: body.action, id: body.id || "bridge" }), "ok");
   } else {
-    toast(`error: ${result.error}`, "error");
+    toast(t("toast.commandError", { error: result.error }), "error");
   }
   return result;
 }
@@ -105,14 +106,14 @@ export async function uploadCloud(file) {
       body: text,
     });
     if (!res.ok) {
-      toast(`upload failed: ${await res.text()}`, "error");
+      toast(t("toast.uploadFailed", { error: await res.text() }), "error");
       return;
     }
     const body = await res.json();
-    let msg = `loaded ${body.count} devices`;
-    if (body.persisted_to) msg += ` — saved to ${body.persisted_to}`;
+    let msg = t("toast.cloudLoaded", { count: body.count });
+    if (body.persisted_to) msg += t("toast.cloudSaved", { path: body.persisted_to });
     toast(msg, "ok");
   } catch (e) {
-    toast(`upload error: ${e.message}`, "error");
+    toast(t("toast.uploadError", { error: e.message }), "error");
   }
 }

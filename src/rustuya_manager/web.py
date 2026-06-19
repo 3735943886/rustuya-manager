@@ -713,6 +713,24 @@ def build_app(
         loop.call_later(app.state.restart_delay, app.state.restart_hook)
         return {"ok": True}
 
+    @app.get("/api/locales")
+    async def list_locales() -> dict[str, Any]:
+        """Enumerate the UI translation catalogs bundled under static/locales/.
+
+        The web client uses this to populate its language picker, so dropping a
+        new `xx.json` next to en.json/ko.json makes "xx" selectable with no code
+        change. English is always offered (and is the client's fallback layer),
+        even if the directory read fails for some reason."""
+        locales_dir = _STATIC_DIR / "locales"
+        codes = {"en"}
+        try:
+            for f in locales_dir.glob("*.json"):
+                if f.is_file():
+                    codes.add(f.stem)
+        except OSError as e:
+            logger.warning("could not enumerate locales dir %s: %s", locales_dir, e)
+        return {"available": sorted(codes), "default": "en"}
+
     # Static assets (JS, eventual CSS, icons). Tailwind comes from a CDN inside
     # the HTML, so there's no build step. Served no-cache (see _NoCacheStaticFiles
     # above) so every release revalidates instead of pulling stale ES-module

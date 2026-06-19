@@ -59,6 +59,27 @@ def test_theme_toggle_flips_html_dark_class(page: Page, server_url: str) -> None
     assert initial_dark != final_dark, "theme toggle did not flip the html class"
 
 
+def test_language_switch_localizes_and_persists(page: Page, server_url: str) -> None:
+    # The UI defaults to English (Chromium's locale is en-US). Switching via the
+    # hamburger's language item re-localizes the static markup live, and the
+    # choice survives a reload (persisted in localStorage).
+    page.goto(server_url)
+    all_tab = page.locator('#filter-tabs button[data-filter="all"] [data-i18n="filter.all"]')
+    expect(all_tab).to_have_text("all")
+
+    page.locator("#actions-menu > summary").click()
+    page.locator("#lang-btn").click()
+    # ko.json renders filter.all as "전체" — no reload needed (applyDom ran live).
+    expect(all_tab).to_have_text("전체")
+    expect(page.locator("html")).to_have_attribute("lang", "ko")
+
+    # The choice persists: a reload re-boots the app and reads localStorage.
+    page.reload()
+    expect(
+        page.locator('#filter-tabs button[data-filter="all"] [data-i18n="filter.all"]')
+    ).to_have_text("전체")
+
+
 def test_search_clear_button_visibility_tracks_input(page: Page, server_url: str) -> None:
     page.goto(server_url)
     search = page.locator("#search-input")

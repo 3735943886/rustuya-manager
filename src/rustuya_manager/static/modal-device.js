@@ -6,6 +6,7 @@
 import { state } from "./state.js";
 import { publishCommand } from "./api.js";
 import { toast } from "./dom.js";
+import { t } from "./i18n.js";
 
 const $modal = document.getElementById("device-modal");
 const $title = document.getElementById("device-modal-title");
@@ -76,8 +77,8 @@ function fillFromDevice(dev) {
 
 export function openAddModal() {
   editingId = null;
-  $title.textContent = "Add device";
-  $submit.textContent = "Add";
+  $title.textContent = t("device.addTitle");
+  $submit.textContent = t("device.add");
   clearForm();
   setLocked(false);
   $modal.classList.remove("hidden");
@@ -89,12 +90,12 @@ export function openEditModal(id) {
   if (!snap) return;
   const dev = snap.bridge[id] || snap.cloud[id];
   if (!dev) {
-    toast(`device ${id} not found`, "error");
+    toast(t("toast.deviceNotFound", { id }), "error");
     return;
   }
   editingId = id;
-  $title.textContent = "Edit device";
-  $submit.textContent = "Save";
+  $title.textContent = t("device.editTitle");
+  $submit.textContent = t("common.save");
   fillFromDevice(dev);
   setLocked(true);
   $modal.classList.remove("hidden");
@@ -119,7 +120,7 @@ async function submitForm() {
   const isWifi = $fTypeWifi.checked;
   const id = $fId.value.trim() || autoId();
   if (!id) {
-    toast("device id is required (or fill IP/CID for auto-id)", "error");
+    toast(t("toast.idRequired"), "error");
     return;
   }
   const name = $fName.value.trim();
@@ -136,7 +137,7 @@ async function submitForm() {
     const cid = $fCid.value.trim();
     const parent = $fParent.value.trim();
     if (!cid) {
-      toast("sub-device needs CID", "error");
+      toast(t("toast.subNeedsCid"), "error");
       return;
     }
     body.cid = cid;

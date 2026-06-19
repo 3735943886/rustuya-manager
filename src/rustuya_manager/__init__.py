@@ -9,4 +9,4 @@ manager's interpretation is byte-identical to the bridge's behavior.
 # The one place the version is defined. pyproject.toml resolves it at build
 # time via [tool.setuptools.dynamic]; web.py uses it for the FastAPI title;
 # check.sh reads it from the installed package. Bump here and nowhere else.
-__version__ = "0.1.0rc50"
+__version__ = "0.1.0rc51"

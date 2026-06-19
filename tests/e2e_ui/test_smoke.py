@@ -546,8 +546,8 @@ def test_header_action_scoping_manager_only_vs_plugin_tab(
     expect(page.locator("#reconfigure-btn")).to_be_visible()  # manager-only
     expect(page.locator("#restart-btn")).to_be_visible()  # global
     expect(page.locator("#tabby-action")).to_be_hidden()  # plugin-tab-scoped
-    # The manager language picker (collapsed submenu toggle) is scoped to the
-    # manager (devices) view.
+    # The language picker (collapsed submenu toggle) is global — the single
+    # app-wide language control, visible on every tab.
     expect(page.locator("#lang-toggle")).to_be_visible()
     page.locator("#actions-menu > summary").click()  # close menu
 
@@ -557,9 +557,9 @@ def test_header_action_scoping_manager_only_vs_plugin_tab(
     expect(page.locator("#tabby-action")).to_be_visible()  # now on its own tab
     expect(page.locator("#restart-btn")).to_be_visible()  # global everywhere
     expect(page.locator("#reconfigure-btn")).to_be_hidden()  # manager-only, hidden here
-    # The manager language picker stays out of plugin tabs — a plugin brings its
-    # own language menu (its own locale catalog), so the manager's doesn't apply.
-    expect(page.locator("#lang-toggle")).to_be_hidden()
+    # The language picker is global, so it stays visible on plugin tabs too — one
+    # switcher for the whole UI; plugins follow the shell's language.
+    expect(page.locator("#lang-toggle")).to_be_visible()
 
 
 def test_plugin_reload_menu_items_present(page: Page, server_url: str) -> None:

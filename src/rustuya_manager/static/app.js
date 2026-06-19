@@ -247,12 +247,12 @@ let langMenuOpen = false;
 // the hamburger short as languages grow. Re-runnable — it clears its own rows
 // (parent + options) each time so a collapse leaves nothing stale behind.
 //
-// Scope is "devices" (manager-only), NOT global: this selector switches the
-// *manager shell's* language. A plugin carries its own locale catalog and its
-// own language state, so it contributes its own language menu on its own tab
-// (via ctx.addHeaderAction, which defaults to that plugin's scope). Keeping the
-// manager picker off plugin tabs avoids two unrelated language switchers
-// fighting for the same menu real estate on a plugin page.
+// Scope is "global": this is the single app-wide language control, shown on
+// every tab (manager and plugin pages alike). Switching it sets the shell's
+// language and, via setLang() → langSubs, notifies plugins through
+// ctx.onLangChange; a plugin follows the shell's language (falling back to
+// English if it doesn't ship it) rather than carrying its own picker, so there
+// is one switcher for the whole UI, not one per tab.
 function registerLanguageActions() {
   unregisterHeaderActions((id) => id === "lang-toggle" || id.startsWith("lang-opt-"));
   const locales = getLocales();
@@ -263,7 +263,7 @@ function registerLanguageActions() {
     id: "lang-toggle",
     iconHtml: "🌐",
     labelHtml: `${t("header.language")}${caret}`,
-    scope: "devices",
+    scope: "global",
     order: 45,
     dividerBefore: true,
     keepOpen: true, // expanding/collapsing must not dismiss the dropdown
@@ -283,7 +283,7 @@ function registerLanguageActions() {
       iconHtml: "",
       // Indent under the toggle so the list reads as a nested group.
       labelHtml: `<span class="inline-flex items-center gap-1.5 pl-4">${check}${getLocaleName(code)}</span>`,
-      scope: "devices",
+      scope: "global",
       order: 45 + (i + 1) * 0.01,
       onClick: () => selectLanguage(code),
     });

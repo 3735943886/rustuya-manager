@@ -103,6 +103,9 @@ class TestHTTP:
             assert "en" in body["available"]
             assert "ko" in body["available"]
             assert body["available"] == sorted(body["available"])
+            # Native display names back the picker's per-language menu items.
+            assert body["names"]["en"] == "English"
+            assert body["names"]["ko"] == "한국어"
 
     def test_locale_files_served_and_parse(self):
         # Each advertised locale must be fetchable from /static/locales/ and be

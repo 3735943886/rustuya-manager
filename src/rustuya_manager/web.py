@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import os
 import sys
@@ -719,17 +720,28 @@ def build_app(
 
         The web client uses this to populate its language picker, so dropping a
         new `xx.json` next to en.json/ko.json makes "xx" selectable with no code
-        change. English is always offered (and is the client's fallback layer),
-        even if the directory read fails for some reason."""
+        change. Each locale's own `lang.name` key is surfaced in `names` so the
+        picker can show native names (English / 한국어 / 日本語) without the client
+        fetching every catalog. English is always offered (and is the client's
+        fallback layer), even if the directory read fails for some reason."""
         locales_dir = _STATIC_DIR / "locales"
         codes = {"en"}
+        names: dict[str, str] = {}
         try:
             for f in locales_dir.glob("*.json"):
-                if f.is_file():
-                    codes.add(f.stem)
+                if not f.is_file():
+                    continue
+                codes.add(f.stem)
+                try:
+                    data = json.loads(f.read_text(encoding="utf-8"))
+                    name = data.get("lang.name")
+                    if isinstance(name, str) and name:
+                        names[f.stem] = name
+                except (OSError, ValueError) as e:
+                    logger.warning("could not read lang.name from %s: %s", f, e)
         except OSError as e:
             logger.warning("could not enumerate locales dir %s: %s", locales_dir, e)
-        return {"available": sorted(codes), "default": "en"}
+        return {"available": sorted(codes), "default": "en", "names": names}
 
     # Static assets (JS, eventual CSS, icons). Tailwind comes from a CDN inside
     # the HTML, so there's no build step. Served no-cache (see _NoCacheStaticFiles

@@ -26,7 +26,7 @@ import { initConfirmModal, confirm } from "./modal-confirm.js";
 import { initPluginsModal, openPluginsModal } from "./modal-plugins.js";
 import { initPluginHost, scanForPlugins } from "./plugins.js";
 import { registerHeaderAction, renderActionsMenu } from "./header-actions.js";
-import { initI18n, applyDom, t, getLocales, getLang, setLang } from "./i18n.js";
+import { initI18n, applyDom, t, getLocales, getLocaleName, getLang, setLang } from "./i18n.js";
 
 // ── Cloud upload (drop zone + file picker) ─────────────────────────────────
 const $dropzone = document.getElementById("cloud-dropzone");
@@ -229,14 +229,36 @@ async function doRestartManager() {
   }
 }
 
-// Cycle to the next available locale, persist + re-localize everything. With
-// only en+ko this is a simple toggle; with more locales it walks the list.
-async function doLanguageCycle() {
+// Switch to a specific locale, then re-localize everything. No-op if it's
+// already active. setLang() swaps the active dictionary + applyDom()s the static
+// markup; applyI18n() then re-renders the JS-built surfaces (menu, cards, …).
+async function selectLanguage(code) {
+  if (code === getLang()) return;
+  await setLang(code);
+  applyI18n();
+}
+
+// Register one menu item per available locale so the user picks a language
+// directly (no cycling). The active one carries a ✓; each shows its native
+// name. Grouped under a divider; skipped entirely when only one locale exists
+// (nothing to choose). Fractional orders keep the group between the theme
+// toggle (40) and Refresh (50) no matter how many languages ship.
+function registerLanguageActions() {
   const locales = getLocales();
   if (locales.length < 2) return;
-  const next = locales[(locales.indexOf(getLang()) + 1) % locales.length];
-  await setLang(next);     // swaps the active dictionary + applyDom() over the static markup
-  applyI18n();             // re-localize the JS-rendered surfaces (menu labels, cards, …)
+  const active = getLang();
+  locales.forEach((code, i) => {
+    registerHeaderAction({
+      id: `lang-${code}`,
+      iconHtml: code === active ? "✓" : "",
+      labelHtml: getLocaleName(code),
+      scope: "global",
+      order: 45 + i * 0.01,
+      dividerBefore: i === 0,
+      title: t("header.language"),
+      onClick: () => selectLanguage(code),
+    });
+  });
 }
 
 // Built-in items — ids/order preserved so the menu (and the e2e suite) looks and
@@ -257,7 +279,7 @@ function registerBuiltinActions() {
     order: 40,
     onClick: doThemeToggle,
   });
-  registerHeaderAction({ id: "lang-btn", iconHtml: "🌐", labelHtml: `${t("header.language")} · ${t("lang.name")}`, scope: "global", order: 45, onClick: doLanguageCycle });
+  registerLanguageActions();
   registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: t("header.refresh"), scope: "devices", order: 50, onClick: doRefresh });
   registerHeaderAction({ id: "manage-plugins-btn", iconHtml: "🧩", labelHtml: t("header.managePlugins"), scope: "global", order: 55, title: t("header.managePluginsTitle"), onClick: openPluginsModal });
   registerHeaderAction({ id: "plugin-scan-btn", iconHtml: "📂", labelHtml: t("header.loadPlugins"), scope: "global", order: 60, title: t("header.loadPluginsTitle"), onClick: doLoadNewPlugins });

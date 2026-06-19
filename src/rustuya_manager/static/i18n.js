@@ -18,6 +18,9 @@ let messages = {};
 let current = "en";
 let available = ["en"];
 let defaultLang = "en";
+// code → native display name (each catalog's own `lang.name`), from /api/locales
+// so the picker can list "English / 한국어 / 日本語" without fetching every file.
+let names = {};
 
 // Subscribers notified after a language switch (see onLangChange) — lets a
 // plugin re-render its own JS-built UI, which applyDom() can't reach.
@@ -51,6 +54,7 @@ export async function initI18n() {
         available = data.available;
       }
       if (data.default) defaultLang = data.default;
+      if (data.names && typeof data.names === "object") names = data.names;
     }
   } catch {
     /* offline / endpoint missing — stay en-only */
@@ -62,6 +66,11 @@ export async function initI18n() {
   }
   current = pickInitialLang();
   messages = current === "en" ? fallback : await fetchLocale(current).catch(() => fallback);
+  // Backfill names for the two catalogs we loaded, in case the server didn't
+  // supply the map (older build). The picker still labels every advertised
+  // locale — any code with no known name falls back to the code itself.
+  if (!names.en && fallback["lang.name"]) names.en = fallback["lang.name"];
+  if (!names[current] && messages["lang.name"]) names[current] = messages["lang.name"];
   document.documentElement.lang = current;
 }
 
@@ -87,6 +96,12 @@ export function onLangChange(cb) {
 
 export function getLocales() {
   return available.slice();
+}
+
+// code → native display name. Falls back to the code for any locale whose
+// catalog didn't declare a `lang.name`.
+export function getLocaleName(code) {
+  return names[code] || code;
 }
 
 export function getLang() {

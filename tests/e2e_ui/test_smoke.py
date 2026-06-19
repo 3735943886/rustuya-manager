@@ -60,24 +60,32 @@ def test_theme_toggle_flips_html_dark_class(page: Page, server_url: str) -> None
 
 
 def test_language_switch_localizes_and_persists(page: Page, server_url: str) -> None:
-    # The UI defaults to English (Chromium's locale is en-US). Switching via the
-    # hamburger's language item re-localizes the static markup live, and the
-    # choice survives a reload (persisted in localStorage).
+    # The UI defaults to English (Chromium's locale is en-US). The hamburger
+    # lists each locale as its own item (id `lang-<code>`) with the active one
+    # checked; picking one re-localizes the static markup live, and the choice
+    # survives a reload (persisted in localStorage).
     page.goto(server_url)
     all_tab = page.locator('#filter-tabs button[data-filter="all"] [data-i18n="filter.all"]')
     expect(all_tab).to_have_text("all")
 
     page.locator("#actions-menu > summary").click()
-    page.locator("#lang-btn").click()
+    # Each language is a direct item; English (active) shows a ✓, Korean is its
+    # own entry labeled with its native name.
+    expect(page.locator("#lang-en")).to_contain_text("✓")
+    expect(page.locator("#lang-ko")).to_have_text("한국어")
+    page.locator("#lang-ko").click()
     # ko.json renders filter.all as "전체" — no reload needed (applyDom ran live).
     expect(all_tab).to_have_text("전체")
     expect(page.locator("html")).to_have_attribute("lang", "ko")
 
-    # The choice persists: a reload re-boots the app and reads localStorage.
+    # The choice persists: a reload re-boots the app and reads localStorage, and
+    # the checkmark now sits on the Korean entry.
     page.reload()
     expect(
         page.locator('#filter-tabs button[data-filter="all"] [data-i18n="filter.all"]')
     ).to_have_text("전체")
+    page.locator("#actions-menu > summary").click()
+    expect(page.locator("#lang-ko")).to_contain_text("✓")
 
 
 def test_search_clear_button_visibility_tracks_input(page: Page, server_url: str) -> None:

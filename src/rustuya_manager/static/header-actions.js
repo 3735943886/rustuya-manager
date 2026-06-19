@@ -44,6 +44,17 @@ export function registerHeaderAction(action) {
   else actions.push(next);
 }
 
+// Drop every registered action whose id matches `predicate`. Used by dynamic
+// groups (e.g. the collapsible language submenu) that need to remove their
+// items, not just replace them — registerHeaderAction can only add/replace by
+// id, so a collapse that registers fewer items would otherwise leave stale
+// rows behind. Does not re-render — call renderActionsMenu() after.
+export function unregisterHeaderActions(predicate) {
+  for (let i = actions.length - 1; i >= 0; i--) {
+    if (predicate(actions[i].id)) actions.splice(i, 1);
+  }
+}
+
 // (Re)render the dropdown inside #actions-menu from the registry.
 export function renderActionsMenu() {
   const menu = document.getElementById("actions-menu");
@@ -70,6 +81,9 @@ export function renderActionsMenu() {
       if (scope !== (state.currentPage || "devices")) btn.classList.add("hidden");
     }
     if (a.title) btn.title = a.title;
+    // `keepOpen` items (the language submenu toggle) don't dismiss the dropdown
+    // on click — the dismiss handler in app.js checks for this marker.
+    if (a.keepOpen) btn.dataset.keepOpen = "";
     btn.innerHTML =
       `<span class="w-5 text-center">${a.iconHtml || ""}</span>` +
       `<span>${a.labelHtml || ""}</span>`;

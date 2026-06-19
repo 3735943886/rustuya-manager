@@ -25,7 +25,7 @@ import { initDeviceModal, openAddModal } from "./modal-device.js";
 import { initConfirmModal, confirm } from "./modal-confirm.js";
 import { initPluginsModal, openPluginsModal } from "./modal-plugins.js";
 import { initPluginHost, scanForPlugins } from "./plugins.js";
-import { registerHeaderAction, renderActionsMenu } from "./header-actions.js";
+import { registerHeaderAction, unregisterHeaderActions, renderActionsMenu } from "./header-actions.js";
 import { initI18n, applyDom, t, getLocales, getLocaleName, getLang, setLang } from "./i18n.js";
 
 // ── Cloud upload (drop zone + file picker) ─────────────────────────────────
@@ -238,24 +238,53 @@ async function selectLanguage(code) {
   applyI18n();
 }
 
-// Register one menu item per available locale so the user picks a language
-// directly (no cycling). The active one carries a ✓; each shows its native
-// name. Grouped under a divider; skipped entirely when only one locale exists
-// (nothing to choose). Fractional orders keep the group between the theme
-// toggle (40) and Refresh (50) no matter how many languages ship.
+// Collapsed by default so the menu stays one row tall no matter how many
+// locales ship; the toggle expands an indented, checkmarked sub-list in place.
+let langMenuOpen = false;
+
+// Render the language picker as a collapsible submenu: a single "🌐 Language ▸"
+// row that expands an indented list of locales (active one ✓) on click. Keeps
+// the hamburger short as languages grow. Re-runnable — it clears its own rows
+// (parent + options) each time so a collapse leaves nothing stale behind.
+//
+// Scope is "devices" (manager-only), NOT global: this selector switches the
+// *manager shell's* language. A plugin carries its own locale catalog and its
+// own language state, so it contributes its own language menu on its own tab
+// (via ctx.addHeaderAction, which defaults to that plugin's scope). Keeping the
+// manager picker off plugin tabs avoids two unrelated language switchers
+// fighting for the same menu real estate on a plugin page.
 function registerLanguageActions() {
+  unregisterHeaderActions((id) => id === "lang-toggle" || id.startsWith("lang-opt-"));
   const locales = getLocales();
-  if (locales.length < 2) return;
+  if (locales.length < 2) return; // nothing to choose → no picker at all
+
+  const caret = `<span class="ml-1 text-xs text-slate-400 dark:text-slate-500">${langMenuOpen ? "▾" : "▸"}</span>`;
+  registerHeaderAction({
+    id: "lang-toggle",
+    iconHtml: "🌐",
+    labelHtml: `${t("header.language")}${caret}`,
+    scope: "devices",
+    order: 45,
+    dividerBefore: true,
+    keepOpen: true, // expanding/collapsing must not dismiss the dropdown
+    onClick: () => {
+      langMenuOpen = !langMenuOpen;
+      registerLanguageActions();
+      renderActionsMenu();
+    },
+  });
+  if (!langMenuOpen) return;
+
   const active = getLang();
   locales.forEach((code, i) => {
+    const check = `<span class="w-3 text-center text-emerald-600 dark:text-emerald-400">${code === active ? "✓" : ""}</span>`;
     registerHeaderAction({
-      id: `lang-${code}`,
-      iconHtml: code === active ? "✓" : "",
-      labelHtml: getLocaleName(code),
-      scope: "global",
-      order: 45 + i * 0.01,
-      dividerBefore: i === 0,
-      title: t("header.language"),
+      id: `lang-opt-${code}`,
+      iconHtml: "",
+      // Indent under the toggle so the list reads as a nested group.
+      labelHtml: `<span class="inline-flex items-center gap-1.5 pl-4">${check}${getLocaleName(code)}</span>`,
+      scope: "devices",
+      order: 45 + (i + 1) * 0.01,
       onClick: () => selectLanguage(code),
     });
   });
@@ -328,10 +357,12 @@ setInterval(() => {
 // ── Actions menu dismiss ─────────────────────────────────────────────────────
 // Buttons are wired per-item by the registry; here we just close the dropdown
 // after any item click (delegated, so it covers registry- and plugin-added
-// items alike).
+// items alike). The language submenu toggle opts out via [data-keep-open] so
+// expanding/collapsing the locale list doesn't dismiss the whole menu.
 const $actionsMenu = document.getElementById("actions-menu");
 $actionsMenu?.addEventListener("click", (e) => {
-  if (e.target.closest("button")) $actionsMenu.removeAttribute("open");
+  const btn = e.target.closest("button");
+  if (btn && !btn.closest("[data-keep-open]")) $actionsMenu.removeAttribute("open");
 });
 
 // ── Boot ─────────────────────────────────────────────────────────────────

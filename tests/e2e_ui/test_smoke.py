@@ -69,23 +69,28 @@ def test_language_switch_localizes_and_persists(page: Page, server_url: str) -> 
     expect(all_tab).to_have_text("all")
 
     page.locator("#actions-menu > summary").click()
-    # Each language is a direct item; English (active) shows a ✓, Korean is its
-    # own entry labeled with its native name.
-    expect(page.locator("#lang-en")).to_contain_text("✓")
-    expect(page.locator("#lang-ko")).to_have_text("한국어")
-    page.locator("#lang-ko").click()
+    # The picker is a collapsed submenu — one "Language" row by default; the
+    # per-locale options are hidden until it's expanded.
+    expect(page.locator("#lang-toggle")).to_be_visible()
+    expect(page.locator("#lang-opt-ko")).to_have_count(0)
+    # Expanding does NOT dismiss the dropdown (keepOpen), and reveals the list.
+    page.locator("#lang-toggle").click()
+    expect(page.locator("#lang-opt-en")).to_contain_text("✓")  # active
+    expect(page.locator("#lang-opt-ko")).to_have_text("한국어")
+    page.locator("#lang-opt-ko").click()
     # ko.json renders filter.all as "전체" — no reload needed (applyDom ran live).
     expect(all_tab).to_have_text("전체")
     expect(page.locator("html")).to_have_attribute("lang", "ko")
 
     # The choice persists: a reload re-boots the app and reads localStorage, and
-    # the checkmark now sits on the Korean entry.
+    # the checkmark now sits on the Korean entry once the submenu is reopened.
     page.reload()
     expect(
         page.locator('#filter-tabs button[data-filter="all"] [data-i18n="filter.all"]')
     ).to_have_text("전체")
     page.locator("#actions-menu > summary").click()
-    expect(page.locator("#lang-ko")).to_contain_text("✓")
+    page.locator("#lang-toggle").click()
+    expect(page.locator("#lang-opt-ko")).to_contain_text("✓")
 
 
 def test_search_clear_button_visibility_tracks_input(page: Page, server_url: str) -> None:
@@ -541,6 +546,9 @@ def test_header_action_scoping_manager_only_vs_plugin_tab(
     expect(page.locator("#reconfigure-btn")).to_be_visible()  # manager-only
     expect(page.locator("#restart-btn")).to_be_visible()  # global
     expect(page.locator("#tabby-action")).to_be_hidden()  # plugin-tab-scoped
+    # The manager language picker (collapsed submenu toggle) is scoped to the
+    # manager (devices) view.
+    expect(page.locator("#lang-toggle")).to_be_visible()
     page.locator("#actions-menu > summary").click()  # close menu
 
     # Switch to the plugin's tab.
@@ -549,6 +557,9 @@ def test_header_action_scoping_manager_only_vs_plugin_tab(
     expect(page.locator("#tabby-action")).to_be_visible()  # now on its own tab
     expect(page.locator("#restart-btn")).to_be_visible()  # global everywhere
     expect(page.locator("#reconfigure-btn")).to_be_hidden()  # manager-only, hidden here
+    # The manager language picker stays out of plugin tabs — a plugin brings its
+    # own language menu (its own locale catalog), so the manager's doesn't apply.
+    expect(page.locator("#lang-toggle")).to_be_hidden()
 
 
 def test_plugin_reload_menu_items_present(page: Page, server_url: str) -> None:

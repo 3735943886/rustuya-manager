@@ -35,10 +35,12 @@ no behavioural change at all.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import importlib.metadata
 import logging
 import sys
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -66,6 +68,11 @@ MqttHandler = Callable[[str, str, bool], Awaitable[None]]
 # A DP watcher: async (device_id, dps, origin) -> None. `dps` is the decoded
 # {dp: value} delta from one device event; `origin` is "device".
 DpWatcher = Callable[[str, "dict[str, Any]", str], Awaitable[None]]
+
+# A plugin service: a zero-arg factory returning the long-lived coroutine the
+# manager supervises (started after bootstrap, crash-backoff restart, cancelled
+# on shutdown). In-process async only.
+ServiceFactory = Callable[[], Awaitable[None]]
 
 # Credential fields stripped from the bridge config before it's handed to a
 # plugin via ctx.bridge_config(). Matches the bridge's own skip_serializing set
@@ -139,6 +146,10 @@ class PluginRegistry:
         # plugin can contribute always-visible UI — e.g. a header menu item via
         # ctx.addHeaderAction — without the user ever opening its tab.
         self.init_scripts: list[dict[str, Any]] = []
+        # Long-lived async services (ctx.add_service). Zero-arg coroutine
+        # factories the manager supervises over the app's lifespan — see
+        # `ServiceSupervisor`.
+        self.services: list[ServiceFactory] = []
 
 
 class StateNamespace:
@@ -295,6 +306,22 @@ class PluginContext:
         `set` action. The same path the web UI uses."""
         await self.bridge_client.set_device_dp(device_id, str(dp), value)
 
+    def add_service(self, coro_factory: ServiceFactory) -> None:
+        """Register a long-lived in-process async daemon (api_version >= 2).
+
+        `coro_factory` is a zero-arg callable returning the coroutine the
+        manager supervises: started after bootstrap, restarted with crash
+        backoff (rate-limited), and cancelled + awaited on shutdown so nothing
+        is orphaned. The coroutine uses the same DP bus (`watch_dps` /
+        `set_device_dp` / `derived_dp`).
+
+        In-process async ONLY — for blocking work use `asyncio.to_thread`
+        inside the coroutine. The manager re-execs on plugin/config changes, so
+        a service restarts cleanly there (state that must persist → write it to
+        disk). A service whose external peers cannot tolerate that restart
+        belongs in an *independent* process talking MQTT, not here."""
+        self._registry.services.append(coro_factory)
+
     def state_namespace(self, name: str) -> StateNamespace:
         return StateNamespace(self._state, name)
 
@@ -327,6 +354,81 @@ class PluginContext:
         is the route for always-visible plugin UI — the item shows up without the
         user opening the plugin's tab."""
         self._registry.init_scripts.append({"id": id, "static_dir": static_dir, "entry": entry})
+
+
+class ServiceSupervisor:
+    """Supervises plugin services (`ctx.add_service`) over the app's lifespan.
+
+    Each service is a long-lived coroutine. `start()` spawns one supervised
+    task per service; a crash is logged and the service is respawned after a
+    backoff, rate-limited so a crash-looping service can't spin. A clean return
+    means the service finished — it is not respawned. `stop()` cancels and
+    awaits every task, so none is orphaned (invariant: no orphan service). The
+    shape mirrors the embedded-bridge supervisor; it is driven by the web app's
+    lifespan (start on startup, stop on shutdown). Services thus restart with
+    the manager on a re-exec — the same contract as the embedded bridge.
+    """
+
+    _CRASH_BACKOFF_SEC = 5.0
+    _MAX_RESTARTS_IN_WINDOW = 5
+    _WINDOW_SEC = 30.0
+
+    def __init__(self, registry: PluginRegistry) -> None:
+        self._registry = registry
+        self._tasks: list[asyncio.Task[None]] = []
+        self._stop = asyncio.Event()
+
+    async def start(self) -> None:
+        """Spawn a supervised task per registered service. Call once per
+        lifespan (paired with `stop()`)."""
+        for idx, factory in enumerate(self._registry.services):
+            self._tasks.append(asyncio.create_task(self._supervise(idx, factory)))
+        if self._tasks:
+            logger.info("started %d plugin service(s)", len(self._tasks))
+
+    async def _supervise(self, idx: int, factory: ServiceFactory) -> None:
+        exits: list[float] = []
+        while not self._stop.is_set():
+            try:
+                await factory()
+            except asyncio.CancelledError:
+                raise  # shutdown — let the task end as cancelled
+            except Exception:  # noqa: BLE001 - any failure flows through respawn
+                logger.exception("plugin service #%d crashed", idx)
+            else:
+                logger.info("plugin service #%d returned cleanly; not respawning", idx)
+                return
+            if self._stop.is_set():
+                return
+            now = time.monotonic()
+            exits = [t for t in exits if now - t < self._WINDOW_SEC]
+            exits.append(now)
+            if len(exits) > self._MAX_RESTARTS_IN_WINDOW:
+                logger.error(
+                    "plugin service #%d crashed %d times in %.0fs — giving up",
+                    idx,
+                    len(exits),
+                    self._WINDOW_SEC,
+                )
+                return
+            logger.warning(
+                "plugin service #%d will respawn in %.1fs", idx, self._CRASH_BACKOFF_SEC
+            )
+            # Resolve early if stop() is signalled during the backoff.
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=self._CRASH_BACKOFF_SEC)
+                return
+            except asyncio.TimeoutError:
+                pass
+
+    async def stop(self) -> None:
+        """Cancel and await every service task. Idempotent."""
+        self._stop.set()
+        for t in self._tasks:
+            t.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks = []
 
 
 def _discover_dir_plugins(

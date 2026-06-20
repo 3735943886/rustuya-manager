@@ -10,6 +10,8 @@ Two layers:
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
@@ -20,6 +22,7 @@ from rustuya_manager.plugins import (
     PLUGIN_API_VERSION,
     PluginContext,
     PluginRegistry,
+    ServiceSupervisor,
     load_plugins,
     topic_matches,
 )
@@ -513,3 +516,103 @@ async def test_reactive_dp_bus_wires_and_dispatches():
     assert seen == [("D1", {"1": True}, "device")]
 
     assert isinstance(ctx.derived_dp("D1", "99"), DerivedDp)
+
+
+# ── in-process service supervision (ctx.add_service, api_version >= 2) ────
+def test_add_service_wires_supervisor_in_app():
+    """ctx.add_service appends to registry.services, and build_app exposes a
+    ServiceSupervisor over that registry on app.state — not yet started (a bare
+    build_app doesn't run the lifespan)."""
+    state = State()
+    client = _make_client(state)
+    started: list = []
+
+    def reg(ctx):
+        async def factory():
+            started.append("ran")
+            await asyncio.Event().wait()
+
+        ctx.add_service(factory)
+
+    app = build_app(state, client, plugins=[reg])
+    sup = app.state.service_supervisor
+    assert isinstance(sup, ServiceSupervisor)
+    assert len(sup._registry.services) == 1
+    assert started == []  # lifespan not run → not started
+
+
+async def test_service_supervisor_starts_runs_then_stops_clean():
+    reg = PluginRegistry()
+    ran = asyncio.Event()
+    release = asyncio.Event()
+
+    async def factory():
+        ran.set()
+        await release.wait()  # block until shutdown cancels us
+
+    reg.services.append(factory)
+    sup = ServiceSupervisor(reg)
+    await sup.start()
+    await asyncio.wait_for(ran.wait(), 1.0)  # it actually ran
+    assert len(sup._tasks) == 1
+    await sup.stop()  # cancels + awaits
+    assert sup._tasks == []  # invariant: no orphan service
+
+
+async def test_service_supervisor_respawns_on_crash():
+    reg = PluginRegistry()
+    calls: list = []
+
+    async def factory():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("boom")  # crash once
+        await asyncio.Event().wait()  # then run forever
+
+    reg.services.append(factory)
+    sup = ServiceSupervisor(reg)
+    sup._CRASH_BACKOFF_SEC = 0.01  # don't wait the real 5s
+    await sup.start()
+    for _ in range(200):
+        if len(calls) >= 2:
+            break
+        await asyncio.sleep(0.01)
+    assert len(calls) >= 2  # respawned after the crash
+    await sup.stop()
+
+
+async def test_service_supervisor_clean_return_not_respawned():
+    reg = PluginRegistry()
+    calls: list = []
+
+    async def factory():
+        calls.append(1)  # returns immediately
+
+    reg.services.append(factory)
+    sup = ServiceSupervisor(reg)
+    sup._CRASH_BACKOFF_SEC = 0.01
+    await sup.start()
+    await asyncio.sleep(0.05)
+    assert calls == [1]  # ran once, a clean return is not respawned
+    await sup.stop()
+
+
+async def test_service_supervisor_rate_limit_gives_up():
+    reg = PluginRegistry()
+    calls: list = []
+
+    async def factory():
+        calls.append(1)
+        raise RuntimeError("always")  # always crash
+
+    reg.services.append(factory)
+    sup = ServiceSupervisor(reg)
+    sup._CRASH_BACKOFF_SEC = 0.001
+    await sup.start()
+    await asyncio.sleep(0.2)
+    n = len(calls)
+    await asyncio.sleep(0.1)
+    # Gave up after the rate limit; no longer respawning.
+    assert len(calls) == n
+    assert 2 <= n <= sup._MAX_RESTARTS_IN_WINDOW + 1
+    await sup.stop()

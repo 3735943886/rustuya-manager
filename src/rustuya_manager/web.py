@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -32,7 +33,13 @@ from . import catalog as plugin_catalog
 from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
 from .models import Device
 from .mqtt import BridgeClient
-from .plugins import PLUGIN_API_VERSION, PluginContext, PluginRegistry, discover_plugins
+from .plugins import (
+    PLUGIN_API_VERSION,
+    PluginContext,
+    PluginRegistry,
+    ServiceSupervisor,
+    discover_plugins,
+)
 from .scan import LanScanCoordinator
 from .state import State
 from .wizard import WizardManager
@@ -225,7 +232,22 @@ def build_app(
     plugin_dirs: list[str] | None = None,
     managed_plugin_dir: str | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="rustuya-manager", version=__version__)
+    @contextlib.asynccontextmanager
+    async def _lifespan(app: FastAPI) -> Any:
+        # Plugin services (ctx.add_service) start after the app comes up — by
+        # which point cli.run has already awaited bootstrap — and are cancelled
+        # + awaited on shutdown so none is orphaned. A no-op when no plugin
+        # registered a service, so a plugin-less manager is unaffected.
+        supervisor = getattr(app.state, "service_supervisor", None)
+        if supervisor is not None:
+            await supervisor.start()
+        try:
+            yield
+        finally:
+            if supervisor is not None:
+                await supervisor.stop()
+
+    app = FastAPI(title="rustuya-manager", version=__version__, lifespan=_lifespan)
     if auth:
         if ":" not in auth:
             raise ValueError("--auth must be in 'user:password' form")
@@ -516,6 +538,12 @@ def build_app(
         )
 
     _apply_new_plugins(_discover(register_callables=plugins))
+
+    # Supervisor for any long-lived plugin services (ctx.add_service). Created
+    # now that build-time plugins have registered; started/stopped by the
+    # lifespan above. Holds the registry by reference, so it reads `services`
+    # at startup time (covering anything the initial apply registered).
+    app.state.service_supervisor = ServiceSupervisor(registry)
 
     def _plugin_manifest() -> dict[str, Any]:
         return {

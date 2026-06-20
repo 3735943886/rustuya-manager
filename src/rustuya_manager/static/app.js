@@ -369,10 +369,21 @@ $actionsMenu?.addEventListener("click", (e) => {
 // it when the user clicks anywhere outside it or presses Escape. The summary
 // (the hamburger button itself) lives inside #actions-menu, so contains() keeps
 // the document handler from fighting the native open-toggle on that click.
-document.addEventListener("click", (e) => {
-  if ($actionsMenu?.hasAttribute("open") && !$actionsMenu.contains(e.target))
-    $actionsMenu.removeAttribute("open");
-});
+//
+// Runs in the CAPTURE phase, on purpose: an in-menu click can re-render the
+// panel (e.g. expanding the language submenu calls renderActionsMenu()), which
+// detaches the clicked button before the bubble phase reaches us — at which
+// point contains() would wrongly report it as "outside" and close the menu.
+// Capturing evaluates contains() against the still-attached original target,
+// before any such re-render.
+document.addEventListener(
+  "click",
+  (e) => {
+    if ($actionsMenu?.hasAttribute("open") && !$actionsMenu.contains(e.target))
+      $actionsMenu.removeAttribute("open");
+  },
+  true,
+);
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") $actionsMenu?.removeAttribute("open");
 });

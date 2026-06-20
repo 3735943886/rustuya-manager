@@ -59,6 +59,33 @@ def test_theme_toggle_flips_html_dark_class(page: Page, server_url: str) -> None
     assert initial_dark != final_dark, "theme toggle did not flip the html class"
 
 
+def test_actions_menu_dismisses_on_outside_click_and_escape(page: Page, server_url: str) -> None:
+    # The hamburger #actions-menu is a transient popover: it must close when the
+    # user clicks anywhere outside it or presses Escape, but stay open while they
+    # interact inside it (the language submenu re-renders the panel on expand —
+    # the dismiss handler must not mistake that for an outside click).
+    page.goto(server_url)
+    menu = page.locator("#actions-menu")
+
+    # Outside click dismisses.
+    menu.locator("> summary").click()
+    expect(menu).to_have_attribute("open", "")
+    page.locator("body").click(position={"x": 5, "y": 5})
+    expect(menu).not_to_have_attribute("open", "")
+
+    # Escape dismisses.
+    menu.locator("> summary").click()
+    expect(menu).to_have_attribute("open", "")
+    page.keyboard.press("Escape")
+    expect(menu).not_to_have_attribute("open", "")
+
+    # Expanding the language submenu (which re-renders the panel) keeps it open.
+    menu.locator("> summary").click()
+    page.locator("#lang-toggle").click()
+    expect(menu).to_have_attribute("open", "")
+    expect(page.locator("#lang-opt-ko")).to_be_visible()
+
+
 def test_language_switch_localizes_and_persists(page: Page, server_url: str) -> None:
     # The UI defaults to English (Chromium's locale is en-US). The hamburger
     # lists each locale as its own item (id `lang-<code>`) with the active one

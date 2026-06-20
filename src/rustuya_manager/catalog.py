@@ -51,6 +51,7 @@ import io
 import json
 import logging
 import os
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -69,6 +70,21 @@ MAX_ARTIFACT_BYTES = 50 * 1024 * 1024
 
 # How long to wait on the download before giving up.
 DOWNLOAD_TIMEOUT_S = 30
+
+# Live catalog source: a single fixed, trusted URL — the manager's own repo on
+# master. The bundled `data/plugins.json` is the offline seed/fallback; a manual
+# "check for updates" fetches this and caches it, so bumping a plugin's version
+# (push the catalog JSON) shows up without releasing a whole new manager. NOT
+# user-configurable — same no-arbitrary-URL trust model as the bundled catalog;
+# the per-entry sha256 still guards every downloaded artifact.
+CATALOG_URL = (
+    "https://raw.githubusercontent.com/3735943886/rustuya-manager/"
+    "master/src/rustuya_manager/data/plugins.json"
+)
+
+# Cached copy of the last successful remote catalog fetch, in the managed dir.
+# Dot-prefixed so plugin discovery skips it (like the ledger).
+CATALOG_CACHE_NAME = ".catalog-cache.json"
 
 
 class CatalogError(Exception):
@@ -99,6 +115,93 @@ def load_bundled_catalog() -> list[dict[str, Any]]:
         return []
     plugins = doc.get("plugins", []) if isinstance(doc, dict) else []
     return [p for p in plugins if isinstance(p, dict) and p.get("id")]
+
+
+def _parse_catalog_doc(raw: str) -> list[dict[str, Any]]:
+    """Parse a catalog JSON document into validated, id-bearing entries.
+
+    Raises `CatalogError` on bad JSON or an empty/unusable shape so a refresh
+    can report the failure (and keep serving the prior effective catalog)."""
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CatalogError(f"catalog is not valid JSON: {exc}") from exc
+    plugins = doc.get("plugins", []) if isinstance(doc, dict) else []
+    entries = [p for p in plugins if isinstance(p, dict) and p.get("id")]
+    if not entries:
+        raise CatalogError("catalog has no usable entries")
+    return entries
+
+
+def _catalog_cache_path(managed_dir: str | Path) -> Path:
+    return Path(managed_dir) / CATALOG_CACHE_NAME
+
+
+def read_catalog_cache(
+    managed_dir: str | Path | None,
+) -> tuple[list[dict[str, Any]] | None, float | None]:
+    """Return `(entries, fetched_at)` from the cached remote catalog, or
+    `(None, None)` when absent/unreadable. Never raises — the bundled catalog is
+    the fallback."""
+    if managed_dir is None:
+        return None, None
+    try:
+        doc = json.loads(_catalog_cache_path(managed_dir).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    plugins = doc.get("plugins", []) if isinstance(doc, dict) else []
+    entries = [p for p in plugins if isinstance(p, dict) and p.get("id")]
+    if not entries:
+        return None, None
+    fetched_at = doc.get("fetched_at")
+    return entries, (fetched_at if isinstance(fetched_at, (int, float)) else None)
+
+
+def write_catalog_cache(
+    managed_dir: str | Path, entries: list[dict[str, Any]], fetched_at: float
+) -> None:
+    """Atomically persist a fetched catalog to `.catalog-cache.json`."""
+    path = _catalog_cache_path(managed_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(
+        json.dumps({"version": 1, "fetched_at": fetched_at, "plugins": entries}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(tmp, path)
+
+
+def fetch_remote_catalog() -> list[dict[str, Any]]:
+    """Download + parse the live catalog from `CATALOG_URL`. Raises
+    `CatalogError` on any network / JSON / shape problem (reuses `_download`'s
+    scheme allow-list and size bound)."""
+    return _parse_catalog_doc(_download(CATALOG_URL).decode("utf-8"))
+
+
+def effective_catalog(
+    managed_dir: str | Path | None,
+) -> tuple[list[dict[str, Any]], str, float | None]:
+    """The catalog to serve: the cached remote fetch when present, else the
+    bundled seed. Returns `(entries, source, checked_at)` where `source` is
+    `"remote"` or `"bundled"`."""
+    entries, fetched_at = read_catalog_cache(managed_dir)
+    if entries is not None:
+        return entries, "remote", fetched_at
+    return load_bundled_catalog(), "bundled", None
+
+
+def refresh_catalog(managed_dir: str | Path | None) -> tuple[list[dict[str, Any]], float]:
+    """Fetch the live catalog and cache it (when a managed dir exists). Returns
+    `(entries, fetched_at)`. Raises `CatalogError` on fetch failure — the caller
+    keeps serving the prior effective catalog."""
+    entries = fetch_remote_catalog()
+    fetched_at = time.time()
+    if managed_dir is not None:
+        try:
+            write_catalog_cache(managed_dir, entries, fetched_at)
+        except OSError as exc:
+            logger.warning("fetched catalog but caching to disk failed: %s", exc)
+    return entries, fetched_at
 
 
 def _ledger_path(managed_dir: str | Path) -> Path:

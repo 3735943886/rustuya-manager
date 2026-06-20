@@ -91,6 +91,11 @@ export async function getCatalog() {
   }
 }
 
+// "Check for updates": fetch the live catalog from the trusted remote source,
+// cache it, and return it annotated. Always resolves with a usable catalog —
+// on fetch failure the response carries ok:false + the prior effective catalog.
+export const refreshCatalog = () => _postJson("/api/plugins/catalog/refresh", {});
+
 export const installPlugin = (id) => _postJson("/api/plugins/install", { id });
 export const updatePlugin = (id) => _postJson("/api/plugins/update", { id });
 export const uninstallPlugin = (id) => _postJson("/api/plugins/uninstall", { id });

@@ -19,6 +19,7 @@ import { confirm } from "./modal-confirm.js";
 import { t } from "./i18n.js";
 import {
   getCatalog,
+  refreshCatalog,
   installPlugin,
   updatePlugin,
   uninstallPlugin,
@@ -32,6 +33,7 @@ const $note = document.getElementById("plugins-modal-note");
 const $done = document.getElementById("plugins-modal-done");
 const $close = document.getElementById("plugins-modal-close");
 const $restart = document.getElementById("plugins-modal-restart");
+const $check = document.getElementById("plugins-modal-check");
 
 // Sticky across actions within one open session: once any action needs a
 // restart, the prompt stays until the user restarts or closes the modal.
@@ -63,29 +65,63 @@ function statusBadges(p, apiVersion) {
   return out.join(" ");
 }
 
-// Re-fetch the catalog and re-render the rows. Called on open and after every
-// action so the displayed state always matches the ledger on disk.
-async function refresh() {
-  const data = await getCatalog();
-  if (data.ok === false) {
-    $body.innerHTML = `<div class="text-sm text-rose-600 dark:text-rose-400">${escapeHtml(t("plugins.catalogError", { error: data.error || t("common.unknown") }))}</div>`;
-    return;
+// Where the catalog came from: a freshly-fetched/cached "live" catalog (with
+// the last-checked time) or the bundled seed that ships with the manager.
+function catalogStatus(data) {
+  if (data.source === "remote" && data.checked_at) {
+    return t("plugins.catalogLive", {
+      when: new Date(data.checked_at * 1000).toLocaleString(),
+    });
   }
+  return t("plugins.catalogBundled");
+}
+
+// Render a catalog payload (from getCatalog or refreshCatalog) into the rows.
+function renderCatalog(data) {
   const plugins = data.plugins || [];
   const apiVersion = data.api_version || 1;
-  $subtitle.textContent = t("plugins.subtitle", { count: plugins.length, version: apiVersion });
-  $note.textContent = data.managed
-    ? t("plugins.noteManaged")
-    : t("plugins.noteUnmanaged");
-
+  $subtitle.textContent =
+    t("plugins.subtitle", { count: plugins.length, version: apiVersion }) +
+    " · " +
+    catalogStatus(data);
+  // Don't clobber a sticky restart prompt with the generic note.
+  if (!needsRestart) {
+    $note.textContent = data.managed ? t("plugins.noteManaged") : t("plugins.noteUnmanaged");
+  }
   if (plugins.length === 0) {
     $body.innerHTML = `<div class="text-sm text-slate-500 dark:text-slate-400">${escapeHtml(t("plugins.empty"))}</div>`;
     return;
   }
+  $body.replaceChildren(...plugins.map((p) => renderRow(p, apiVersion, Boolean(data.managed))));
+}
 
-  $body.replaceChildren(
-    ...plugins.map((p) => renderRow(p, apiVersion, Boolean(data.managed)))
-  );
+// Re-fetch the catalog (cached/bundled, no network) and re-render. Called on
+// open and after every action so the displayed state matches the ledger.
+async function refresh() {
+  const data = await getCatalog();
+  if (data.ok === false && !data.plugins) {
+    $body.innerHTML = `<div class="text-sm text-rose-600 dark:text-rose-400">${escapeHtml(t("plugins.catalogError", { error: data.error || t("common.unknown") }))}</div>`;
+    return;
+  }
+  renderCatalog(data);
+}
+
+// "Check for updates": fetch the live catalog from the trusted remote source.
+async function checkForUpdates() {
+  $check.disabled = true;
+  $check.textContent = t("plugins.checking");
+  try {
+    const data = await refreshCatalog();
+    renderCatalog(data);
+    if (data.ok === false) {
+      toast(t("plugins.checkFailed", { error: data.error || t("common.unknown") }), "error");
+    } else {
+      toast(t("plugins.checkOk"), "ok");
+    }
+  } finally {
+    $check.disabled = false;
+    $check.textContent = t("plugins.checkUpdates");
+  }
 }
 
 function renderRow(p, apiVersion, managed) {
@@ -204,6 +240,7 @@ export function initPluginsModal() {
   $done.addEventListener("click", close);
   $close.addEventListener("click", close);
   $restart.addEventListener("click", doRestart);
+  $check.addEventListener("click", checkForUpdates);
   $modal.addEventListener("click", (e) => {
     if (e.target === $modal) close();
   });

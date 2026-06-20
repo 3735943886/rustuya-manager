@@ -592,12 +592,40 @@ def build_app(
         unavailable. Reads the on-disk ledger fresh each call so state reflects
         installs/uninstalls done since boot."""
         ledger = plugin_catalog.read_ledger(managed_plugin_dir)
+        entries, source, checked_at = plugin_catalog.effective_catalog(managed_plugin_dir)
         return {
             "api_version": PLUGIN_API_VERSION,
             "managed": managed_plugin_dir is not None,
-            "plugins": plugin_catalog.annotate_catalog(
-                plugin_catalog.load_bundled_catalog(), ledger
-            ),
+            "source": source,
+            "checked_at": checked_at,
+            "plugins": plugin_catalog.annotate_catalog(entries, ledger),
+        }
+
+    @app.post("/api/plugins/catalog/refresh")
+    async def refresh_plugin_catalog() -> dict[str, Any]:
+        """Fetch the live catalog from the trusted remote source, cache it, and
+        return it annotated — the "Check for updates" action. Reuses the same
+        download path (scheme allow-list + size bound) off the event loop. On
+        fetch failure the prior effective catalog (cached or bundled) is returned
+        with `ok: false` + an `error`, so the panel keeps rendering."""
+        ledger = plugin_catalog.read_ledger(managed_plugin_dir)
+        try:
+            entries, checked_at = await asyncio.to_thread(
+                plugin_catalog.refresh_catalog, managed_plugin_dir
+            )
+            ok, error, source = True, None, "remote"
+        except plugin_catalog.CatalogError as exc:
+            logger.warning("catalog refresh failed: %s", exc)
+            entries, source, checked_at = plugin_catalog.effective_catalog(managed_plugin_dir)
+            ok, error = False, str(exc)
+        return {
+            "ok": ok,
+            "error": error,
+            "api_version": PLUGIN_API_VERSION,
+            "managed": managed_plugin_dir is not None,
+            "source": source,
+            "checked_at": checked_at,
+            "plugins": plugin_catalog.annotate_catalog(entries, ledger),
         }
 
     @app.post("/api/plugins/install")
@@ -618,7 +646,11 @@ def build_app(
         if not plugin_id:
             raise HTTPException(400, "missing plugin id")
         entry = next(
-            (e for e in plugin_catalog.load_bundled_catalog() if e["id"] == plugin_id),
+            (
+                e
+                for e in plugin_catalog.effective_catalog(managed_plugin_dir)[0]
+                if e["id"] == plugin_id
+            ),
             None,
         )
         if entry is None:
@@ -669,7 +701,12 @@ def build_app(
         _require_managed()
         plugin_id = await _read_id(request)
         entry = next(
-            (e for e in plugin_catalog.load_bundled_catalog() if e["id"] == plugin_id), None
+            (
+                e
+                for e in plugin_catalog.effective_catalog(managed_plugin_dir)[0]
+                if e["id"] == plugin_id
+            ),
+            None,
         )
         if entry is None:
             raise HTTPException(404, f"unknown plugin id {plugin_id!r}")

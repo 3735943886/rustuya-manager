@@ -379,3 +379,93 @@ def test_toggle_not_installed_404(tmp_path):
     with TestClient(app) as tc:
         r = tc.post("/api/plugins/toggle", json={"id": "ghost", "enabled": False})
         assert r.status_code == 404
+
+
+# ── live (remote) catalog: fetch / cache / refresh endpoint ───────────────
+_FAKE_REMOTE = [
+    {
+        "id": "rustuya-homeassistant",
+        "name": "Home Assistant Discovery",
+        "version": "9.9.9",
+        "min_api": 1,
+        "url": "https://example/rustuya_ha-9.9.9-dropin.zip",
+        "sha256": "00",
+    }
+]
+
+
+def test_effective_catalog_bundled_when_no_cache(tmp_path):
+    eff, source, checked_at = catalog.effective_catalog(tmp_path)
+    assert source == "bundled"
+    assert checked_at is None
+    assert eff == catalog.load_bundled_catalog()
+
+
+def test_refresh_catalog_caches_and_effective_reads_remote(tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog, "fetch_remote_catalog", lambda: list(_FAKE_REMOTE))
+    entries, ts = catalog.refresh_catalog(tmp_path)
+    assert entries == _FAKE_REMOTE
+    assert isinstance(ts, float)
+    # cache persisted, dot-prefixed so plugin discovery skips it
+    assert (tmp_path / catalog.CATALOG_CACHE_NAME).is_file()
+    assert catalog.CATALOG_CACHE_NAME.startswith(".")
+    # effective now serves the cached remote catalog with its fetch time
+    eff, source, checked_at = catalog.effective_catalog(tmp_path)
+    assert source == "remote"
+    assert eff == _FAKE_REMOTE
+    assert checked_at == ts
+
+
+def test_refresh_catalog_failure_raises_and_falls_back(tmp_path, monkeypatch):
+    def boom():
+        raise catalog.CatalogError("network down")
+
+    monkeypatch.setattr(catalog, "fetch_remote_catalog", boom)
+    with pytest.raises(catalog.CatalogError):
+        catalog.refresh_catalog(tmp_path)
+    # nothing cached → effective stays bundled
+    _eff, source, checked_at = catalog.effective_catalog(tmp_path)
+    assert source == "bundled"
+    assert checked_at is None
+
+
+def test_get_catalog_includes_source_and_checked_at(tmp_path):
+    state = State()
+    app = build_app(state, _make_client(state), managed_plugin_dir=str(tmp_path))
+    with TestClient(app) as tc:
+        body = tc.get("/api/plugins/catalog").json()
+        assert body["source"] == "bundled"
+        assert body["checked_at"] is None
+
+
+def test_refresh_endpoint_success_then_get_serves_remote(tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog, "fetch_remote_catalog", lambda: list(_FAKE_REMOTE))
+    state = State()
+    app = build_app(state, _make_client(state), managed_plugin_dir=str(tmp_path))
+    with TestClient(app) as tc:
+        body = tc.post("/api/plugins/catalog/refresh").json()
+        assert body["ok"] is True
+        assert body["error"] is None
+        assert body["source"] == "remote"
+        ha = next(p for p in body["plugins"] if p["id"] == "rustuya-homeassistant")
+        assert ha["version"] == "9.9.9"
+        # the cached remote catalog now drives the plain GET too
+        g = tc.get("/api/plugins/catalog").json()
+        assert g["source"] == "remote"
+        assert any(p["version"] == "9.9.9" for p in g["plugins"])
+
+
+def test_refresh_endpoint_failure_falls_back_to_bundled(tmp_path, monkeypatch):
+    def boom():
+        raise catalog.CatalogError("offline")
+
+    monkeypatch.setattr(catalog, "fetch_remote_catalog", boom)
+    state = State()
+    app = build_app(state, _make_client(state), managed_plugin_dir=str(tmp_path))
+    with TestClient(app) as tc:
+        body = tc.post("/api/plugins/catalog/refresh").json()
+        assert body["ok"] is False
+        assert "offline" in body["error"]
+        assert body["source"] == "bundled"
+        # still serves a usable catalog so the panel keeps rendering
+        assert any(p["id"] == "rustuya-homeassistant" for p in body["plugins"])

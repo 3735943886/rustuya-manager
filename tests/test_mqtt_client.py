@@ -20,6 +20,7 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 
 import aiomqtt
+import pyrustuyabridge as pb
 import pytest
 
 from rustuya_manager.models import Device
@@ -222,6 +223,41 @@ class TestDispatch:
         }
         # Data flowing marks the device online.
         assert state.live_status["eb7ba8427911a8ccbda92w"]["state"] == "online"
+
+    @pytest.mark.asyncio
+    async def test_derived_type_event_is_dropped(self):
+        """Plugin-runtime invariant: a `{type}=derived` event is the manager's
+        own derived-DP republish echoed back by the broker. It must NOT be
+        re-ingested — no merge into dps, no liveness stamp — otherwise our own
+        publish would mark the device freshly-seen and could loop a watcher.
+        The bridge only emits active/passive/state, so `derived` is only ever
+        our echo."""
+        state = State()
+        await state.set_templates(
+            BridgeTemplates(
+                root="rustuya",
+                command="rustuya/command",
+                event="rustuya/event/{type}/{id}",
+                message="rustuya/{level}/{id}",
+                scanner="rustuya/scanner",
+                payload="{value}",
+            )
+        )
+        client, _ = _make_client(state)
+        await client._dispatch(
+            "rustuya/event/derived/eb7ba8427911a8ccbda92w",
+            '{"99":42}',
+        )
+        # Fully dropped: no dps entry, no live status.
+        assert state.dps == {}
+        assert "eb7ba8427911a8ccbda92w" not in state.live_status
+        # Sanity: the same payload on a real `passive` event IS ingested,
+        # proving the drop keys on the type segment, not the payload.
+        await client._dispatch(
+            "rustuya/event/passive/eb7ba8427911a8ccbda92w",
+            '{"99":42}',
+        )
+        assert state.dps["eb7ba8427911a8ccbda92w"] == {"99": 42}
 
     @pytest.mark.asyncio
     async def test_event_with_unknown_name_skips_silently(self):
@@ -1010,6 +1046,146 @@ class TestBrokerEndpointAndTls:
         client = BridgeClient("mqtts://u:p@host", "r", State())
         assert client.tls is True
         assert (client.username, client.password) == ("u", "p")
+
+
+class TestPluginRuntimeDpBus:
+    """The reactive DP bus (plugin runtime, api_version 2): watch dispatch from
+    `_route`, `set_device_dp`, and `derived_dp` publish/clear with byte-faithful
+    rendering verified against the bridge's own parser."""
+
+    @staticmethod
+    async def _multi_dp_state() -> State:
+        state = State()
+        await state.set_templates(
+            BridgeTemplates(
+                root="rustuya",
+                command="rustuya/command/{id}/{action}",
+                event="rustuya/event/{type}/{id}",
+                message="rustuya/{level}/{id}",
+                scanner="rustuya/scanner",
+                payload="{value}",
+            )
+        )
+        return state
+
+    @pytest.mark.asyncio
+    async def test_watcher_fires_on_event_with_decoded_dps(self):
+        state = await self._multi_dp_state()
+        client, _ = _make_client(state)
+        seen: list = []
+
+        async def w(device_id, dps, origin):
+            seen.append((device_id, dps, origin))
+
+        client.add_dp_watcher(None, None, w)
+        await client._dispatch("rustuya/event/passive/D1", '{"1":true,"2":false}')
+        assert seen == [("D1", {"1": True, "2": False}, "device")]
+
+    @pytest.mark.asyncio
+    async def test_watcher_device_and_dp_filters(self):
+        state = await self._multi_dp_state()
+        client, _ = _make_client(state)
+        d1, dp2 = [], []
+
+        async def on_d1(device_id, dps, origin):
+            d1.append(device_id)
+
+        async def on_dp2(device_id, dps, origin):
+            dp2.append(dps)
+
+        client.add_dp_watcher("D1", None, on_d1)  # only device D1
+        client.add_dp_watcher("D1", "2", on_dp2)  # only D1 events carrying dp 2
+        await client._dispatch("rustuya/event/passive/D1", '{"1":true}')  # no dp 2
+        await client._dispatch("rustuya/event/passive/D1", '{"2":true}')  # has dp 2
+        await client._dispatch("rustuya/event/passive/OTHER", '{"2":true}')  # wrong device
+        assert d1 == ["D1", "D1"]  # both D1 events, not OTHER
+        assert dp2 == [{"2": True}]  # only the event with dp 2
+
+    @pytest.mark.asyncio
+    async def test_watcher_not_fired_on_derived_echo(self):
+        state = await self._multi_dp_state()
+        client, _ = _make_client(state)
+        seen: list = []
+
+        async def w(device_id, dps, origin):
+            seen.append(device_id)
+
+        client.add_dp_watcher(None, None, w)
+        # Our own derived echo must not reach a watcher (dropped in _route).
+        await client._dispatch("rustuya/event/derived/D1", '{"99":1}')
+        assert seen == []
+        # A real event still fires it.
+        await client._dispatch("rustuya/event/passive/D1", '{"1":true}')
+        assert seen == ["D1"]
+
+    @pytest.mark.asyncio
+    async def test_set_device_dp_publishes_set_command(self):
+        state = await self._multi_dp_state()
+        client, mock = _make_client(state)
+        await client.set_device_dp("D1", "1", True)
+        topic, body = mock.publish.await_args.args
+        assert topic == "rustuya/command/D1/set"
+        assert json.loads(body) == {"action": "set", "id": "D1", "dps": {"1": True}}
+
+    @pytest.mark.asyncio
+    async def test_publish_derived_dp_multi_dp_mode(self):
+        state = await self._multi_dp_state()
+        client, mock = _make_client(state)
+        await client.publish_derived_dp("D1", "99", 42, retain=True)
+        call = mock.publish.await_args
+        topic, payload = call.args
+        assert topic == "rustuya/event/derived/D1"
+        assert call.kwargs.get("retain") is True
+        # Byte-faithful: the bridge's own parser reads it back as {99: 42}.
+        assert pb.parse_seed_dps(payload, None, "{value}") == {"99": 42}
+
+    @pytest.mark.asyncio
+    async def test_publish_derived_dp_single_dp_mode_string_value(self):
+        state = State()
+        await state.set_templates(
+            BridgeTemplates(
+                root="rustuya",
+                command="rustuya/command/{id}/{action}",
+                event="rustuya/event/{type}/{id}/{dp}",  # {dp} in topic → single-DP
+                message="rustuya/{level}/{id}",
+                scanner="rustuya/scanner",
+                payload="{value}",
+            )
+        )
+        client, mock = _make_client(state)
+        await client.publish_derived_dp("D1", "99", "hello", retain=False)
+        topic, payload = mock.publish.await_args.args
+        assert topic == "rustuya/event/derived/D1/99"
+        # String value is JSON-encoded so it round-trips through the parser.
+        assert pb.parse_seed_dps(payload, "99", "{value}") == {"99": "hello"}
+
+    @pytest.mark.asyncio
+    async def test_clear_derived_dp_empties_retained(self):
+        state = await self._multi_dp_state()
+        client, mock = _make_client(state)
+        await client.clear_derived_dp("D1", "99")
+        call = mock.publish.await_args
+        topic, payload = call.args
+        assert topic == "rustuya/event/derived/D1"
+        assert payload == ""
+        assert call.kwargs.get("retain") is True
+
+    @pytest.mark.asyncio
+    async def test_derived_requires_type_in_event_template(self):
+        state = State()
+        await state.set_templates(
+            BridgeTemplates(
+                root="rustuya",
+                command="rustuya/command/{id}/{action}",
+                event="rustuya/event/{id}",  # no {type} → no derived segment
+                message="rustuya/{level}/{id}",
+                scanner="rustuya/scanner",
+                payload="{value}",
+            )
+        )
+        client, _ = _make_client(state)
+        with pytest.raises(RuntimeError, match="type"):
+            await client.publish_derived_dp("D1", "99", 1, retain=False)
 
 
 # pytest-asyncio integration — auto mode is the simplest setup for our needs.

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rustuya-derived-plugin"
+version = "0.0.1"
+description = "Example plugin proving the rustuya-manager reactive DP bus: combine two DPs into a derived DP (not for production)"
+requires-python = ">=3.10"
+
+# The manager discovers plugins via this entry-point group. `register` is the
+# callable the host invokes with the plugin context.
+[project.entry-points."rustuya_manager.plugins"]
+derived = "rustuya_derived:register"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rustuya_derived*"]

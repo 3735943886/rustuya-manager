@@ -202,6 +202,14 @@ class BridgeClient:
         self._plugin_subscriptions: list[
             tuple[str, Callable[[str, str, bool], Awaitable[None]]]
         ] = []
+        # Plugin-registered DP watchers (plugin runtime, reactive pillar):
+        # (device_id_filter, dp_filter, handler). A None filter means "any".
+        # Fired from `_route` after `merge_dps` for a real device event —
+        # in-process function calls, no MQTT round-trip. `add_dp_watcher`
+        # appends; `_dispatch_dp_watchers` fans out with per-handler isolation.
+        self._dp_watchers: list[
+            tuple[str | None, str | None, Callable[[str, dict[str, Any], str], Awaitable[None]]]
+        ] = []
         # In-progress buffer for a paginated `status` reply (see
         # `_handle_status_page`). None when no page-through is active; a partial
         # {id: Device} map while one is. Committed to state on the final page.
@@ -523,6 +531,17 @@ class BridgeClient:
                 else:
                     await self.state.record_response(target, parsed, retained=retain)
         elif matched_as == "event":
+            # The `derived` {type} segment is the manager's own derived-DP
+            # republish (plugin runtime). The broker echoes it back on our
+            # event subscription, but re-ingesting it as a device event would
+            # stamp last_seen/liveness and could loop into a watcher — so drop
+            # it entirely here. The bridge only ever emits active/passive/state,
+            # so a `derived` type can only be our own echo. (Deployments whose
+            # event template has no {type} can't carry a derived segment, so
+            # `.get("type")` is None there and this guard is a no-op.)
+            if vars_.get("type") == "derived":
+                logger.debug("Dropping own derived echo for id=%s", vars_.get("id"))
+                return
             if isinstance(parsed, dict):
                 key = self._resolve_device_key(vars_, parsed)
                 dps = await self._extract_dps_from_event(vars_, parsed, payload_str)
@@ -535,6 +554,10 @@ class BridgeClient:
                     # in the MSG row. The online dot + edge color already
                     # convey state; MSG should only fire for real diagnostics.
                     await self.state.set_live_status(key, "online", code=0, message="")
+                    # Fan out to plugin DP watchers. After merge_dps returns
+                    # (so the lock is released and state reflects the update),
+                    # never under it.
+                    await self._dispatch_dp_watchers(key, dps)
                 # Surface the resolved key+dps to listeners (CLI prints these).
                 extras["device_id"] = key
                 extras["dps"] = dps
@@ -929,6 +952,102 @@ class BridgeClient:
                     await handler(topic, payload, retain)
                 except Exception:  # noqa: BLE001 - one bad handler must not break others
                     logger.exception("plugin handler for %s raised on %s", topic_filter, topic)
+
+    # ── plugin runtime: reactive DP bus ──────────────────────────────────
+    def add_dp_watcher(
+        self,
+        device_id: str | None,
+        dp: str | None,
+        handler: Callable[[str, dict[str, Any], str], Awaitable[None]],
+    ) -> None:
+        """Register a DP watcher (plugin runtime, reactive pillar).
+
+        `device_id`/`dp` are optional filters (None = any). The handler is
+        `async (device_id, dps, origin)` and is called from `_route` for every
+        real device event whose update matches. In-process function call — no
+        MQTT round-trip."""
+        self._dp_watchers.append((device_id, dp, handler))
+
+    async def _dispatch_dp_watchers(self, device_id: str, dps: dict[str, Any]) -> None:
+        """Fan a decoded device event out to matching DP watchers.
+
+        Isolated per handler: an exception is logged and the rest still run.
+        `origin` is `"device"` — derived echoes never reach here (dropped in
+        `_route` on the `{type}=derived` segment)."""
+        for did_filter, dp_filter, handler in self._dp_watchers:
+            if did_filter is not None and did_filter != device_id:
+                continue
+            if dp_filter is not None and dp_filter not in dps:
+                continue
+            try:
+                await handler(device_id, dps, "device")
+            except Exception:  # noqa: BLE001 - one bad watcher must not break others
+                logger.exception("dp watcher raised for %s", device_id)
+
+    async def set_device_dp(self, device_id: str, dp: str, value: Any) -> None:
+        """Outbound: command a real device's DP (external → Tuya).
+
+        Thin wrapper over `publish_command("set", …)` — the bridge's `Set`
+        action takes a `dps` map. Same path the web UI / an external controller
+        uses."""
+        await self.publish_command("set", target_id=device_id, extra={"dps": {str(dp): value}})
+
+    def _render_derived(
+        self, tpls: BridgeTemplates, device_id: str, dp: str, value: Any
+    ) -> tuple[str, str]:
+        """Render the `{type}=derived` topic + a byte-faithful payload for one DP.
+
+        Reuses the bridge's own `render_template` (topic) and verifies the
+        payload by round-tripping it through the bridge's own `parse_seed_dps`
+        (payload) — so a consumer reading the derived topic with the bridge's
+        payload template gets exactly `{dp: value}`. Raises if the deployment's
+        event template lacks `{type}` (no room for a derived segment — it would
+        collide with the device's real event topic) or if the value can't be
+        rendered byte-faithfully under the configured payload template."""
+        if "{type}" not in tpls.event:
+            raise RuntimeError(
+                "derived DPs require '{type}' in the event topic template; "
+                f"{tpls.event!r} has no derived segment to publish into safely"
+            )
+        single = "{dp}" in tpls.event
+        topic_vars = {"root": tpls.root, "type": "derived", "id": device_id}
+        if single:
+            topic_vars["dp"] = str(dp)
+        topic = pb.render_template(tpls.event, topic_vars)
+        if single:
+            payload = pb.render_template(tpls.payload, {"value": json.dumps(value)})
+            check = pb.parse_seed_dps(payload, str(dp), tpls.payload)
+        else:
+            payload = json.dumps({str(dp): value})
+            check = pb.parse_seed_dps(payload, None, tpls.payload)
+        if check != {str(dp): value}:
+            raise RuntimeError(
+                f"derived payload not byte-faithful under template {tpls.payload!r}: "
+                f"parsed back as {check!r}, expected {{{str(dp)!r}: {value!r}}}"
+            )
+        return topic, payload
+
+    async def publish_derived_dp(
+        self, device_id: str, dp: str, value: Any, *, retain: bool
+    ) -> None:
+        """Publish a derived DP value on the `{type}=derived` topic for `device_id`.
+
+        The manager renders both topic and payload (byte-faithful, see
+        `_render_derived`); the plugin never touches bridge config."""
+        if self.state.templates is None:
+            raise RuntimeError("templates not yet resolved (bootstrap incomplete)")
+        topic, payload = self._render_derived(self.state.templates, device_id, str(dp), value)
+        await self.publish_raw(topic, payload, retain=retain)
+
+    async def clear_derived_dp(self, device_id: str, dp: str) -> None:
+        """Clear a derived DP: empty retained payload on its topic (the
+        rule-level cleanup path). Always `retain=True` — the canonical
+        retained-clear, identical to the bridge's own scavenger."""
+        if self.state.templates is None:
+            raise RuntimeError("templates not yet resolved (bootstrap incomplete)")
+        # value is irrelevant to the topic; pass a placeholder of the right type.
+        topic, _ = self._render_derived(self.state.templates, device_id, str(dp), 0)
+        await self.publish_raw(topic, "", retain=True)
 
     def subscribe_scanner(self) -> asyncio.Queue[dict[str, Any]]:
         """Returns a fresh queue that will receive every scanner-topic

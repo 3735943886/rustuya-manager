@@ -16,6 +16,10 @@ Through `ctx` a plugin can contribute five things:
   4. a UI page (tab + static assets) (ctx.add_page)
   5. an eager init module            (ctx.add_header_init) — runs at boot, e.g.
                                       to add a hamburger-menu item
+  6. reactive DP handlers            (ctx.watch_dps / watch_device / watch_dp)
+                                      + derived-DP output (ctx.derived_dp) and
+                                      device control (ctx.set_device_dp) — the
+                                      in-process DP bus, api_version >= 2
 
 It can also *read* two host-owned snapshots — the cloud devices
 (`ctx.devices`) and the raw bridge config (`ctx.bridge_config`) — and publish
@@ -47,15 +51,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Bumped only on a breaking change to the `ctx` contract below. Plugins read it
-# via `ctx.api_version` to refuse to load against an incompatible host.
-PLUGIN_API_VERSION = 1
+# Incremented when the `ctx` contract gains or breaks surface; plugins read it
+# via `ctx.api_version` (compare `>=`) to refuse to load against a host too old
+# for what they need. v2 added the reactive DP bus: watch_dps/watch_device/
+# watch_dp, derived_dp, set_device_dp.
+PLUGIN_API_VERSION = 2
 
 # Entry-point group plugins advertise their `register(ctx)` callable under.
 ENTRY_POINT_GROUP = "rustuya_manager.plugins"
 
 # An MQTT message handler: async (topic, payload, retain) -> None.
 MqttHandler = Callable[[str, str, bool], Awaitable[None]]
+
+# A DP watcher: async (device_id, dps, origin) -> None. `dps` is the decoded
+# {dp: value} delta from one device event; `origin` is "device".
+DpWatcher = Callable[[str, "dict[str, Any]", str], Awaitable[None]]
 
 # Credential fields stripped from the bridge config before it's handed to a
 # plugin via ctx.bridge_config(). Matches the bridge's own skip_serializing set
@@ -151,6 +161,44 @@ class StateNamespace:
         return self._state.get_plugin_data(self._name)
 
 
+class DerivedDp:
+    """A handle to one derived DP, returned by `ctx.derived_dp(device_id, dp)`.
+
+    A derived DP is a value the plugin computes and publishes on the device's
+    `{type}=derived` event topic (a sibling of the bridge's active/passive/state
+    segments, so it never overwrites a real snapshot and is cleared for free by
+    the bridge's retain scavenger when the device is removed). `set` renders the
+    topic and a byte-faithful payload via the bridge's own helpers; `clear`
+    empties it (the rule-level cleanup path — for when a derived value should
+    vanish while its device still exists). The plugin never touches bridge
+    config or builds a topic string itself."""
+
+    def __init__(
+        self, client: BridgeClient, state: State, device_id: str, dp: str, retain: bool | None
+    ) -> None:
+        self._client = client
+        self._state = state
+        self._device_id = device_id
+        self._dp = dp
+        self._retain = retain
+
+    def _resolve_retain(self) -> bool:
+        """`retain=None` mirrors the bridge's own `mqtt_retain`; an explicit
+        value overrides it."""
+        if self._retain is not None:
+            return self._retain
+        cfg = self._state.bridge_config_raw or {}
+        return bool(cfg.get("mqtt_retain", False))
+
+    async def set(self, value: Any) -> None:
+        await self._client.publish_derived_dp(
+            self._device_id, self._dp, value, retain=self._resolve_retain()
+        )
+
+    async def clear(self) -> None:
+        await self._client.clear_derived_dp(self._device_id, self._dp)
+
+
 class PluginContext:
     """The single object handed to every plugin's `register(ctx)`.
 
@@ -216,6 +264,36 @@ class PluginContext:
         # Hand to the live client so it subscribes now (if connected) and
         # replays on every reconnect.
         self.bridge_client.add_plugin_subscription(topic_filter, handler)
+
+    # ── reactive DP bus (api_version >= 2) ───────────────────────────────
+    def watch_dps(self, handler: DpWatcher) -> None:
+        """Fire `handler(device_id, dps, origin)` on every real device event.
+
+        `dps` is the decoded `{dp: value}` delta; `origin` is "device". Runs
+        in-process (function call, no MQTT round-trip) from the manager's route
+        path after state is updated. The handler keeps its own state in a
+        closure, so accumulators / combinators are free. Derived echoes never
+        fire watchers."""
+        self.bridge_client.add_dp_watcher(None, None, handler)
+
+    def watch_device(self, device_id: str, handler: DpWatcher) -> None:
+        """Like `watch_dps` but only for events from `device_id`."""
+        self.bridge_client.add_dp_watcher(device_id, None, handler)
+
+    def watch_dp(self, device_id: str, dp: str, handler: DpWatcher) -> None:
+        """Like `watch_dps` but only when `device_id`'s event carries `dp`."""
+        self.bridge_client.add_dp_watcher(device_id, str(dp), handler)
+
+    def derived_dp(self, device_id: str, dp: str, *, retain: bool | None = None) -> DerivedDp:
+        """A handle for publishing a derived DP on `device_id`'s
+        `{type}=derived` topic. `retain=None` mirrors the bridge's
+        `mqtt_retain`. See `DerivedDp`."""
+        return DerivedDp(self.bridge_client, self._state, device_id, str(dp), retain)
+
+    async def set_device_dp(self, device_id: str, dp: str, value: Any) -> None:
+        """Command a real device's DP (external → Tuya), via the bridge's
+        `set` action. The same path the web UI uses."""
+        await self.bridge_client.set_device_dp(device_id, str(dp), value)
 
     def state_namespace(self, name: str) -> StateNamespace:
         return StateNamespace(self._state, name)

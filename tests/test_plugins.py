@@ -477,3 +477,39 @@ class TestZeroPluginNoRegression:
             r = tc.get("/static/plugins.js")
             assert r.status_code == 200
             assert "initPluginHost" in r.text
+
+
+# ── reactive DP bus (api_version >= 2) ───────────────────────────────────
+async def test_reactive_dp_bus_wires_and_dispatches():
+    """ctx.watch_* register watchers that fire from the route path with decoded
+    DPs; ctx.derived_dp returns a handle. End-to-end through `_dispatch` (no
+    broker needed — the bus is in-process function calls)."""
+    from rustuya_manager.plugins import DerivedDp
+    from rustuya_manager.state import BridgeTemplates
+
+    state = State()
+    await state.set_templates(
+        BridgeTemplates(
+            root="rustuya",
+            command="rustuya/command/{id}/{action}",
+            event="rustuya/event/{type}/{id}",
+            message="rustuya/{level}/{id}",
+            scanner="rustuya/scanner",
+            payload="{value}",
+        )
+    )
+    client = _make_client(state)
+    ctx = PluginContext(PluginRegistry(), bridge_client=client, state=state)
+
+    seen: list = []
+
+    async def on_dp(device_id, dps, origin):
+        seen.append((device_id, dps, origin))
+
+    ctx.watch_dps(on_dp)
+    assert len(client._dp_watchers) == 1
+
+    await client._dispatch("rustuya/event/passive/D1", '{"1":true}')
+    assert seen == [("D1", {"1": True}, "device")]
+
+    assert isinstance(ctx.derived_dp("D1", "99"), DerivedDp)

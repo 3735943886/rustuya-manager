@@ -63,6 +63,4 @@ def register(ctx) -> None:
         await out.set(combined)
 
     ctx.watch_device(device, on_event)
-    logger.info(
-        "derived plugin: %s dp[%s]&dp[%s] -> derived dp[%s]", device, dp_a, dp_b, dp_out
-    )
+    logger.info("derived plugin: %s dp[%s]&dp[%s] -> derived dp[%s]", device, dp_a, dp_b, dp_out)

@@ -411,9 +411,7 @@ class ServiceSupervisor:
                     self._WINDOW_SEC,
                 )
                 return
-            logger.warning(
-                "plugin service #%d will respawn in %.1fs", idx, self._CRASH_BACKOFF_SEC
-            )
+            logger.warning("plugin service #%d will respawn in %.1fs", idx, self._CRASH_BACKOFF_SEC)
             # Resolve early if stop() is signalled during the backoff.
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._CRASH_BACKOFF_SEC)

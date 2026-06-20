@@ -617,7 +617,7 @@ def build_app(
         except plugin_catalog.CatalogError as exc:
             logger.warning("catalog refresh failed: %s", exc)
             entries, source, checked_at = plugin_catalog.effective_catalog(managed_plugin_dir)
-            ok, error = False, str(exc)
+            ok, error = False, "catalog refresh failed"
         return {
             "ok": ok,
             "error": error,

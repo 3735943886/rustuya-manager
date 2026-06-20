@@ -1082,6 +1082,22 @@ class TestPluginRuntimeDpBus:
         assert seen == [("D1", {"1": True, "2": False}, "device")]
 
     @pytest.mark.asyncio
+    async def test_watcher_origin_marks_retained_vs_live(self):
+        state = await self._multi_dp_state()
+        client, _ = _make_client(state)
+        seen: list = []
+
+        async def w(device_id, dps, origin):
+            seen.append(origin)
+
+        client.add_dp_watcher(None, None, w)
+        # The retained-snapshot replay (retain=True) is tagged "retained"…
+        await client._dispatch("rustuya/event/passive/D1", '{"1":true}', retain=True)
+        # …and a live event is tagged "device".
+        await client._dispatch("rustuya/event/passive/D1", '{"1":false}')
+        assert seen == ["retained", "device"]
+
+    @pytest.mark.asyncio
     async def test_watcher_device_and_dp_filters(self):
         state = await self._multi_dp_state()
         client, _ = _make_client(state)

@@ -518,6 +518,29 @@ async def test_reactive_dp_bus_wires_and_dispatches():
     assert isinstance(ctx.derived_dp("D1", "99"), DerivedDp)
 
 
+async def test_current_dps_snapshot_is_readonly_copy():
+    """ctx.current_dps() exposes the live DP map (whole or per-device) so a
+    plugin can seed from values already ingested, and hands back fresh dicts
+    that can't mutate the manager's state."""
+    state = State()
+    await state.merge_dps("D1", {"1": True, "2": 7})
+    await state.merge_dps("D2", {"5": "x"})
+    client = _make_client(state)
+    ctx = PluginContext(PluginRegistry(), bridge_client=client, state=state)
+
+    # Whole-map view.
+    assert ctx.current_dps() == {"D1": {"1": True, "2": 7}, "D2": {"5": "x"}}
+    # Per-device view; unknown device is an empty dict, not an error.
+    assert ctx.current_dps("D1") == {"1": True, "2": 7}
+    assert ctx.current_dps("NOPE") == {}
+
+    # Mutating the returned snapshot must not leak back into state.
+    snap = ctx.current_dps()
+    snap["D1"]["1"] = "tampered"
+    snap["D3"] = {}
+    assert state.dps == {"D1": {"1": True, "2": 7}, "D2": {"5": "x"}}
+
+
 # ── in-process service supervision (ctx.add_service, api_version >= 2) ────
 def test_add_service_wires_supervisor_in_app():
     """ctx.add_service appends to registry.services, and build_app exposes a

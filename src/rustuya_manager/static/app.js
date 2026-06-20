@@ -365,6 +365,18 @@ $actionsMenu?.addEventListener("click", (e) => {
   if (btn && !btn.closest("[data-keep-open]")) $actionsMenu.removeAttribute("open");
 });
 
+// A hamburger menu is a transient popover, not a kept-open accordion: dismiss
+// it when the user clicks anywhere outside it or presses Escape. The summary
+// (the hamburger button itself) lives inside #actions-menu, so contains() keeps
+// the document handler from fighting the native open-toggle on that click.
+document.addEventListener("click", (e) => {
+  if ($actionsMenu?.hasAttribute("open") && !$actionsMenu.contains(e.target))
+    $actionsMenu.removeAttribute("open");
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") $actionsMenu?.removeAttribute("open");
+});
+
 // ── Boot ─────────────────────────────────────────────────────────────────
 // i18n loads first so every label / toast / render below resolves in the
 // chosen language; it's best-effort (falls back to English / raw keys) and

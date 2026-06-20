@@ -557,7 +557,7 @@ class BridgeClient:
                     # Fan out to plugin DP watchers. After merge_dps returns
                     # (so the lock is released and state reflects the update),
                     # never under it.
-                    await self._dispatch_dp_watchers(key, dps)
+                    await self._dispatch_dp_watchers(key, dps, retained=retain)
                 # Surface the resolved key+dps to listeners (CLI prints these).
                 extras["device_id"] = key
                 extras["dps"] = dps
@@ -964,23 +964,30 @@ class BridgeClient:
 
         `device_id`/`dp` are optional filters (None = any). The handler is
         `async (device_id, dps, origin)` and is called from `_route` for every
-        real device event whose update matches. In-process function call — no
+        real device event whose update matches. `origin` is `"retained"` when
+        the update came from the broker's retained snapshot (the burst replayed
+        on (re)connect) and `"device"` for a live event, so a watcher can tell
+        an initial-state seed from a real change. In-process function call — no
         MQTT round-trip."""
         self._dp_watchers.append((device_id, dp, handler))
 
-    async def _dispatch_dp_watchers(self, device_id: str, dps: dict[str, Any]) -> None:
+    async def _dispatch_dp_watchers(
+        self, device_id: str, dps: dict[str, Any], *, retained: bool = False
+    ) -> None:
         """Fan a decoded device event out to matching DP watchers.
 
         Isolated per handler: an exception is logged and the rest still run.
-        `origin` is `"device"` — derived echoes never reach here (dropped in
-        `_route` on the `{type}=derived` segment)."""
+        `origin` is `"retained"` for the retained-snapshot replay and `"device"`
+        for a live event — derived echoes never reach here (dropped in `_route`
+        on the `{type}=derived` segment)."""
+        origin = "retained" if retained else "device"
         for did_filter, dp_filter, handler in self._dp_watchers:
             if did_filter is not None and did_filter != device_id:
                 continue
             if dp_filter is not None and dp_filter not in dps:
                 continue
             try:
-                await handler(device_id, dps, "device")
+                await handler(device_id, dps, origin)
             except Exception:  # noqa: BLE001 - one bad watcher must not break others
                 logger.exception("dp watcher raised for %s", device_id)
 

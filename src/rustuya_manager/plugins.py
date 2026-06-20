@@ -242,6 +242,23 @@ class PluginContext:
         expected to read, not write). Empty until the cloud snapshot loads."""
         return {did: dev.raw_data for did, dev in self._state.cloud.items()}
 
+    def current_dps(self, device_id: str | None = None) -> dict[str, Any]:
+        """Read-only snapshot of the current decoded DP values.
+
+        With `device_id=None`, returns `{device_id: {dp: value}}` for every
+        device the manager holds DPs for; with a `device_id`, returns just that
+        device's `{dp: value}` (an empty dict if it's unknown). This is the same
+        live state the DP watchers receive *deltas* of — call it at register /
+        service-start time to seed a combinator from the values already on hand
+        (e.g. ingested from the retained snapshot) instead of waiting for each
+        source DP's next change.
+
+        Fresh dicts are returned so a plugin can't mutate the manager's DP map;
+        the DP values themselves are shared by reference (read, don't mutate)."""
+        if device_id is not None:
+            return dict(self._state.dps.get(device_id, {}))
+        return {did: dict(dps) for did, dps in self._state.dps.items()}
+
     def bridge_config(self) -> dict[str, Any] | None:
         """Read-only, credential-redacted copy of the raw `{root}/bridge/config`
         payload dict, or None if the bridge config hasn't been received yet.
@@ -280,11 +297,14 @@ class PluginContext:
     def watch_dps(self, handler: DpWatcher) -> None:
         """Fire `handler(device_id, dps, origin)` on every real device event.
 
-        `dps` is the decoded `{dp: value}` delta; `origin` is "device". Runs
-        in-process (function call, no MQTT round-trip) from the manager's route
-        path after state is updated. The handler keeps its own state in a
-        closure, so accumulators / combinators are free. Derived echoes never
-        fire watchers."""
+        `dps` is the decoded `{dp: value}` delta; `origin` is `"retained"` for
+        the retained-snapshot replay on (re)connect and `"device"` for a live
+        event (so a watcher can distinguish an initial-state seed from a real
+        change). Runs in-process (function call, no MQTT round-trip) from the
+        manager's route path after state is updated. The handler keeps its own
+        state in a closure, so accumulators / combinators are free. Use
+        `current_dps()` to seed from values already on hand. Derived echoes
+        never fire watchers."""
         self.bridge_client.add_dp_watcher(None, None, handler)
 
     def watch_device(self, device_id: str, handler: DpWatcher) -> None:

@@ -59,6 +59,36 @@ def test_theme_toggle_flips_html_dark_class(page: Page, server_url: str) -> None
     assert initial_dark != final_dark, "theme toggle did not flip the html class"
 
 
+def test_i18n_html_renders_trusted_markup_but_not_dom_attribute_text(
+    page: Page, server_url: str
+) -> None:
+    # data-i18n-html assigns innerHTML, but ONLY from the locale dictionaries
+    # (trusted first-party JSON where inline <strong>/<code> is intended). A key
+    # that isn't in the dictionaries must NOT have its attribute text reinterpreted
+    # as HTML (js/xss-through-dom) — it renders as inert text instead.
+    page.goto(server_url)
+    # Wait for the modules to have loaded + localized the static markup: a known
+    # data-i18n-html node has its trusted inline markup applied (a <code> child).
+    expect(page.locator('[data-i18n-html="cloud.noFileTitle"] code')).to_have_count(1)
+
+    result = page.evaluate(
+        """async () => {
+          const m = await import('/static/i18n.js');
+          const el = document.createElement('span');
+          // A bogus key whose text is an XSS payload.
+          el.setAttribute('data-i18n-html', '<img src=x onerror="window.__xss=1">');
+          document.body.appendChild(el);
+          m.applyDom();
+          return { children: el.childElementCount, text: el.textContent, xss: window.__xss };
+        }"""
+    )
+    # No <img> element created, the onerror never ran, and the raw payload is
+    # shown as inert text.
+    assert result["children"] == 0, "data-i18n-html reinterpreted attribute text as HTML"
+    assert result["xss"] is None
+    assert result["text"] == '<img src=x onerror="window.__xss=1">'
+
+
 def test_actions_menu_dismisses_on_outside_click_and_escape(page: Page, server_url: str) -> None:
     # The hamburger #actions-menu is a transient popover: it must close when the
     # user clicks anywhere outside it or presses Escape, but stay open while they

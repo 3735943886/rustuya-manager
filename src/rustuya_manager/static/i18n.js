@@ -140,7 +140,16 @@ export function applyDom(root = document) {
     el.textContent = t(el.getAttribute("data-i18n"));
   }
   for (const el of root.querySelectorAll("[data-i18n-html]")) {
-    el.innerHTML = t(el.getAttribute("data-i18n-html"));
+    const key = el.getAttribute("data-i18n-html");
+    // innerHTML may ONLY ever be a value from the locale dictionaries (trusted
+    // first-party JSON, where inline <strong>/<code> is intended). Read the
+    // resolved string straight from those dicts — never via t(), whose
+    // missing-key fallback returns the key itself, which would reinterpret the
+    // DOM attribute text as HTML (js/xss-through-dom). A missing key renders as
+    // inert text so it's still visible without becoming a markup sink.
+    const html = messages[key] ?? fallback[key];
+    if (html != null) el.innerHTML = html;
+    else el.textContent = key;
   }
   for (const el of root.querySelectorAll("[data-i18n-attr]")) {
     for (const pair of el.getAttribute("data-i18n-attr").split(ATTR_PAIR_SEP)) {

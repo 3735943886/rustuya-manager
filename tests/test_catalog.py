@@ -465,7 +465,11 @@ def test_refresh_endpoint_failure_falls_back_to_bundled(tmp_path, monkeypatch):
     with TestClient(app) as tc:
         body = tc.post("/api/plugins/catalog/refresh").json()
         assert body["ok"] is False
-        assert "offline" in body["error"]
+        # The endpoint returns a generic error, not the exception text, so a
+        # failed fetch can't leak internal detail to the UI (CodeQL alert #7,
+        # information exposure through an exception). The cause is logged
+        # server-side instead.
+        assert body["error"] == "catalog refresh failed"
         assert body["source"] == "bundled"
         # still serves a usable catalog so the panel keeps rendering
         assert any(p["id"] == "rustuya-homeassistant" for p in body["plugins"])

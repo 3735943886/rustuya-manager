@@ -1,0 +1,66 @@
+name: Catalog sync
+
+# Daily bot that keeps src/rustuya_manager/data/plugins.json pointed at each
+# tracked plugin's newest release. scripts/sync_catalog.py reads the tracking
+# manifest (data/plugin-sources.json), asks GitHub for the latest release of
+# every listed repo (prereleases INCLUDED — the plugins ship rc builds), and
+# rewrites version/url/sha256 when a newer one exists. The change lands as a
+# PR, never a direct push to master: curation is the catalog's trust anchor
+# (plugins run in-process, unsandboxed), so a human still merges.
+#
+# Note: a PR opened with the default GITHUB_TOKEN does NOT trigger CI on that PR
+# (GitHub's loop-prevention rule). That's fine here — the diff is a JSON version
+# bump — but it's why the PR shows no checks. Re-push the branch by hand if you
+# want CI to run before merge.
+
+on:
+  schedule:
+    # 07:00 UTC daily. Cron on GitHub is best-effort and can lag under load;
+    # this is a catalog refresh, so a late run is harmless.
+    - cron: "0 7 * * *"
+  # Manual trigger for testing / on-demand refresh.
+  workflow_dispatch:
+
+# Least privilege: read the repo, write a branch + open a PR. No package or
+# id-token scope needed.
+permissions:
+  contents: write
+  pull-requests: write
+
+# One sync at a time; a slow run shouldn't overlap the next day's.
+concurrency:
+  group: catalog-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Refresh catalog from plugin releases
+        env:
+          # Raises the API rate limit and lets the script read private plugin
+          # repos if any get added to the manifest later.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/sync_catalog.py
+
+      - name: Open / update PR
+        # Idempotent: reuses the same branch + PR across days, so repeated runs
+        # update one PR instead of piling up. Skips entirely when the tree is
+        # unchanged (no plugin updates available).
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: bot/catalog-sync
+          base: master
+          commit-message: "chore(catalog): sync tracked plugins to latest releases"
+          title: "chore(catalog): sync plugin catalog to latest releases"
+          body-path: catalog-sync-body.md
+          labels: catalog, automated
+          delete-branch: true
+          add-paths: src/rustuya_manager/data/plugins.json

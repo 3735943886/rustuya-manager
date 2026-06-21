@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "_comment": "Release-tracking manifest for scripts/sync_catalog.py — NOT shipped logic, just the daily catalog-sync bot's source of truth. Maps each catalog id (data/plugins.json) to the GitHub repo that publishes it and the release-asset name pattern. {version} expands to the release tag minus its leading 'v' (e.g. tag v0.0.1rc13 -> version 0.0.1rc13). The bot reads the latest release (prereleases included), and when its version differs from the catalog entry it downloads the matching asset, computes its sha256, and rewrites the catalog entry's version/url/sha256 in a PR. Add an entry here for every plugin you want auto-tracked.",
+  "sources": {
+    "rustuya-homeassistant": {
+      "repo": "3735943886/rustuya-homeassistant",
+      "asset": "rustuya_ha-{version}-dropin.zip"
+    }
+  }
+}

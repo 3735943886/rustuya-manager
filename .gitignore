@@ -2,6 +2,8 @@
 *.json
 # …but the bundled plugin catalog ships with the package and must be tracked.
 !src/rustuya_manager/data/plugins.json
+# …and the catalog-sync bot's release-tracking manifest (see scripts/sync_catalog.py).
+!src/rustuya_manager/data/plugin-sources.json
 # …and the bundled UI translation catalogs (en.json, ko.json, …) likewise.
 !src/rustuya_manager/static/locales/*.json
 

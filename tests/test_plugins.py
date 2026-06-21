@@ -133,6 +133,30 @@ async def test_state_namespace_bumps_and_serializes():
     assert snap["plugins"] == {"hello": {"pings": 3}}
 
 
+def test_data_dir_roots_at_data_root_and_guards_traversal(tmp_path):
+    state = State()
+    client = _make_client(state)
+    root = tmp_path / "data"
+    ctx = PluginContext(PluginRegistry(), bridge_client=client, state=state, data_root=root)
+
+    d = ctx.data_dir("custom_converters")
+    assert d == root / "custom_converters"
+    assert d.is_dir()  # created on demand
+    assert ctx.data_dir("custom_converters") == d  # idempotent
+
+    for bad in ["../evil", "a/b", "/abs", ".", "..", ""]:
+        with pytest.raises(ValueError):
+            ctx.data_dir(bad)
+
+
+def test_data_dir_defaults_to_cwd_when_unmanaged(tmp_path, monkeypatch):
+    state = State()
+    client = _make_client(state)
+    monkeypatch.chdir(tmp_path)
+    ctx = PluginContext(PluginRegistry(), bridge_client=client, state=state)  # no data_root
+    assert ctx.data_dir("stuff") == tmp_path / "stuff"
+
+
 # ── (d) Page manifest + static serving ───────────────────────────────────
 def test_api_plugins_manifest_and_static(tmp_path):
     static_dir = tmp_path / "static"

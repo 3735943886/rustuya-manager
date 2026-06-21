@@ -225,11 +225,16 @@ class PluginContext:
         *,
         bridge_client: BridgeClient,
         state: State,
+        data_root: str | Path | None = None,
     ) -> None:
         self._registry = registry
         self._state = state
         self.api_version = PLUGIN_API_VERSION
         self.bridge_client = bridge_client
+        # Root for plugin-owned persistent data dirs (sibling of the managed
+        # plugin dir, so it survives plugin reinstalls). None → the process CWD,
+        # which preserves the historical "./<name>" behaviour for unmanaged runs.
+        self._data_root = Path(data_root) if data_root is not None else None
 
     def devices(self) -> dict[str, dict[str, Any]]:
         """Read-only snapshot of the cloud devices as `{id: raw_data}`.
@@ -344,6 +349,23 @@ class PluginContext:
 
     def state_namespace(self, name: str) -> StateNamespace:
         return StateNamespace(self._state, name)
+
+    def data_dir(self, name: str) -> Path:
+        """A persistent, user-visible directory a plugin owns for its on-disk data
+        (created on demand, returned as a Path).
+
+        Rooted at the data root (the parent of the managed plugin dir — i.e. a
+        sibling of `plugins/`, next to the cloud file), NOT the process CWD, so
+        the location is the same no matter where the manager was launched from and
+        survives plugin reinstalls (it lives outside `plugins/`). `name` is a
+        single path segment — traversal and absolute paths are refused."""
+        seg = Path(name)
+        if name != seg.name or not seg.name or seg.name in (".", ".."):
+            raise ValueError(f"data_dir name must be a single path segment: {name!r}")
+        base = self._data_root if self._data_root is not None else Path.cwd()
+        target = base / seg.name
+        target.mkdir(parents=True, exist_ok=True)
+        return target
 
     def add_page(
         self,

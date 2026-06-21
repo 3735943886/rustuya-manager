@@ -455,7 +455,11 @@ def build_app(
     # no routers, no pages, no static mounts, and GET /api/plugins returns empty
     # lists. The host is HA-agnostic — it never imports any specific plugin.
     registry = PluginRegistry()
-    ctx = PluginContext(registry, bridge_client=client, state=state)
+    # Plugin-owned data dirs (ctx.data_dir) live next to the managed plugin dir —
+    # i.e. the data root (the cloud file's directory), a sibling of plugins/ — so
+    # they're CWD-independent and survive plugin reinstalls.
+    data_root = Path(managed_plugin_dir).parent if managed_plugin_dir else None
+    ctx = PluginContext(registry, bridge_client=client, state=state, data_root=data_root)
     # Dedup state so a rescan only wires *new* plugins: register callables
     # already run, router objects already included, and plugin ids already
     # mounted. Routes/mounts can be added to a live Starlette app but not cleanly

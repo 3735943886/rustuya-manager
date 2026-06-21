@@ -1,7 +1,10 @@
 # Design: manager plugin runtime — reactive DPs & in-process daemons
 
-> **Status: plan, not yet implemented.** This document fixes the decisions
-> before any code is written, so the work does not proceed by trial and error.
+> **Status: implemented — Pillars 1 & 2 shipped (`PLUGIN_API_VERSION = 2`).**
+> This started as a pre-implementation design record and is kept current. It
+> fixes the decisions and explains *why* the runtime is shaped as it is; the live
+> API is in `plugins.py` (`PluginContext`) and `mqtt.py` (`BridgeClient._route`
+> and the derived-DP publish path), which are the reference for exact signatures.
 > It defines what runs *inside* the manager and where the boundary is — services
 > that must outlive manager restarts are independent and not hosted here (§6).
 > MQTT correctness is the top constraint. Source references use function names,
@@ -82,7 +85,7 @@ under it).
 | D6 | The manager **must not re-ingest** `{type}=derived` echoes through the device-event path. | Otherwise its own publish stamps `last_seen`/liveness and can loop. Filter on `{type}` in `_route`. |
 | D7 | **Rule-level cleanup is the manager's job**; device-removal cleanup is the bridge's. | The scavenger only fires on `remove`/`clear`/`reconfigure`. A rule deleted while its device still exists self-clears via `publish_raw(topic, "", retain=True)`. |
 | D8 | Derived DPs flow **outward only** — never into `State`/the WS snapshot. | No UI exposure; wire stays byte-identical to a plugin-less manager. |
-| D9 | **Phase 0–1 are folded into v0.1.0; the memory soak is reset** when they land. | Validate the new server-side execution surface *inside* the v0.1.0 soak. |
+| D9 | **Phase 0–1 were folded into v0.1.0; the memory soak was reset** when they landed (rc58). | Validate the new server-side execution surface *inside* the v0.1.0 soak. |
 | D10 | `add_service` is an **in-process async coroutine — the only daemon form.** | User's choice. Blocking work is the plugin's own `asyncio.to_thread`; the manager offers no thread/child-process daemon surface. Minimal, flexible for async Python. |
 | D11 | **Continuity-critical / hard-isolation services are NOT manager-hosted.** | The manager re-execs (`os.execvp` in `_reexec_process`) on every plugin install/enable/disable + config change. In-process daemons restart cleanly there (fine for general work); a service that can't tolerate that (a Matter fabric) is independent + MQTT. See §7. |
 | D12 | Where a clean rebuild and a patch-to-reuse compete, **rebuild clean.** | [[feedback_design_over_reuse]]. Drove the native-Rust Matter daemon over reusing the `matterbridge` pyo3 binding. |
@@ -117,7 +120,9 @@ vanish must be cleared explicitly.
 ctx.watch_dps(handler)                 # async (device_id, dps: dict, origin) -> None
 ctx.watch_device(device_id, handler)   # filtered convenience
 ctx.watch_dp(device_id, dp, handler)   # filtered convenience
-#   origin ∈ {"device"} for real events. Derived echoes never fire watchers.
+#   origin is "device" for a live event and "retained" for the retained-snapshot
+#   replay on (re)connect, so a handler can tell an initial-state seed from a real
+#   change. Derived echoes are filtered at _route and never fire watchers.
 #   handler keeps its own state in a closure → stateful/accumulator logic is free.
 
 # derived output — a registered object with a lifecycle, not fire-and-forget:
@@ -142,16 +147,17 @@ Existing surfaces (`add_mqtt_subscription`, `publish_raw`, `state_namespace`,
 `add_api_router`, pages) are unchanged — and are exactly how a plugin talks to
 an *external* service (§7). `derived_dp` is a thin wrapper over `publish_raw`;
 full control stays available via `publish_raw` + `bridge_config()`.
-`PLUGIN_API_VERSION` bumps once, when these land.
+`PLUGIN_API_VERSION` is now `2`; a plugin gates on these methods with
+`ctx.api_version >= 2`.
 
 ---
 
 ## 6. In-process daemon supervision (Pillar 2)
 
-`add_service` reuses the embedded-bridge supervision pattern
-(`_EmbeddedBridgeSupervisor`: `asyncio.Event` stop, crash backoff,
-`await wait_for(task, …)` shutdown) — clean reuse of a mechanism that already
-fits, not a patch.
+`add_service` is supervised by `ServiceSupervisor` (plugins.py), which reuses
+the embedded-bridge supervision pattern (`_EmbeddedBridgeSupervisor`:
+`asyncio.Event` stop, crash backoff, `await wait_for(task, …)` shutdown) — clean
+reuse of a mechanism that already fits, not a patch.
 
 - **start** after bootstrap (templates resolved, MQTT connected) so the service
   can use the bus immediately.
@@ -238,23 +244,27 @@ Each invariant gets a regression test (§10).
 
 ## 10. Phasing & test gates
 
-**Phase 0 — boundary contract.** API signatures, the `_route` `{type}=derived`
-filter, `PLUGIN_API_VERSION` bump. No behaviour change. *Gate:* existing plugin
-tests pass; a new test asserts `{type}=derived` is dropped by `_route`
-(invariant 2).
+All three phases shipped in v0.1.0; the gates below are the regression tests
+that now guard them.
 
-**Phase 1 — reactive (the now-task).** Folded into v0.1.0; the soak resets when
-Phase 0–1 land (D9). `watch_dps`/`watch_device`/`watch_dp`,
-`derived_dp().set/clear`, `set_device_dp`, and an example plugin: combine two
-Tuya DPs → derived DP → HA. *Gates:* (a) a watcher fires on a real event and not
-on a derived echo; (b) `set()` publishes `{type}=derived` with retain mirroring
-config; (c) `clear()` empties it; (d) a simulated device `remove` leaves no
-orphan; (e) invariants 1–4 each have a test.
+**Phase 0 — boundary contract (shipped).** API signatures, the `_route`
+`{type}=derived` filter, `PLUGIN_API_VERSION` bump. No behaviour change. *Gate:*
+existing plugin tests pass; a test asserts `{type}=derived` is dropped by
+`_route` (invariant 2).
 
-**Phase 2 — in-process daemons.** `add_service` supervision (§6): start after
-bootstrap, crash backoff, graceful stop on shutdown/re-exec, soak attribution.
-*Gates:* a service starts, drives the bus, survives a crash via backoff, is
-cancelled+awaited on shutdown (invariant 6), restarts cleanly across a re-exec.
+**Phase 1 — reactive (shipped).** Folded into v0.1.0; the soak was reset when
+Phase 0–1 landed (D9). `watch_dps`/`watch_device`/`watch_dp`,
+`derived_dp().set/clear`, `set_device_dp`, and the `examples/derived_plugin`
+example: combine two Tuya DPs → derived DP → HA. *Gates:* (a) a watcher fires on
+a real event and not on a derived echo; (b) `set()` publishes `{type}=derived`
+with retain mirroring config; (c) `clear()` empties it; (d) a simulated device
+`remove` leaves no orphan; (e) invariants 1–4 each have a test.
+
+**Phase 2 — in-process daemons (shipped).** `add_service` supervision (§6,
+`ServiceSupervisor`): start after bootstrap, crash backoff, graceful stop on
+shutdown/re-exec, soak attribution. *Gates:* a service starts, drives the bus,
+survives a crash via backoff, is cancelled+awaited on shutdown (invariant 6),
+restarts cleanly across a re-exec.
 
 **Matter (separate repos).** The independent ecosystem (§7) is phased in
 `../matterdaemon/docs/` and `../rustuya-matter/docs/`. The manager's only
@@ -265,7 +275,7 @@ no runtime coupling to this document.
 
 ## 11. Resolved decisions
 
-- **Soak timing → D9:** fold Phase 0–1 into v0.1.0, reset the soak clock.
+- **Soak timing → D9:** Phase 0–1 folded into v0.1.0, soak clock reset (rc58).
 - **UI exposure → D8:** derived DPs flow outward only; wire stays byte-identical.
 - **Daemon form → D10:** `add_service` = in-process async coroutine only; no
   thread/child/external form.

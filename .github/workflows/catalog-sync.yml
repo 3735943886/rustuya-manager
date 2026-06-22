@@ -20,6 +20,10 @@ on:
     - cron: "0 7 * * *"
   # Manual trigger for testing / on-demand refresh.
   workflow_dispatch:
+  # A tracked plugin just cut a release and pinged us (publish.yml → repos/.../
+  # dispatches event_type=plugin-released) — refresh now instead of next cron.
+  repository_dispatch:
+    types: [plugin-released]
 
 # Least privilege: read the repo, write a branch + open a PR. No package or
 # id-token scope needed.
@@ -56,6 +60,11 @@ jobs:
         # unchanged (no plugin updates available).
         uses: peter-evans/create-pull-request@v7
         with:
+          # A PAT (if configured) authors the PR — which both lets the bot open
+          # PRs at all (the default GITHUB_TOKEN is blocked by the repo's "Allow
+          # Actions to create PRs" setting) and makes the PR trigger CI. Falls
+          # back to GITHUB_TOKEN when unset. PAT scope: Contents + Pull requests: write.
+          token: ${{ secrets.CATALOG_BOT_TOKEN || github.token }}
           branch: bot/catalog-sync
           base: master
           commit-message: "chore(catalog): sync tracked plugins to latest releases"

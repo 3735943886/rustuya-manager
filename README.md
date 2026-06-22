@@ -121,25 +121,13 @@ Common flags:
   directory as `--cloud`, matching the standalone bridge's filename) —
   embedded bridge's device state file. **Only meaningful with
   `--embed-bridge`.**
-- `--bridge-config PATH` (default off) — JSON config file for the
-  embedded bridge. Same format as `rustuya-bridge --config`: existing
-  file is read and merged, missing file is auto-created from the
-  merged settings. Allows setting custom topics / MQTT auth / scanner
+- `--bridge-config PATH` (default off) — JSON config for the embedded
+  bridge, same format as `rustuya-bridge --config` (read and merged;
+  auto-created if missing). Sets custom topics / MQTT auth / scanner
   options without re-exposing every bridge flag here. **Only meaningful
-  with `--embed-bridge`** — ignored otherwise.
-
-  Special handling for the three fields that the manager and the bridge
-  *both* care about (`mqtt_broker`, `mqtt_root_topic`, `state_file`):
-  when `--bridge-config` supplies them, the manager adopts them as its
-  own defaults too, so they only need to be specified once. Precedence:
-    1. CLI flag (`--broker`, `--root`, `--bridge-state`)
-    2. value from `--bridge-config`
-    3. manager default (`mqtt://localhost:1883`, `rustuya`, `rustuya.json`
-       next to `--cloud`)
-
-  If a CLI flag and the bridge-config value disagree, the CLI value
-  overrides (the embedded bridge ends up with the same kwarg) and a
-  warning is logged so the contradiction doesn't go unnoticed.
+  with `--embed-bridge`.** For the three fields the manager and bridge
+  share (`mqtt_broker`, `mqtt_root_topic`, `state_file`) the manager
+  adopts the config's values as its own defaults; a CLI flag still wins.
 
 ### Run as a service (systemd, user-level, no sudo)
 
@@ -168,10 +156,10 @@ systemctl --user restart rustuya-manager
 
 ## Docker
 
-Single-container deploy with the bridge bundled in. Aimed at HA OS,
-unraid, CasaOS, and similar container-first setups — distinct from the
+Single-container deploy with the bridge bundled in — aimed at HA OS,
+unraid, CasaOS and similar container-first setups (distinct from the
 pipx + systemd track above, which keeps `rustuya-bridge` as a separate
-service.
+service).
 
 ```bash
 docker run -d \
@@ -183,36 +171,23 @@ docker run -d \
   3735943886/rustuya-manager:latest
 ```
 
-The broker defaults to `mqtt://localhost:1883` (which `--network host`
-makes a host-local mosquitto). For a remote broker, set `mqtt_broker`
-in `/data/config.json` (the embedded bridge auto-creates this on first
-boot) — that's the single source of truth the bridge already reads. The
-`BROKER` env var is still available as a quick override but is not
-shown here on purpose: the env-vs-config-file precedence story (see the
-table below) is easier to keep straight when one place owns the value.
+The image runs `rustuya-manager --web --embed-bridge`, so manager and
+bridge share one process and the only external dependency is an MQTT
+broker. Key points:
 
-`--restart unless-stopped` is intentional: with `--embed-bridge` on (the
-image default), the manager process is the de-facto supervisor for the
-in-process bridge task. `_EmbeddedBridgeSupervisor` respawns it across
-reconfigure and crashes, but once that gives up (rate limit) only a
-manager-process restart recovers it (see
-[docs/internals.md §1.2–1.3](docs/internals.md)).
-Restarting the manager container respawns a fresh embedded bridge with
-it, so docker's restart policy covers both. Drop the flag only if you
-deliberately want a one-shot, non-resilient run.
-
-The image runs `rustuya-manager --web --embed-bridge` — manager and
-bridge live in the same process, so the only external dependency is an
-MQTT broker. If you're already running rustuya-bridge separately
-(systemd service or a sibling container) and pointing both at the
-same broker, pass `-e EMBED_BRIDGE=0` so the container doesn't spawn
-a second bridge that would double-publish on the same MQTT topics.
-
-`--network host` is **required**: the embedded `rustuya-bridge` scans
-the LAN with UDP broadcasts on ports 6666/6667 to discover Tuya
-devices, and Docker's default bridge network isolates broadcast
-traffic to the docker bridge — devices are never seen. Host networking
-gives the container direct access to the LAN segment.
+- **`--network host` is required** — the embedded bridge discovers Tuya
+  devices with UDP broadcasts (ports 6666/6667), which Docker's default
+  bridge network drops, so devices are never seen.
+- **Broker** defaults to `mqtt://localhost:1883` (host-local mosquitto
+  under `--network host`). For a remote broker, set `mqtt_broker` in
+  `/data/config.json` — the embedded bridge auto-creates that file and
+  treats it as the single source of truth.
+- **Already running a separate bridge?** Pass `-e EMBED_BRIDGE=0` so the
+  container doesn't spawn a second one that double-publishes on the same
+  topics.
+- **`--restart unless-stopped`** lets Docker recover the manager — and
+  with it a fresh embedded bridge — after the in-process supervisor hits
+  its restart rate limit.
 
 Environment variables (defaults shown; all optional unless noted):
 
@@ -220,44 +195,33 @@ Environment variables (defaults shown; all optional unless noted):
 |---|---|---|
 | `HOST` | `0.0.0.0` | `--host` |
 | `PORT` | `8373` | `--port` |
-| `BROKER` | *(unset — manager falls back to bridge-config, then `mqtt://localhost:1883`)* | `--broker` |
-| `ROOT` | *(unset — manager falls back to bridge-config, then `rustuya`)* | `--root` |
+| `BROKER` | *(unset → bridge-config, then `mqtt://localhost:1883`)* | `--broker` |
+| `ROOT` | *(unset → bridge-config, then `rustuya`)* | `--root` |
 | `AUTH` | *(off)* | `--auth USER:PASS` |
 | `CLOUD` | `/data/tuyadevices.json` | `--cloud` |
 | `PLUGIN_DIR` | `/data/plugins` | `--plugin-dir` |
 | `BRIDGE_CONFIG` | `/data/config.json` | `--bridge-config` |
-| `BRIDGE_STATE` | *(unset — manager falls back to bridge-config `state_file`, then `/data/rustuya.json`)* | `--bridge-state` |
+| `BRIDGE_STATE` | *(unset → bridge-config `state_file`, then `/data/rustuya.json`)* | `--bridge-state` |
 | `PUID` | `1000` | UID the app runs as |
 | `PGID` | `1000` | GID the app runs as |
-| `EMBED_BRIDGE` | `1` | `--embed-bridge` (set `0` to skip when an external bridge is already on the broker) |
+| `EMBED_BRIDGE` | `1` | `--embed-bridge` (set `0` when an external bridge is already on the broker) |
 
-`BROKER` / `ROOT` / `BRIDGE_STATE` are deliberately left **unset** in the
-image — the entrypoint only adds the corresponding `--broker` / `--root`
-/ `--bridge-state` flag when the env var is set. Leaving them unset
-means edits to `/data/config.json` (`mqtt_broker`, `mqtt_root_topic`,
-`state_file`) win on their own, with no second source of truth in the
-container env to silently override them. Setting the env var still
-overrides bridge-config (with a startup warning if they disagree) for
-the case where the env IS the canonical place.
+All persistent state lives under `/data` — cloud cache
+(`tuyadevices.json`), wizard credentials (`tuyacreds.json`), bridge
+config (`config.json`) and bridge state (`rustuya.json`) — so the volume
+is the only backup target. Pass an empty value to disable an optional
+flag (e.g. `-e BRIDGE_CONFIG=`).
 
-Every persistent artifact — cloud cache (`tuyadevices.json`), wizard
-credentials (`tuyacreds.json`), embedded bridge config (`config.json`,
-auto-created on first run from defaults), and bridge state
-(`rustuya.json`) — lives under `/data` so the volume is the sole
-backup target. To disable any of the optional flags pass an empty
-value, e.g. `-e BRIDGE_CONFIG=` to skip writing a bridge config file.
-
-For **bind-mounted** host directories (`-v /host/path:/data` instead
-of the named-volume `rustuya-manager-data:/data`), pass `PUID`/`PGID`
-so the in-container user can write to them:
+For **bind-mounted** host directories (`-v /host/path:/data`), pass
+`PUID`/`PGID` so the in-container user can write to them:
 
 ```bash
 -e PUID=$(id -u) -e PGID=$(id -g)
 ```
 
-The entrypoint then renumbers its internal `manager` user to that
-UID/GID and `chown`s `/data` on startup, so any host owner works. With
-named volumes Docker handles ownership and the defaults are fine.
+The entrypoint renumbers its internal `manager` user to that UID/GID and
+`chown`s `/data` on startup. Named volumes need none of this — Docker
+handles ownership.
 
 ### Plugins
 

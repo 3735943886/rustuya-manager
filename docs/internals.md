@@ -200,3 +200,50 @@ re-subscribe (the shared `pyo3-async-runtimes` tokio runtime is *not*
 rebuilt per restart, unlike the old thread route's per-server runtime), on
 the order of a few hundred milliseconds, which is the implicit budget any
 user of `reconfigure` already accepts.
+
+---
+
+## 2. Embedded bridge configuration: one source of truth per setting
+
+Three settings are needed by *both* the manager and the embedded bridge:
+`mqtt_broker`, `mqtt_root_topic`, and `state_file` (the bridge's device-state
+path). Specifying each in two places — a manager CLI flag and the bridge's
+config file — invites them to disagree, so the manager resolves a single value
+per setting with a fixed precedence:
+
+1. The manager CLI flag (`--broker`, `--root`, `--bridge-state`).
+2. The value from `--bridge-config`, when that file supplies it.
+3. The manager's own default (`mqtt://localhost:1883`, `rustuya`, and
+   `rustuya.json` next to `--cloud`).
+
+`_apply_bridge_config_defaults` / `_apply_manager_defaults`
+([cli.py](../src/rustuya_manager/cli.py)) implement this: a value taken from
+`--bridge-config` becomes the manager's default too, so the setting is written
+once and both halves agree. When a CLI flag and the bridge-config value
+disagree, the CLI value wins (the embedded bridge is handed the same kwarg) and
+a warning is logged so the contradiction is visible rather than silent.
+
+### 2.1 Docker: config.json as the canonical store
+
+The image leaves `BROKER`, `ROOT`, and `BRIDGE_STATE` **unset** on purpose. The
+entrypoint adds the matching `--broker` / `--root` / `--bridge-state` flag only
+when its env var is set, so with them unset the values in `/data/config.json`
+(`mqtt_broker`, `mqtt_root_topic`, `state_file`) are the sole source: editing
+that file takes effect with no second value in the container env to outrank it
+(precedence rule 1 above would win over the file). Setting the env var is still
+supported for the case where the env *is* the canonical place — it then
+overrides the config file, with the same startup warning on a disagreement.
+
+This is why the README configures a remote broker by editing `config.json`
+rather than by setting `BROKER`: it keeps one place authoritative.
+
+### 2.2 Docker restart policy and the in-process supervisor
+
+With `--embed-bridge` on (the image default) the manager process is the
+de-facto supervisor of the in-process bridge task. `_EmbeddedBridgeSupervisor`
+(§1.3) respawns the bridge across `reconfigure` and crashes, but once it hits
+its rate limit (`_MAX_RESTARTS_IN_WINDOW` exits in `_WINDOW_SEC`) it gives up,
+and only a restart of the *manager* process brings the bridge back. `--restart
+unless-stopped` is what supplies that outer restart under Docker: restarting the
+container respawns the manager and, with it, a fresh embedded bridge. Drop the
+flag only for a deliberately one-shot, non-resilient run.

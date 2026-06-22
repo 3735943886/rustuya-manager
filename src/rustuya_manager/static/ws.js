@@ -3,7 +3,7 @@
 // re-render — there's no incremental diffing on the client.
 
 import { state } from "./state.js";
-import { render } from "./render.js";
+import { renderFromPush } from "./render.js";
 import { notifyPluginState } from "./plugins.js";
 import { t } from "./i18n.js";
 
@@ -59,7 +59,7 @@ export function connect() {
       lastBootId = bootId;
     }
     state.snapshot = snap;
-    render();
+    renderFromPush();  // defer if the user is mid-gesture (drag/selection/open <select>)
     // Fan the frame out to plugin pages (no-op when no plugins are installed).
     notifyPluginState(state.snapshot);
   };

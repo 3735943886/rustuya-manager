@@ -29,6 +29,51 @@ export function render() {
   renderDevices();
 }
 
+// ── Defer push-driven re-renders while the user is mid-gesture ──────────────
+// Each WS frame rebuilds the device list (renderDevices does `innerHTML = ""`),
+// which would drop an in-progress text selection, an open <select>, or a drag —
+// the "I dragged, waited, and it let go" bug. So a frame that lands mid-gesture
+// is remembered, not applied, and re-rendered the moment the gesture ends. The
+// list still converges to the latest state; it just never yanks the DOM out
+// from under an active interaction. User-initiated renders (filter/search/sort)
+// keep calling render() directly, so they stay instant.
+let _pointerDown = false;
+let _pendingPush = false;
+
+function userIsInteracting() {
+  if (_pointerDown) return true; // a drag (text selection, slider, …) in progress
+  const a = document.activeElement;
+  if (a && a.tagName === "SELECT") return true; // an open native dropdown keeps focus
+  const sel = window.getSelection && window.getSelection();
+  if (sel && sel.type === "Range" && String(sel).length) return true; // a live text selection
+  return false;
+}
+
+function flushPendingRender() {
+  if (_pendingPush && !userIsInteracting()) {
+    _pendingPush = false;
+    render();
+  }
+}
+
+if (typeof document !== "undefined") {
+  // Capture phase so the flag is set before any handler that might re-render.
+  document.addEventListener("pointerdown", () => { _pointerDown = true; }, true);
+  document.addEventListener("pointerup", () => { _pointerDown = false; flushPendingRender(); }, true);
+  document.addEventListener("selectionchange", flushPendingRender);
+  // focusout fires as a <select>/field is left; let focus settle, then flush.
+  document.addEventListener("focusout", () => setTimeout(flushPendingRender, 0));
+}
+
+// WS frames render through here so an incoming snapshot can't interrupt a gesture.
+export function renderFromPush() {
+  if (userIsInteracting()) {
+    _pendingPush = true;
+    return;
+  }
+  render();
+}
+
 export function renderWarnings() {
   const ws = state.snapshot.warnings || {};
   const keys = Object.keys(ws);

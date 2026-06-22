@@ -71,8 +71,9 @@
            the plugin host (plugins.js) when a plugin tab is active. The
            disclosure triangle is stripped from <summary> globally in <head>. -->
       <details id="actions-menu" class="relative">
-        <summary class="w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none cursor-pointer select-none" title="Menu" data-i18n-attr="title:header.menuTitle">
+        <summary class="relative w-8 h-8 inline-flex items-center justify-center rounded border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-base leading-none cursor-pointer select-none" title="Menu" data-i18n-attr="title:header.menuTitle">
           ☰
+          <span id="actions-menu-dot" class="hidden absolute top-0.5 right-0.5 w-2 h-2 rounded-full bg-amber-500 ring-2 ring-white dark:ring-slate-900" aria-hidden="true"></span>
         </summary>
         <div data-actions-panel class="absolute right-0 top-full mt-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded shadow-lg p-1 z-20 min-w-[200px]"></div>
       </details>

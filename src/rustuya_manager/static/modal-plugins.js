@@ -16,6 +16,7 @@
 
 import { escapeHtml, toast, button } from "./dom.js";
 import { confirm } from "./modal-confirm.js";
+import { setHeaderAttention } from "./header-actions.js";
 import { t } from "./i18n.js";
 import {
   getCatalog,
@@ -215,6 +216,11 @@ function setRestart() {
   needsRestart = true;
   $restart.classList.remove("hidden");
   $note.textContent = t("plugins.restartRequired");
+  // Mark the built-in "Restart manager" item too, so the cue survives closing
+  // the modal — the hamburger dot persists until an actual restart (which
+  // reloads the page and resets it). "restart-btn" is the id registered in
+  // app.js setupHeaderActions.
+  setHeaderAttention("restart-btn", true);
 }
 
 async function doRestart() {

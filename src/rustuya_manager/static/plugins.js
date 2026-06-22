@@ -10,7 +10,7 @@ import { state } from "./state.js";
 import { render } from "./render.js";
 import { toast } from "./dom.js";
 import { confirm } from "./modal-confirm.js";
-import { registerHeaderAction, renderActionsMenu } from "./header-actions.js";
+import { registerHeaderAction, renderActionsMenu, setHeaderAttention } from "./header-actions.js";
 import { t, getLang, onLangChange } from "./i18n.js";
 
 let manifest = [];
@@ -99,6 +99,10 @@ function pluginCtx(opts = {}) {
       registerHeaderAction({ order: 200, ...action, scope });
       renderActionsMenu();
     },
+    // Flag (or clear) one of this plugin's own header items as needing notice:
+    // an amber dot on the item and on the collapsed hamburger. Pass the same
+    // `id` used in addHeaderAction. Re-renders the menu.
+    setHeaderAttention: (id, on) => setHeaderAttention(id, on),
   };
 }
 

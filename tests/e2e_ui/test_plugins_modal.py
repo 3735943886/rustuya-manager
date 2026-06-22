@@ -92,3 +92,39 @@ def test_install_round_trip(page, plugin_server):
     expect(body).to_contain_text("installed")
     expect(body.get_by_role("button", name="Disable")).to_be_visible()
     expect(body.get_by_role("button", name="Uninstall")).to_be_visible()
+
+
+def test_restart_attention_dot_persists(page, plugin_server):
+    # A restart-requiring plugin action flags the built-in "Restart manager"
+    # item: a dot on the collapsed hamburger and on the item itself. The cue must
+    # outlive closing the modal AND a language switch (which re-registers the
+    # built-in header actions) — it should clear only on an actual restart, which
+    # reloads the page.
+    _open_modal(page, plugin_server)
+    body = page.locator("#plugins-modal-body")
+    dot = page.locator("#actions-menu-dot")
+
+    # Nothing needs attention before a restart-requiring action.
+    expect(dot).to_be_hidden()
+
+    # Install is live (no restart); Disable flips the enable flag → restart
+    # required → the attention cue lights up.
+    body.get_by_role("button", name="Install").click()
+    expect(body).to_contain_text("installed")
+    body.get_by_role("button", name="Disable").click()
+    expect(dot).to_be_visible()
+
+    # Survives closing the modal.
+    page.click("#plugins-modal-done")
+    expect(page.locator("#plugins-modal")).to_be_hidden()
+    expect(dot).to_be_visible()
+
+    # The "Restart manager" item carries its own dot when the menu is opened.
+    page.click("#actions-menu > summary")
+    expect(page.locator("#restart-btn span.bg-amber-500")).to_be_visible()
+
+    # Regression: switching the language re-registers the built-in actions; the
+    # attention flag must be preserved across that re-register, not wiped.
+    page.click("#lang-toggle")
+    page.click("#lang-opt-ko")
+    expect(dot).to_be_visible()

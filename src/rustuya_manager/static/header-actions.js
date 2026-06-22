@@ -21,6 +21,10 @@
 //     order         sort key (built-ins 10..110; plugins default 200+)
 //     dividerBefore insert a separator above this item
 //     danger        amber styling (used by Reconfigure / Restart)
+//     attention     show an amber dot on the item AND on the collapsed
+//                   hamburger, flagging an item that needs the user's notice
+//                   (e.g. "Restart manager" after a plugin change). Toggle it
+//                   later by id with setHeaderAttention(id, on).
 //     title         tooltip
 //     onClick       (ev, btn) => void
 
@@ -38,8 +42,13 @@ const DANGER_CLS =
 // after a batch of registrations.
 export function registerHeaderAction(action) {
   if (!action || !action.id) return;
-  const next = { order: 100, ...action };
   const i = actions.findIndex((a) => a.id === action.id);
+  // `attention` is transient runtime state, not part of the static declaration.
+  // Carry it across a re-register that doesn't mention it — a language switch
+  // re-declares the built-ins with fresh labels and must not clear an active
+  // cue. An explicit `attention` in `action` still wins (the spread overrides).
+  const prevAttention = i >= 0 ? actions[i].attention : undefined;
+  const next = { order: 100, attention: prevAttention, ...action };
   if (i >= 0) actions[i] = next;
   else actions.push(next);
 }
@@ -84,12 +93,33 @@ export function renderActionsMenu() {
     // `keepOpen` items (the language submenu toggle) don't dismiss the dropdown
     // on click — the dismiss handler in app.js checks for this marker.
     if (a.keepOpen) btn.dataset.keepOpen = "";
+    // `attention` → a right-aligned amber dot (ml-auto pushes it to the edge of
+    // the flex row), mirrored by the hamburger dot toggled below.
+    const attentionDot = a.attention
+      ? `<span class="ml-auto w-2 h-2 rounded-full bg-amber-500" aria-hidden="true"></span>`
+      : "";
     btn.innerHTML =
       `<span class="w-5 text-center">${a.iconHtml || ""}</span>` +
-      `<span>${a.labelHtml || ""}</span>`;
+      `<span>${a.labelHtml || ""}</span>` +
+      attentionDot;
     if (typeof a.onClick === "function") {
       btn.addEventListener("click", (ev) => a.onClick(ev, btn));
     }
     panel.appendChild(btn);
   }
+  // The menu is collapsed by default, so the dot on the hamburger itself is what
+  // draws the eye — show it whenever any registered action wants attention.
+  const dot = document.getElementById("actions-menu-dot");
+  if (dot) dot.classList.toggle("hidden", !sorted.some((a) => a.attention));
+}
+
+// Toggle the `attention` marker on a registered action by id and re-render. A
+// no-op if the id is unknown or already in the requested state. Built-ins call
+// this (e.g. when a plugin change needs a restart); plugins reach it through
+// `ctx.setHeaderAttention`.
+export function setHeaderAttention(id, on) {
+  const a = actions.find((x) => x.id === id);
+  if (!a || !!a.attention === !!on) return;
+  a.attention = !!on;
+  renderActionsMenu();
 }

@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__
+from . import __version__, versions
 from . import catalog as plugin_catalog
 from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
 from .models import Device
@@ -95,6 +96,9 @@ def serialize_state(state: State) -> dict[str, Any]:
     else:
         diff_payload = {"synced": [], "mismatched": [], "missing": [], "orphaned": []}
     tpl = state.templates
+    # Resolved once: feeds both the displayed bridge version and the
+    # bridge_update compare below.
+    bridge_version = (state.bridge_config_raw or {}).get("version")
     snapshot: dict[str, Any] = {
         "version": state.version,
         # Per-process id; a change across a reconnect tells the client the
@@ -125,10 +129,10 @@ def serialize_state(state: State) -> dict[str, Any]:
         "cloud_loaded": bool(state.cloud),
         # Bridge-reported diagnostics from the latest paginated `status` reply.
         # device_count is the authoritative total; mqtt_drop_count is cumulative
-        # publish drops. Surfaced in the "Bridge info" drawer.
+        # publish drops. Surfaced in the Info panel.
         "device_count": state.device_count,
         "mqtt_drop_count": state.mqtt_drop_count,
-        # How the bridge is sourced, for the "Bridge info" drawer. "embedded" =
+        # How the bridge is sourced, for the Info panel. "embedded" =
         # spawned in-process via --embed-bridge; "external" = a separate bridge
         # over MQTT. `embed_requested` lets the UI flag the conflict case
         # (embed asked for, but an external bridge already owned the root so the
@@ -137,8 +141,22 @@ def serialize_state(state: State) -> dict[str, Any]:
         "bridge_mode": "embedded" if state.bridge_embedded else "external",
         "embed_requested": state.embed_requested,
         # Running bridge build, published into {root}/bridge/config since bridge
-        # 0.2.0rc25 (None when an older bridge omits it). Same debug drawer.
-        "bridge_version": (state.bridge_config_raw or {}).get("version"),
+        # 0.2.0rc25 (None when an older bridge omits it). Same Info panel.
+        "bridge_version": bridge_version,
+        # Online "update available" check for the Info panel (informational —
+        # the manager doesn't self-update or update an external bridge). The
+        # background task in build_app fills *_latest from PyPI; the booleans
+        # are computed here so they track the live bridge_version, which can
+        # arrive after the version check has already run. manager_version is the
+        # one place __version__ reaches the UI. None latest ⇒ couldn't check ⇒
+        # no badge. Wheel and config-reported bridge versions share a scheme now
+        # (the wheel was re-tagged to the bridge crate version), so this compare
+        # is apples-to-apples.
+        "manager_version": __version__,
+        "manager_latest": state.manager_latest,
+        "manager_update": versions.is_newer(__version__, state.manager_latest),
+        "bridge_latest": state.bridge_latest,
+        "bridge_update": versions.is_newer(bridge_version, state.bridge_latest),
         # Wholesale dict (id → sighting) from the last LAN scan. Empty
         # until the first scan completes. Dataclass → dict here keeps
         # the WS frame schema-stable for the UI (no datetime/None
@@ -241,11 +259,44 @@ def build_app(
         supervisor = getattr(app.state, "service_supervisor", None)
         if supervisor is not None:
             await supervisor.start()
+        version_task = asyncio.create_task(_version_check_loop())
         try:
             yield
         finally:
+            version_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await version_task
             if supervisor is not None:
                 await supervisor.stop()
+
+    async def _version_check_loop() -> None:
+        """Keep state.{manager,bridge}_latest current from PyPI for the Info
+        panel's update badge. Best-effort and entirely off the request path:
+        seed instantly from the disk cache (so a restart shows the badge without
+        waiting on the network), then poll once per TTL. Every failure mode —
+        offline, PyPI down, parse error — is swallowed; the panel just doesn't
+        show a badge. The managed plugin dir doubles as the cache location (like
+        the catalog cache); with no managed dir we simply skip the disk cache."""
+        cache_dir = managed_plugin_dir
+        cached = await asyncio.to_thread(versions.read_cache, cache_dir)
+        if cached is not None:
+            latest, fetched_at = cached
+            await state.set_latest_versions(
+                manager=latest.get("manager"), bridge=latest.get("bridge")
+            )
+            if versions.cache_is_fresh(fetched_at):
+                await asyncio.sleep(versions.CACHE_TTL_S - (time.time() - fetched_at))
+        while True:
+            try:
+                latest = await asyncio.to_thread(versions.fetch_latest)
+                if cache_dir is not None and any(latest.values()):
+                    await asyncio.to_thread(versions.write_cache, cache_dir, latest, time.time())
+                await state.set_latest_versions(
+                    manager=latest.get("manager"), bridge=latest.get("bridge")
+                )
+            except Exception:  # noqa: BLE001 - best-effort; never break the loop
+                logger.debug("version check iteration failed", exc_info=True)
+            await asyncio.sleep(versions.CACHE_TTL_S)
 
     app = FastAPI(title="rustuya-manager", version=__version__, lifespan=_lifespan)
     if auth:

@@ -145,18 +145,21 @@ export function renderTemplates() {
     !!(snap.warnings && snap.warnings.embedded_bridge_aborted);
   renderBridgeModeBadge(mode, conflict);
 
-  const t = snap.templates;
-  if (!t) return;
+  // NB: the i18n function is imported as `t` at module scope, so the resolved
+  // templates object must NOT shadow it here — later rows call t("…") for the
+  // mode label / update chip / conflict note.
+  const tpl = snap.templates;
+  if (!tpl) return;
   $templates.innerHTML = "";
   // Root is surfaced here (rather than as a header label) so the header
   // stays compact and doesn't wrap to two lines on narrow viewports.
   const lines = [
-    ["root",    t.root],
-    ["command", t.command],
-    ["event",   t.event],
-    ["message", t.message],
-    ["scanner", t.scanner],
-    ["payload", t.payload],
+    ["root",    tpl.root],
+    ["command", tpl.command],
+    ["event",   tpl.event],
+    ["message", tpl.message],
+    ["scanner", tpl.scanner],
+    ["payload", tpl.payload],
   ];
   for (const [k, v] of lines) {
     const row = document.createElement("div");
@@ -167,29 +170,37 @@ export function renderTemplates() {
     $templates.appendChild(row);
   }
 
-  // Bridge-reported diagnostics from the latest status reply live in this same
-  // drawer — authoritative totals kept out of the tight header. device_count
-  // is the bridge's full fleet size; mqtt drops is its cumulative publish-drop
-  // count (highlighted when non-zero, mirroring the warning banner). The mode
-  // row goes amber on the embed→external conflict.
+  // Diagnostics block: manager + bridge versions, then bridge-reported totals
+  // from the latest status reply (device_count is the full fleet size; mqtt
+  // drops is the cumulative publish-drop count, highlighted when non-zero like
+  // the warning banner). The bridge row folds its mode in as a "· embedded/
+  // external" suffix — the standalone mode row is gone, the summary badge
+  // already carries it — and goes amber on the embed→external conflict. manager
+  // and bridge each show an "update available" chip when the online check found
+  // a newer release on PyPI.
   const divider = document.createElement("div");
   divider.className = "border-t border-slate-200 dark:border-slate-700 my-1";
   $templates.appendChild(divider);
   const drops = Number(snap.mqtt_drop_count || 0);
+  const modeLabel =
+    mode === "embedded" ? t("bridge.modeEmbedded") : t("bridge.modeExternal");
   const diag = [
-    ["bridge", snap.bridge_version || "—", false],
-    ["devices", snap.device_count != null ? String(snap.device_count) : "—", false],
-    ["mqtt drops", String(drops), drops > 0],
-    ["mode", mode, conflict],
+    ["manager", snap.manager_version || "—", { update: !!snap.manager_update }],
+    ["bridge", snap.bridge_version || "—", { suffix: modeLabel, warn: conflict, update: !!snap.bridge_update }],
+    ["devices", snap.device_count != null ? String(snap.device_count) : "—", {}],
+    ["mqtt drops", String(drops), { warn: drops > 0 }],
   ];
-  for (const [k, v, warn] of diag) {
-    const row = document.createElement("div");
-    row.className = "flex";
-    const valueCls = warn
-      ? "flex-1 min-w-0 break-all text-amber-600 dark:text-amber-400 font-medium"
-      : "flex-1 min-w-0 break-all";
-    row.innerHTML = `<span class="text-slate-400 dark:text-slate-500 w-20 shrink-0">${k}</span><span class="${valueCls}">${escapeHtml(v)}</span>`;
-    $templates.appendChild(row);
+  for (const [k, v, opts] of diag) {
+    $templates.appendChild(diagRow(k, v, opts));
+  }
+
+  // Amber dot on the (possibly collapsed) summary whenever anything can be
+  // updated — the cue to expand and read which component it is.
+  const dot = document.getElementById("info-update-dot");
+  if (dot) {
+    const anyUpdate = !!(snap.manager_update || snap.bridge_update);
+    dot.classList.toggle("hidden", !anyUpdate);
+    dot.title = anyUpdate ? t("info.updateAvailable") : "";
   }
 
   // Spell out the conflict — a colored "external" value is easy to miss.
@@ -205,8 +216,30 @@ export function renderTemplates() {
   }
 }
 
-// Fill the mode badge on the Bridge-info <summary> so embedded/external (and
-// the conflict) is visible even with the drawer collapsed.
+// One row in the Info panel's diagnostics block: a fixed-width muted label, a
+// value that can wrap, an optional muted "· suffix" (the bridge mode), and an
+// optional amber "update available" chip. The value goes amber+bold when warn.
+function diagRow(label, value, { warn = false, suffix = null, update = false } = {}) {
+  const row = document.createElement("div");
+  row.className = "flex items-center";
+  const valueCls = warn
+    ? "flex-1 min-w-0 break-all text-amber-600 dark:text-amber-400 font-medium"
+    : "flex-1 min-w-0 break-all";
+  const suffixHtml = suffix
+    ? `<span class="text-slate-400 dark:text-slate-500"> · ${escapeHtml(suffix)}</span>`
+    : "";
+  const chipHtml = update
+    ? `<span class="ml-2 shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700">${escapeHtml(t("info.updateAvailable"))}</span>`
+    : "";
+  row.innerHTML =
+    `<span class="text-slate-400 dark:text-slate-500 w-20 shrink-0">${escapeHtml(label)}</span>` +
+    `<span class="${valueCls}">${escapeHtml(value)}${suffixHtml}</span>` +
+    chipHtml;
+  return row;
+}
+
+// Fill the mode badge on the Info <summary> so embedded/external (and the
+// conflict) is visible even with the drawer collapsed.
 function renderBridgeModeBadge(mode, conflict) {
   const el = document.getElementById("bridge-info-badge");
   if (!el) return;

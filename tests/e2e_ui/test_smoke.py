@@ -543,9 +543,9 @@ def test_bridge_info_drawer_label_and_external_badge(page: Page, server_url: str
     page.goto(server_url)
     expect(page.locator("#conn-badge")).to_contain_text("live")
     _apply_snapshot(page, _bridge_info_snap(bridge_mode="external", embed_requested=False))
-    # Renamed drawer + a neutral "external" mode badge on the summary.
+    # Renamed drawer ("Info") + a neutral "external" mode badge on the summary.
     summary = page.locator("#bridge-info-badge").locator("xpath=..")
-    expect(summary).to_contain_text("Bridge info")
+    expect(summary).to_contain_text("Info")
     badge = page.locator("#bridge-info-badge")
     expect(badge).to_be_visible()
     expect(badge).to_have_text("external")

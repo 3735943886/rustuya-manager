@@ -120,6 +120,15 @@ class State:
     embed_requested: bool = False
     bridge_embedded: bool = False
 
+    # Highest versions seen on PyPI for the manager and the embedded-bridge
+    # wheel, filled by web.py's background version check (None until the first
+    # successful fetch, and left as-is — never wiped to None — on a later
+    # offline poll). The serializer compares these against the running
+    # manager/bridge versions to flag "update available" in the Info panel;
+    # purely informational. Set off the MQTT path, under the condition lock.
+    manager_latest: str | None = None
+    bridge_latest: str | None = None
+
     # Per-plugin state slices keyed by namespace name (see plugins.py). Empty
     # unless a plugin calls its StateNamespace.set(); `serialize_state` omits
     # the `plugins` snapshot key entirely while this is empty, so a
@@ -172,6 +181,26 @@ class State:
         change, so bumping here would be a redundant broadcast."""
         async with self._changed:
             self.bridge_config_raw = cfg
+
+    async def set_latest_versions(
+        self, *, manager: str | None = None, bridge: str | None = None
+    ) -> None:
+        """Record PyPI's latest manager/bridge versions for the Info panel.
+
+        Only a non-None value overwrites — a later offline poll (which yields
+        None) must not wipe a previously-learned version and make the badge
+        flap. Bumps only when something actually changed, so a periodic
+        re-check that finds nothing new doesn't trigger a needless broadcast."""
+        async with self._changed:
+            changed = False
+            if manager is not None and manager != self.manager_latest:
+                self.manager_latest = manager
+                changed = True
+            if bridge is not None and bridge != self.bridge_latest:
+                self.bridge_latest = bridge
+                changed = True
+            if changed:
+                self._bump()
 
     async def merge_dps(
         self,

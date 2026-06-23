@@ -74,7 +74,8 @@
   "empty.noMatchQuery": "“{query}”와 일치하는 기기가 없습니다.",
   "empty.noMatchFilter": "현재 필터와 일치하는 기기가 없습니다.",
 
-  "bridge.infoTitle": "브리지 정보",
+  "info.title": "정보",
+  "info.updateAvailable": "새 버전 있음",
   "bridge.waiting": "(부트스트랩 대기 중)",
   "bridge.modeEmbedded": "내장",
   "bridge.modeExternal": "외부",

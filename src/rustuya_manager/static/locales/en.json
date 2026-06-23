@@ -74,7 +74,8 @@
   "empty.noMatchQuery": "No devices match “{query}”.",
   "empty.noMatchFilter": "No devices match the active filter.",
 
-  "bridge.infoTitle": "Bridge info",
+  "info.title": "Info",
+  "info.updateAvailable": "update available",
   "bridge.waiting": "(waiting for bootstrap)",
   "bridge.modeEmbedded": "embedded",
   "bridge.modeExternal": "external",

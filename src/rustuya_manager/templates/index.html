@@ -189,14 +189,17 @@
     </div>
   </section>
 
-  <!-- Bridge info: version, device count, mode (embedded/external), and the
-       resolved topic templates. The summary carries a mode badge that render.js
-       fills, so embedded-vs-external (and the embed→external conflict) is
-       visible even while the drawer is collapsed. -->
+  <!-- Info: manager + bridge versions (with an online "update available"
+       check), device count, MQTT drops, bridge mode (embedded/external), and
+       the resolved topic templates. The summary carries a mode badge that
+       render.js fills (so embedded-vs-external and the embed→external conflict
+       are visible while collapsed) and an amber dot that lights when any
+       component has a newer version — the cue to expand the panel. -->
   <section>
     <details class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
       <summary class="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-center gap-2">
-        <span data-i18n="bridge.infoTitle">Bridge info</span>
+        <span data-i18n="info.title">Info</span>
+        <span id="info-update-dot" class="hidden w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
         <span id="bridge-info-badge" class="hidden text-xs px-2 py-0.5 rounded-full border"></span>
       </summary>
       <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-700 dark:text-slate-300 space-y-1" id="templates-block">

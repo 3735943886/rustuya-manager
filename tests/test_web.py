@@ -398,3 +398,38 @@ class TestLocales:
                 f"{path.name} key set diverges from en.json — "
                 f"missing={sorted(en_keys - keys)} extra={sorted(keys - en_keys)}"
             )
+
+
+class TestInfoPanelVersionFields:
+    """serialize_state surfaces the manager version + the online update flags
+    the Info panel reads. The booleans are computed at serialize time so they
+    track the live bridge_version, which can land after the version check ran."""
+
+    def test_manager_version_always_present(self):
+        from rustuya_manager import __version__
+        from rustuya_manager.web import serialize_state
+
+        snap = serialize_state(State())
+        assert snap["manager_version"] == __version__
+        # No PyPI result yet ⇒ latest is None and no update is claimed.
+        assert snap["manager_latest"] is None
+        assert snap["manager_update"] is False
+        assert snap["bridge_update"] is False
+
+    def test_update_flags_track_latest_and_running_versions(self):
+        from rustuya_manager.web import serialize_state
+
+        state = State()
+        # Running bridge build comes from the retained {root}/bridge/config.
+        state.bridge_config_raw = {"version": "0.3.0-rc.25"}
+        state.manager_latest = "9.9.9"  # pretend PyPI has a much newer manager
+        state.bridge_latest = "0.3.0rc25"  # same build (rc.25) → not newer
+
+        snap = serialize_state(state)
+        assert snap["manager_update"] is True
+        assert snap["bridge_version"] == "0.3.0-rc.25"
+        # Rust "0.3.0-rc.25" normalises equal to PEP440 "0.3.0rc25" — no false flag.
+        assert snap["bridge_update"] is False
+
+        state.bridge_latest = "0.3.0rc26"
+        assert serialize_state(state)["bridge_update"] is True

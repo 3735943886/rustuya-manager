@@ -427,7 +427,8 @@ class TestInfoPanelVersionFields:
 
         snap = serialize_state(state)
         assert snap["manager_update"] is True
-        assert snap["bridge_version"] == "0.3.0-rc.25"
+        # Displayed bridge version is normalised to PEP440 (no stray hyphen).
+        assert snap["bridge_version"] == "0.3.0rc25"
         # Rust "0.3.0-rc.25" normalises equal to PEP440 "0.3.0rc25" — no false flag.
         assert snap["bridge_update"] is False
 

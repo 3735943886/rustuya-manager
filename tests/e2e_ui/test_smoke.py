@@ -548,7 +548,7 @@ def test_bridge_info_drawer_label_and_external_badge(page: Page, server_url: str
     expect(summary).to_contain_text("Info")
     badge = page.locator("#bridge-info-badge")
     expect(badge).to_be_visible()
-    expect(badge).to_have_text("external")
+    expect(badge).to_have_text("external bridge")
 
 
 def test_bridge_info_badge_flags_embed_external_conflict(page: Page, server_url: str) -> None:

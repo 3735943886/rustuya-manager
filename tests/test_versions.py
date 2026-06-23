@@ -46,6 +46,16 @@ def test_is_newer_normalises_rust_and_pep440():
     assert versions.is_newer("0.3.0-rc.25", "0.3.0rc25") is False
 
 
+def test_normalize_unifies_version_scheme():
+    # Rust CARGO_PKG_VERSION → PEP440 (the manager's scheme), so both read alike.
+    assert versions.normalize("0.3.0-rc.26") == "0.3.0rc26"
+    assert versions.normalize("0.1.0rc63") == "0.1.0rc63"
+    # Unparseable / empty inputs pass through untouched rather than vanish.
+    assert versions.normalize("weird-build") == "weird-build"
+    assert versions.normalize(None) is None
+    assert versions.normalize("") == ""
+
+
 def test_is_newer_guards_missing_and_garbage():
     assert versions.is_newer(None, "0.3.0rc25") is False
     assert versions.is_newer("0.3.0rc25", None) is False

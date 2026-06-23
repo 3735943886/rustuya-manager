@@ -84,7 +84,10 @@ function applyWizardSession(s) {
     case "logged_in":
     case "fetching":
       showWizardPane("working");
-      $wizardWorkingMsg.textContent = s.message || t("wizard.workingDefault");
+      // Both are the same transient "logging in / fetching devices" pane with
+      // generic text — use the translated string, not the backend's English
+      // session.message (which would bypass i18n; it's only meaningful on `done`).
+      $wizardWorkingMsg.textContent = t("wizard.working");
       $wizardStart.disabled = true;
       break;
     case "done":

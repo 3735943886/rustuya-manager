@@ -409,7 +409,9 @@ async def test_serialize_exposes_bridge_version():
     state = State()
     assert serialize_state(state)["bridge_version"] is None  # no config yet
     await state.set_bridge_config_raw({"mqtt_root_topic": "rustuya", "version": "0.3.0-rc.25"})
-    assert serialize_state(state)["bridge_version"] == "0.3.0-rc.25"
+    # Displayed version is normalised to PEP440 (no stray hyphen) so it reads in
+    # the same scheme as the manager's; plugins still get the raw config dict.
+    assert serialize_state(state)["bridge_version"] == "0.3.0rc25"
 
 
 async def test_set_bridge_config_raw_does_not_bump_version():

@@ -75,10 +75,15 @@
   "empty.noMatchFilter": "No devices match the active filter.",
 
   "info.title": "Info",
+  "info.topics": "Topics",
+  "info.status": "Status",
   "info.updateAvailable": "update available",
+  "info.latest": "latest",
   "bridge.waiting": "(waiting for bootstrap)",
   "bridge.modeEmbedded": "embedded",
   "bridge.modeExternal": "external",
+  "bridge.modeEmbeddedBadge": "embedded bridge",
+  "bridge.modeExternalBadge": "external bridge",
   "bridge.conflictNote": "--embed-bridge was requested, but an external bridge already owns this root — talking to the external one.",
 
   "time.justNow": "just now",

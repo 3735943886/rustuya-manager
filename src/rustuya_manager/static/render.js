@@ -151,8 +151,11 @@ export function renderTemplates() {
   const tpl = snap.templates;
   if (!tpl) return;
   $templates.innerHTML = "";
-  // Root is surfaced here (rather than as a header label) so the header
-  // stays compact and doesn't wrap to two lines on narrow viewports.
+
+  // ── Topics ── the resolved MQTT topic templates. Root is surfaced here
+  // (rather than as a header label) so the header stays compact and doesn't
+  // wrap to two lines on narrow viewports.
+  $templates.appendChild(sectionHeading(t("info.topics")));
   const lines = [
     ["root",    tpl.root],
     ["command", tpl.command],
@@ -170,23 +173,25 @@ export function renderTemplates() {
     $templates.appendChild(row);
   }
 
-  // Diagnostics block: manager + bridge versions, then bridge-reported totals
-  // from the latest status reply (device_count is the full fleet size; mqtt
-  // drops is the cumulative publish-drop count, highlighted when non-zero like
-  // the warning banner). The bridge row folds its mode in as a "· embedded/
-  // external" suffix — the standalone mode row is gone, the summary badge
-  // already carries it — and goes amber on the embed→external conflict. manager
-  // and bridge each show an "update available" chip when the online check found
-  // a newer release on PyPI.
-  const divider = document.createElement("div");
-  divider.className = "border-t border-slate-200 dark:border-slate-700 my-1";
-  $templates.appendChild(divider);
+  // ── Status ── manager + bridge versions, then bridge-reported totals from
+  // the latest status reply (device_count is the full fleet size; mqtt drops
+  // is the cumulative publish-drop count, highlighted when non-zero like the
+  // warning banner). The bridge row folds its mode in as a "· embedded/external"
+  // suffix — the standalone mode row is gone, the summary badge already carries
+  // it — and goes amber on the embed→external conflict. manager and bridge each
+  // carry a version chip: amber "update available" when PyPI has a newer build,
+  // a quiet "latest" when the check ran and they're current, nothing when the
+  // check couldn't reach PyPI (latest unknown).
+  $templates.appendChild(sectionHeading(t("info.status"), { spaced: true }));
   const drops = Number(snap.mqtt_drop_count || 0);
   const modeLabel =
     mode === "embedded" ? t("bridge.modeEmbedded") : t("bridge.modeExternal");
+  // installed + latest both known ⇒ "update" or "latest"; else no chip.
+  const verChip = (installed, latest, update) =>
+    installed == null || latest == null ? null : update ? "update" : "latest";
   const diag = [
-    ["manager", snap.manager_version || "—", { update: !!snap.manager_update }],
-    ["bridge", snap.bridge_version || "—", { suffix: modeLabel, warn: conflict, update: !!snap.bridge_update }],
+    ["manager", snap.manager_version || "—", { chip: verChip(snap.manager_version, snap.manager_latest, snap.manager_update) }],
+    ["bridge", snap.bridge_version || "—", { suffix: modeLabel, warn: conflict, chip: verChip(snap.bridge_version, snap.bridge_latest, snap.bridge_update) }],
     ["devices", snap.device_count != null ? String(snap.device_count) : "—", {}],
     ["mqtt drops", String(drops), { warn: drops > 0 }],
   ];
@@ -216,10 +221,23 @@ export function renderTemplates() {
   }
 }
 
-// One row in the Info panel's diagnostics block: a fixed-width muted label, a
+// A muted uppercase subheading that groups the Info panel into sections
+// ("Topics", "Status"). `spaced` adds top margin to separate it from the
+// preceding group.
+function sectionHeading(text, { spaced = false } = {}) {
+  const h = document.createElement("div");
+  h.className =
+    (spaced ? "mt-2 " : "") +
+    "text-[10px] uppercase tracking-wide font-semibold text-slate-400 dark:text-slate-500";
+  h.textContent = text;
+  return h;
+}
+
+// One row in the Info panel's Status section: a fixed-width muted label, a
 // value that can wrap, an optional muted "· suffix" (the bridge mode), and an
-// optional amber "update available" chip. The value goes amber+bold when warn.
-function diagRow(label, value, { warn = false, suffix = null, update = false } = {}) {
+// optional version chip — "update" (amber, a newer build exists) or "latest"
+// (quiet emerald, current). The value goes amber+bold when warn.
+function diagRow(label, value, { warn = false, suffix = null, chip = null } = {}) {
   const row = document.createElement("div");
   row.className = "flex items-center";
   const valueCls = warn
@@ -228,9 +246,12 @@ function diagRow(label, value, { warn = false, suffix = null, update = false } =
   const suffixHtml = suffix
     ? `<span class="text-slate-400 dark:text-slate-500"> · ${escapeHtml(suffix)}</span>`
     : "";
-  const chipHtml = update
-    ? `<span class="ml-2 shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700">${escapeHtml(t("info.updateAvailable"))}</span>`
-    : "";
+  let chipHtml = "";
+  if (chip === "update") {
+    chipHtml = `<span class="ml-2 shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700">${escapeHtml(t("info.updateAvailable"))}</span>`;
+  } else if (chip === "latest") {
+    chipHtml = `<span class="ml-2 shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">${escapeHtml(t("info.latest"))}</span>`;
+  }
   row.innerHTML =
     `<span class="text-slate-400 dark:text-slate-500 w-20 shrink-0">${escapeHtml(label)}</span>` +
     `<span class="${valueCls}">${escapeHtml(value)}${suffixHtml}</span>` +
@@ -244,16 +265,18 @@ function renderBridgeModeBadge(mode, conflict) {
   const el = document.getElementById("bridge-info-badge");
   if (!el) return;
   el.classList.remove("hidden");
+  // Standalone on the summary it needs the "bridge" noun to read on its own
+  // (the inline row suffix can stay terse — its row is already labelled).
   if (conflict) {
-    el.textContent = `${t("bridge.modeExternal")} ⚠`;
+    el.textContent = `${t("bridge.modeExternalBadge")} ⚠`;
     el.className =
       "text-xs px-2 py-0.5 rounded-full border bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700 font-medium";
   } else if (mode === "embedded") {
-    el.textContent = t("bridge.modeEmbedded");
+    el.textContent = t("bridge.modeEmbeddedBadge");
     el.className =
       "text-xs px-2 py-0.5 rounded-full border bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700";
   } else {
-    el.textContent = t("bridge.modeExternal");
+    el.textContent = t("bridge.modeExternalBadge");
     el.className =
       "text-xs px-2 py-0.5 rounded-full border bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600";
   }

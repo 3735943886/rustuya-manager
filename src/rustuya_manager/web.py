@@ -97,8 +97,11 @@ def serialize_state(state: State) -> dict[str, Any]:
         diff_payload = {"synced": [], "mismatched": [], "missing": [], "orphaned": []}
     tpl = state.templates
     # Resolved once: feeds both the displayed bridge version and the
-    # bridge_update compare below.
-    bridge_version = (state.bridge_config_raw or {}).get("version")
+    # bridge_update compare below. Normalised to PEP440 so the bridge's Rust
+    # CARGO_PKG_VERSION ("0.3.0-rc.26") displays in the same scheme as the
+    # manager's version ("0.1.0rc63") — no stray hyphen. is_newer parses it
+    # fine either way; plugins still read the raw config via bridge_config().
+    bridge_version = versions.normalize((state.bridge_config_raw or {}).get("version"))
     snapshot: dict[str, Any] = {
         "version": state.version,
         # Per-process id; a change across a reconnect tells the client the

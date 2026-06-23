@@ -75,10 +75,15 @@
   "empty.noMatchFilter": "현재 필터와 일치하는 기기가 없습니다.",
 
   "info.title": "정보",
+  "info.topics": "토픽",
+  "info.status": "상태",
   "info.updateAvailable": "새 버전 있음",
+  "info.latest": "최신",
   "bridge.waiting": "(부트스트랩 대기 중)",
   "bridge.modeEmbedded": "내장",
   "bridge.modeExternal": "외부",
+  "bridge.modeEmbeddedBadge": "내장 브리지",
+  "bridge.modeExternalBadge": "외부 브리지",
   "bridge.conflictNote": "--embed-bridge가 요청되었지만 외부 브리지가 이미 이 루트를 점유하고 있어 외부 브리지와 통신합니다.",
 
   "time.justNow": "방금 전",

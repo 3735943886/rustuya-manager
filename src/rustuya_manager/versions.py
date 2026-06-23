@@ -55,10 +55,11 @@ PYPI_INDEXES = ("https://pypi.org/pypi", "https://test.pypi.org/pypi")
 PYPI_TIMEOUT_S = 10
 MAX_PYPI_BYTES = 5 * 1024 * 1024
 
-# How long a fetched result stays good. Generous on purpose: this is an
-# informational nicety, not something worth hammering PyPI for. The disk cache
-# also lets a restart show the badge instantly without waiting on the network.
-CACHE_TTL_S = 6 * 60 * 60
+# How long a fetched result stays good — once a day. Generous on purpose: this
+# is an informational nicety, not something worth hammering PyPI for. The disk
+# cache also lets a restart show the badge instantly without waiting on the
+# network.
+CACHE_TTL_S = 24 * 60 * 60
 
 # Cached result in the managed plugin dir, dot-prefixed so plugin discovery
 # skips it (same convention as the catalog cache / ledger).
@@ -112,6 +113,19 @@ def pypi_latest(dist: str) -> str | None:
         if found is not None and (best is None or found > best):
             best = found
     return str(best) if best is not None else None
+
+
+def normalize(raw: str | None) -> str | None:
+    """Render a version in canonical PEP440 form for display, so the bridge's
+    Rust ``CARGO_PKG_VERSION`` ("0.3.0-rc.26") and the manager's PEP440 string
+    ("0.1.0rc63") read the same in the UI — same scheme, no stray hyphen/dot.
+    Returns the input unchanged if it isn't parseable (don't hide an odd value)."""
+    if not raw:
+        return raw
+    try:
+        return str(Version(raw))
+    except InvalidVersion:
+        return raw
 
 
 def is_newer(installed: str | None, latest: str | None) -> bool:

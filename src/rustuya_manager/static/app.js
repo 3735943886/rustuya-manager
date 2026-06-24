@@ -163,6 +163,10 @@ async function doRefresh(_ev, btn) {
 // renderer to highlight.
 async function doScan(_ev, btn) {
   btn.disabled = true;
+  // The scan awaits a full ~18s (20s max) drain server-side, so without an
+  // immediate cue the click feels like nothing happened until completion.
+  // Fire an in-progress toast up front — it also lands in the notification list.
+  toast(t("toast.scanStarted"), "ok");
   try {
     const result = await postScan();
     if (result.ok) {

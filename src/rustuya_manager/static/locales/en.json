@@ -258,6 +258,7 @@
 
   "toast.refreshed": "Refreshed — bridge {bridge}, cloud {cloud}",
   "toast.refreshFailed": "Refresh failed: {error}",
+  "toast.scanStarted": "Scanning LAN… (up to 20s)",
   "toast.scanComplete": "Scan complete — {count} {unit} seen on LAN",
   "toast.scanFailed": "Scan failed: {error}",
   "toast.waitingBridge": "Waiting for bridge state…",

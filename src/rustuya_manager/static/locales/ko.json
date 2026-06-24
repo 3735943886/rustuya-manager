@@ -258,6 +258,7 @@
 
   "toast.refreshed": "새로고침 완료 — 브리지 {bridge}, 클라우드 {cloud}",
   "toast.refreshFailed": "새로고침 실패: {error}",
+  "toast.scanStarted": "LAN 검색 중… (최대 20초)",
   "toast.scanComplete": "검색 완료 — LAN에서 {count}{unit} 발견",
   "toast.scanFailed": "검색 실패: {error}",
   "toast.waitingBridge": "브리지 상태 대기 중…",

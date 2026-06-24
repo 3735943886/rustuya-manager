@@ -38,8 +38,10 @@ const WIZARD_WARNING_KEYS = {
 
 let wizardPollTimer = null;
 // Done-state polls happen ~1.5s apart and we don't want the same warning
-// toast firing on every tick until auto-close. Reset on each startWizard().
+// or completion toast firing on every tick until auto-close. Reset on each
+// startWizard().
 let wizardWarningShown = false;
+let wizardDoneToastShown = false;
 
 export async function openWizardModal() {
   showWizardPane("idle");
@@ -113,6 +115,13 @@ function applyWizardSession(s) {
       $wizardStart.textContent = t("wizard.close");
       $wizardStart.disabled = false;
       stopWizardPoll();
+      // The modal auto-closes shortly after `done`, leaving no trace of a
+      // successful fetch. Drop a toast so it lands in the notification list
+      // alongside every other cloud/network action.
+      if (!wizardDoneToastShown) {
+        toast(t("toast.cloudFetched", { count: s.devices_count }), "ok");
+        wizardDoneToastShown = true;
+      }
       // Surface any non-fatal warning the backend attached (e.g. "Bridge
       // not connected — scan skipped, parent linking only"). The modal
       // auto-closes shortly after `done`, so the message has to live
@@ -159,6 +168,7 @@ async function startWizard() {
   if (cur === "done") { closeWizardModal(); return; }
   if (cur === "idle" || cur === "error") {
     wizardWarningShown = false;
+    wizardDoneToastShown = false;
     try {
       const res = await fetch("/api/wizard/start", {
         method: "POST",

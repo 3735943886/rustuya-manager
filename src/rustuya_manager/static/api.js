@@ -96,6 +96,11 @@ export async function getCatalog() {
 // on fetch failure the response carries ok:false + the prior effective catalog.
 export const refreshCatalog = () => _postJson("/api/plugins/catalog/refresh", {});
 
+// Force an immediate PyPI version check (bypassing the daily cache). State
+// updates over the WS, so the Info panel chips refresh on their own; the
+// returned latest versions are mainly for the toast.
+export const checkVersions = () => _postJson("/api/version-check", {});
+
 export const installPlugin = (id) => _postJson("/api/plugins/install", { id });
 export const updatePlugin = (id) => _postJson("/api/plugins/update", { id });
 export const uninstallPlugin = (id) => _postJson("/api/plugins/uninstall", { id });

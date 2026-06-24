@@ -448,6 +448,23 @@ def build_app(
             raise HTTPException(503, str(e)) from None
         return {"ok": True, "count": len(sightings)}
 
+    @app.post("/api/version-check")
+    async def post_version_check() -> dict[str, Any]:
+        """Force an immediate PyPI version check, bypassing the daily cache —
+        the Info panel's "check now" button. Reuses the same off-thread fetch as
+        the background loop and updates state, so the chips refresh over the WS.
+        Best-effort: an unreachable PyPI yields nulls (and leaves any previously
+        learned versions intact) rather than erroring."""
+        latest = await asyncio.to_thread(versions.fetch_latest)
+        if managed_plugin_dir is not None and any(latest.values()):
+            await asyncio.to_thread(versions.write_cache, managed_plugin_dir, latest, time.time())
+        await state.set_latest_versions(manager=latest.get("manager"), bridge=latest.get("bridge"))
+        return {
+            "ok": True,
+            "manager_latest": latest.get("manager"),
+            "bridge_latest": latest.get("bridge"),
+        }
+
     @app.websocket("/ws")
     async def ws_state(ws: WebSocket) -> None:
         await ws.accept()

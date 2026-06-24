@@ -71,6 +71,14 @@ class WizardSession:
     # session ran to DONE but degraded somewhere (e.g. scan was requested
     # but the bridge wasn't connected so we fell back to parent-only).
     warning: str | None = None
+    # Stable, translatable codes the UI maps to localized strings, set
+    # alongside the English `error`/`warning` above (which stay as the
+    # CLI/log/fallback text). The web client renders the localized string for a
+    # known code and falls back to the English prose for anything it doesn't
+    # recognize — so the user-facing wizard flow is fully translated without the
+    # backend having to know the UI language.
+    error_code: str | None = None
+    warning_code: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -81,6 +89,8 @@ class WizardSession:
             "message": self.message,
             "error": self.error,
             "warning": self.warning,
+            "error_code": self.error_code,
+            "warning_code": self.warning_code,
         }
 
 
@@ -202,12 +212,14 @@ class WizardManager:
                 self.session.state = WizardState.ERROR
                 if qr_was_shown:
                     self.session.error = "Login was not completed in time. Try again."
+                    self.session.error_code = "qr_timeout"
                 else:
                     self.session.error = (
                         "Login failed. If this is the first time, paste the "
                         "User Code from Smart Life → Me → Settings → Account "
                         "and Security."
                     )
+                    self.session.error_code = "login_failed_usercode"
                 return
 
             self.session.state = WizardState.LOGGED_IN
@@ -230,6 +242,7 @@ class WizardManager:
                     self.session.warning = (
                         "Bridge not connected — scan skipped, parent linking only."
                     )
+                    self.session.warning_code = "scan_skipped_no_bridge"
 
             self.session.state = WizardState.FETCHING
             devices = await loop.run_in_executor(None, wizard.fetch_devices)
@@ -250,6 +263,7 @@ class WizardManager:
                     self.session.warning = (
                         f"Bridge scan failed ({type(e).__name__}); used parent linking only."
                     )
+                    self.session.warning_code = "scan_failed"
 
             # Postprocess: "parent" links sub-devices to their gateway —
             # always needed so the bridge can route them. "all" additionally
@@ -271,6 +285,7 @@ class WizardManager:
                 scan_task.cancel()
             self.session.state = WizardState.ERROR
             self.session.error = "cancelled"
+            self.session.error_code = "cancelled"
             raise
         except Exception as e:  # noqa: BLE001 - any failure ends in ERROR with message
             if scan_task is not None and not scan_task.done():
@@ -278,6 +293,7 @@ class WizardManager:
             logger.exception("Wizard flow failed")
             self.session.state = WizardState.ERROR
             self.session.error = f"{type(e).__name__}: {e}"
+            self.session.error_code = "unexpected"
         finally:
             # Tear down tuyawizard's internals — closes the requests.Sessions
             # inside CustomerApi / LoginControl, stops the MQ thread if one

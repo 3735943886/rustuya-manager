@@ -22,6 +22,20 @@ const $wizardScanToggle = document.getElementById("wizard-scan-toggle");
 const $wizardScanInfo = document.getElementById("wizard-scan-info");
 const $wizardScanPopover = document.getElementById("wizard-scan-popover");
 
+// The backend tags errors/warnings with a stable code (alongside English
+// prose) so the UI can localize them. Map code → i18n key here; an unknown
+// code falls back to the backend's English string.
+const WIZARD_ERROR_KEYS = {
+  qr_timeout: "wizard.errQrTimeout",
+  login_failed_usercode: "wizard.errLoginUsercode",
+  cancelled: "wizard.errCancelled",
+  unexpected: "wizard.errUnexpected",
+};
+const WIZARD_WARNING_KEYS = {
+  scan_skipped_no_bridge: "wizard.warnScanSkipped",
+  scan_failed: "wizard.warnScanFailed",
+};
+
 let wizardPollTimer = null;
 // Done-state polls happen ~1.5s apart and we don't want the same warning
 // toast firing on every tick until auto-close. Reset on each startWizard().
@@ -92,7 +106,10 @@ function applyWizardSession(s) {
       break;
     case "done":
       showWizardPane("done");
-      $wizardDoneMsg.textContent = s.message || t("wizard.loadedDevices", { count: s.devices_count });
+      // Translated, keyed off the device count — not the backend's English
+      // session.message ("Done — N devices loaded"), which would bypass i18n.
+      // Backend-specific detail rides the separate `warning` channel below.
+      $wizardDoneMsg.textContent = t("wizard.loadedDevices", { count: s.devices_count });
       $wizardStart.textContent = t("wizard.close");
       $wizardStart.disabled = false;
       stopWizardPoll();
@@ -100,8 +117,9 @@ function applyWizardSession(s) {
       // not connected — scan skipped, parent linking only"). The modal
       // auto-closes shortly after `done`, so the message has to live
       // outside the modal — a toast is the right channel.
-      if (s.warning && !wizardWarningShown) {
-        toast(s.warning, "warning");
+      if ((s.warning || s.warning_code) && !wizardWarningShown) {
+        const wk = WIZARD_WARNING_KEYS[s.warning_code];
+        toast(wk ? t(wk) : s.warning, "warning");
         wizardWarningShown = true;
       }
       // Auto-close after a brief moment so the user sees the success state
@@ -111,7 +129,11 @@ function applyWizardSession(s) {
       break;
     case "error":
       showWizardPane("error");
-      $wizardErrorMsg.textContent = s.error || s.message || t("wizard.unknownError");
+      $wizardErrorMsg.textContent =
+        (WIZARD_ERROR_KEYS[s.error_code] && t(WIZARD_ERROR_KEYS[s.error_code])) ||
+        s.error ||
+        s.message ||
+        t("wizard.unknownError");
       $wizardStart.disabled = false;
       $wizardStart.textContent = t("wizard.tryAgain");
       stopWizardPoll();

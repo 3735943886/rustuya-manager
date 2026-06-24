@@ -574,6 +574,29 @@ def test_bridge_info_badge_flags_embed_external_conflict(page: Page, server_url:
     assert "amber" in (badge.get_attribute("class") or "")
 
 
+def test_log_menu_records_and_shows_toasts(page: Page, server_url: str) -> None:
+    """Every toast funnels through the single dom.js toast(), which records into
+    the ring buffer the Log menu reads. Emit one, open the Log modal from the
+    actions menu, see it listed, then clear it."""
+    page.goto(server_url)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+    # wait_for_function (not evaluate) re-runs across the initial-load context
+    # swap; the body is idempotent enough for the test (a stray re-emit just
+    # logs the message twice, which the assertions don't mind).
+    page.wait_for_function(
+        "() => (async () => { const m = await import('/static/dom.js');"
+        " m.toast('hello-log-test', 'ok'); return true; })()"
+    )
+    page.locator("#actions-menu > summary").click()
+    page.locator("#log-btn").click()
+    modal = page.locator("#log-modal")
+    expect(modal).to_be_visible()
+    expect(modal).to_contain_text("hello-log-test")
+    # Clear empties the list live (no reopen needed).
+    page.locator("#log-modal-clear").click()
+    expect(modal).to_contain_text("No notifications yet.")
+
+
 def test_plugin_contributes_header_menu_item(page: Page, server_url_with_plugin: str) -> None:
     """A plugin's eager init.js (ctx.add_header_init → ctx.addHeaderAction) puts
     an item in the hamburger menu without the user opening the plugin's tab."""

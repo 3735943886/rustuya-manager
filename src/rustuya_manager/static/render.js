@@ -3,9 +3,10 @@
 // can re-run just the affected sub-tree without a full re-render.
 
 import { state, ALL_CATEGORIES } from "./state.js";
-import { escapeHtml } from "./dom.js";
+import { escapeHtml, toast } from "./dom.js";
 import { deviceCard, missingParentCard, classifyDevice, primaryDevice } from "./cards.js";
 import { t } from "./i18n.js";
+import { checkVersions } from "./api.js";
 
 const $list = document.getElementById("device-list");
 const $empty = document.getElementById("empty-state");
@@ -14,6 +15,32 @@ const $filterTabs = document.getElementById("filter-tabs");
 const $banner = document.getElementById("cloud-banner");
 const $warnings = document.getElementById("warnings");
 const $syncBar = document.getElementById("sync-bar");
+
+// The Info panel's "check now" button is rebuilt on every render, so its click
+// is handled by one delegated listener on the stable parent. It spins the icon
+// while the forced PyPI check runs; the resulting state bump refreshes the
+// version chips over the WS (this re-render swaps in a fresh, idle button).
+if ($templates) {
+  $templates.addEventListener("click", async (e) => {
+    const btn = e.target.closest("#version-check-btn");
+    if (!btn || btn.dataset.busy) return;
+    btn.dataset.busy = "1";
+    btn.disabled = true;
+    btn.classList.add("animate-spin");
+    let ok = false;
+    try {
+      const res = await checkVersions();
+      ok = !!res && res.ok !== false;
+    } catch {
+      ok = false;
+    } finally {
+      btn.classList.remove("animate-spin");
+      btn.disabled = false;
+      delete btn.dataset.busy;
+    }
+    toast(ok ? t("info.checkDone") : t("info.checkFailed"), ok ? "ok" : "error");
+  });
+}
 
 export function render() {
   if (!state.snapshot) return;
@@ -182,7 +209,19 @@ export function renderTemplates() {
   // carry a version chip: amber "update available" when PyPI has a newer build,
   // a quiet "latest" when the check ran and they're current, nothing when the
   // check couldn't reach PyPI (latest unknown).
-  $templates.appendChild(sectionHeading(t("info.status"), { spaced: true }));
+  const divider = document.createElement("div");
+  divider.className = "border-t border-slate-200 dark:border-slate-700 my-1";
+  $templates.appendChild(divider);
+  // Status heading carries a "check now" button (forces an immediate PyPI check
+  // past the daily cache). The button is rebuilt every render, so its click is
+  // handled by a delegated listener on the stable #templates-block parent.
+  const statusHead = sectionHeading(t("info.status"));
+  statusHead.classList.add("flex", "items-center");
+  statusHead.insertAdjacentHTML(
+    "beforeend",
+    `<button id="version-check-btn" type="button" title="${escapeHtml(t("info.checkNow"))}" aria-label="${escapeHtml(t("info.checkNow"))}" class="ml-auto shrink-0 text-sm leading-none px-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">↻</button>`,
+  );
+  $templates.appendChild(statusHead);
   const drops = Number(snap.mqtt_drop_count || 0);
   const modeLabel =
     mode === "embedded" ? t("bridge.modeEmbedded") : t("bridge.modeExternal");

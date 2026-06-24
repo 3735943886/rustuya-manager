@@ -82,6 +82,7 @@ class TestHTTP:
             "modal-wizard.js": "applyWizardSession",
             "modal-device.js": "openAddModal",
             "modal-confirm.js": "initConfirmModal",
+            "modal-log.js": "openLogModal",
             "i18n.js": "initI18n",
         }
         with TestClient(build_app(state, client)) as tc:
@@ -246,6 +247,43 @@ class TestScanEndpoint:
         with TestClient(build_app(state, client)) as tc:
             r = tc.post("/api/scan")
             assert r.status_code == 503
+
+
+class TestVersionCheckEndpoint:
+    """POST /api/version-check forces an immediate PyPI check (past the daily
+    cache) and folds the result into state, which the WS then broadcasts."""
+
+    def test_forces_check_and_updates_state(self, monkeypatch):
+        from rustuya_manager import versions
+
+        state, client = _fixture_state()
+        monkeypatch.setattr(
+            versions, "fetch_latest", lambda: {"manager": "9.9.9", "bridge": "0.3.0rc99"}
+        )
+        with TestClient(build_app(state, client)) as tc:
+            r = tc.post("/api/version-check")
+            assert r.status_code == 200
+            assert r.json() == {
+                "ok": True,
+                "manager_latest": "9.9.9",
+                "bridge_latest": "0.3.0rc99",
+            }
+            # Folded into state so the next snapshot carries the update flags.
+            assert state.manager_latest == "9.9.9"
+            assert state.bridge_latest == "0.3.0rc99"
+
+    def test_unreachable_pypi_is_not_an_error(self, monkeypatch):
+        from rustuya_manager import versions
+
+        state, client = _fixture_state()
+        state.manager_latest = "1.2.3"  # a previously-learned value
+        monkeypatch.setattr(versions, "fetch_latest", lambda: {"manager": None, "bridge": None})
+        with TestClient(build_app(state, client)) as tc:
+            r = tc.post("/api/version-check")
+            assert r.status_code == 200
+            assert r.json()["ok"] is True
+            # A null result must not wipe what we already knew.
+            assert state.manager_latest == "1.2.3"
 
 
 class TestWebSocket:

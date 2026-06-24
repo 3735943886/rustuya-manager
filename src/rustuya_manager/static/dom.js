@@ -140,15 +140,48 @@ export function statusPill(cls) {
 }
 
 const $toasts = document.getElementById("toast-container");
+
+// Ring buffer of recent toasts for the Log menu. Every toast in the app —
+// built-in or plugin — funnels through toast() below (plugins get it as
+// ctx.toast), so this is the single capture point. In-memory, session-scoped,
+// newest last.
+const MAX_TOAST_LOG = 50;
+const toastLog = [];
+const toastListeners = new Set();
+
+// A snapshot of the recorded toasts (oldest→newest). Callers that want
+// newest-first reverse it themselves.
+export function getToastLog() {
+  return toastLog.slice();
+}
+
+// Drop all recorded toasts (the Log menu's "clear"). Notifies subscribers so an
+// open log view empties live.
+export function clearToastLog() {
+  toastLog.length = 0;
+  for (const fn of toastListeners) fn();
+}
+
+// Subscribe to toast-log changes (a new toast or a clear); returns an
+// unsubscribe fn. The Log modal uses this to update while open.
+export function onToastLog(fn) {
+  toastListeners.add(fn);
+  return () => toastListeners.delete(fn);
+}
+
 export function toast(msg, kind = "ok") {
   const styles = {
     ok:      "bg-slate-900 dark:bg-slate-200 text-white dark:text-slate-900",
     error:   "bg-rose-600 dark:bg-rose-500 text-white",
     warning: "bg-amber-600 dark:bg-amber-500 text-white dark:text-slate-900",
   }[kind];
-  const t = document.createElement("div");
-  t.className = `pointer-events-auto text-xs px-3 py-2 rounded shadow ${styles}`;
-  t.textContent = msg;
-  $toasts.appendChild(t);
-  setTimeout(() => t.remove(), 3000);
+  const el = document.createElement("div");
+  el.className = `pointer-events-auto text-xs px-3 py-2 rounded shadow ${styles}`;
+  el.textContent = msg;
+  $toasts.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+  // Record for the Log menu, then notify any open log view.
+  toastLog.push({ msg: String(msg), kind, at: Date.now() });
+  if (toastLog.length > MAX_TOAST_LOG) toastLog.shift();
+  for (const fn of toastListeners) fn();
 }

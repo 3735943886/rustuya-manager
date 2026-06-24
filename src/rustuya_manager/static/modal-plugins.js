@@ -109,6 +109,12 @@ async function refresh() {
 
 // "Check for updates": fetch the live catalog from the trusted remote source.
 async function checkForUpdates() {
+  // Lock the button to its current width before swapping the label to the
+  // (shorter) "Checking…": the footer is flex-wrap and on desktop the
+  // note+buttons sit right at the row's wrap threshold, so a width change here
+  // would tip it between one and two rows and visibly resize the modal. Pinning
+  // the width keeps the footer height constant; released in finally.
+  $check.style.width = `${$check.offsetWidth}px`;
   $check.disabled = true;
   $check.textContent = t("plugins.checking");
   try {
@@ -122,6 +128,7 @@ async function checkForUpdates() {
   } finally {
     $check.disabled = false;
     $check.textContent = t("plugins.checkUpdates");
+    $check.style.width = "";
   }
 }
 

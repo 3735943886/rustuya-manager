@@ -281,20 +281,22 @@ already provides — for anything heavier, install it as an entry-point
 package or via the catalog instead). See
 [`examples/hello_plugin`](examples/hello_plugin) for a complete plugin.
 
-#### Loading without a restart
+#### Loading a hand-dropped plugin
 
-Two more ☰-menu items handle reloads for hand-dropped plugins:
+Installing from the catalog ("Manage plugins" 🧩) loads the plugin live, no
+restart. If you instead copy a plugin package into the plugin dir by hand, pick
+it up with:
 
-- **Load new plugins** (📂) — scans the plugin dir and loads any *newly
-  added* plugin live, no restart. Add-only: it can't pick up edits to an
-  already-loaded plugin or unload one (live routes/mounts can't be
-  cleanly removed). Catalog installs already do this for you.
-- **Restart manager** (♻) — restarts the manager process in place (same
-  PID, via re-exec). This is the full reload: it picks up edited plugin
-  code, drops removed/disabled plugins, and respawns an embedded bridge —
-  lighter than a container restart and works outside Docker too. The UI
-  reconnects automatically; an embedded bridge briefly disconnects its
-  devices.
+- **Restart manager** (♻, ☰-menu) — restarts the manager process in place (same
+  PID, via re-exec). This is the full reload: it discovers hand-dropped plugins,
+  picks up edited plugin code, drops removed/disabled plugins, and respawns an
+  embedded bridge — lighter than a container restart and works outside Docker
+  too. The UI reconnects automatically; an embedded bridge briefly disconnects
+  its devices.
+
+(The add-only `POST /api/plugins/scan` endpoint still loads newly-dropped
+plugins without a restart, but it's no longer surfaced as a menu item — a
+restart is the simpler story for the rare hand-drop.)
 
 ## License
 MIT

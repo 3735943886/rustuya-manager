@@ -22,8 +22,6 @@
   "header.refreshTitle": "Reload the device list and live status from the bridge",
   "header.managePlugins": "Manage plugins",
   "header.managePluginsTitle": "Browse the catalog and install / update / remove plugins",
-  "header.loadPlugins": "Load new plugins",
-  "header.loadPluginsTitle": "Load plugins dropped into the plugin directory by hand (no restart)",
   "header.log": "Log",
   "header.logTitle": "Recent notifications",
   "log.title": "Notifications",
@@ -276,9 +274,5 @@
   "toast.subNeedsCid": "sub-device needs CID",
   "toast.nothingToSync": "Nothing to sync in that category",
   "toast.synced": "Synced {count}",
-  "toast.syncedFailed": "Synced {ok}, failed {err}",
-  "toast.pluginScanFailed": "Plugin scan failed: {error}",
-  "toast.pluginsLoaded": "Loaded {count} new plugins",
-  "toast.pluginsLoadedOne": "Loaded {count} new plugin",
-  "toast.noNewPlugins": "No new plugins found"
+  "toast.syncedFailed": "Synced {ok}, failed {err}"
 }

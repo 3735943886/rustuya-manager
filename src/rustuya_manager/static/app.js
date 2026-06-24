@@ -25,7 +25,7 @@ import { initDeviceModal, openAddModal } from "./modal-device.js";
 import { initConfirmModal, confirm } from "./modal-confirm.js";
 import { initPluginsModal, openPluginsModal } from "./modal-plugins.js";
 import { initLogModal, openLogModal } from "./modal-log.js";
-import { initPluginHost, scanForPlugins } from "./plugins.js";
+import { initPluginHost } from "./plugins.js";
 import { registerHeaderAction, unregisterHeaderActions, renderActionsMenu } from "./header-actions.js";
 import { initI18n, applyDom, t, getLocales, getLocaleName, getLang, setLang } from "./i18n.js";
 
@@ -205,11 +205,6 @@ async function doReconfigure() {
   await publishCommand({ action: "reconfigure", id: "bridge" });
 }
 
-// Load plugins newly dropped into the server's plugin dir (add-only, no restart).
-async function doLoadNewPlugins() {
-  await scanForPlugins();
-}
-
 // Restart the manager process in place — the "full reload" that picks up edited
 // or removed plugins. Confirm-guarded: it briefly drops the WS (auto-reconnects)
 // and restarts an embedded bridge.
@@ -312,7 +307,6 @@ function registerBuiltinActions() {
   registerLanguageActions();
   registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: t("header.refresh"), scope: "devices", order: 50, title: t("header.refreshTitle"), onClick: doRefresh });
   registerHeaderAction({ id: "manage-plugins-btn", iconHtml: "🧩", labelHtml: t("header.managePlugins"), scope: "global", order: 55, title: t("header.managePluginsTitle"), onClick: openPluginsModal });
-  registerHeaderAction({ id: "plugin-scan-btn", iconHtml: "📂", labelHtml: t("header.loadPlugins"), scope: "global", order: 60, title: t("header.loadPluginsTitle"), onClick: doLoadNewPlugins });
   registerHeaderAction({ id: "log-btn", iconHtml: "🔔", labelHtml: t("header.log"), scope: "global", order: 65, title: t("header.logTitle"), onClick: openLogModal });
   registerHeaderAction({
     id: "reconfigure-btn",

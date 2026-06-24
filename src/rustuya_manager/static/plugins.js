@@ -268,27 +268,3 @@ export async function initPluginHost() {
   }
   await applyManifest(data);
 }
-
-// Load plugins newly dropped into the server's plugin dir, without a restart.
-// Add-only: picks up new plugin packages/modules; it cannot reload edited code
-// or unload a plugin (those need a process restart — see README). Wired to the
-// "Load new plugins" hamburger item in app.js.
-export async function scanForPlugins() {
-  let data;
-  try {
-    const res = await fetch("/api/plugins/scan", { method: "POST" });
-    if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
-    data = await res.json();
-  } catch (e) {
-    toast(t("toast.pluginScanFailed", { error: e.message }), "error");
-    return;
-  }
-  await applyManifest(data);
-  const n = data.added ?? 0;
-  toast(
-    n > 0
-      ? t(n === 1 ? "toast.pluginsLoadedOne" : "toast.pluginsLoaded", { count: n })
-      : t("toast.noNewPlugins"),
-    "ok",
-  );
-}

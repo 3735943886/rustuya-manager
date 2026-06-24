@@ -16,11 +16,27 @@ both fixes are present. Reverting either fix should cross the budget.
 
 from __future__ import annotations
 
+import time
+
 from fastapi.testclient import TestClient
 
 from rustuya_manager.web import build_app
 
 from .conftest import assert_no_leak, make_ws_fixture
+
+
+def _wait_drained(waiters, timeout: float = 2.0) -> int:
+    """Poll until the waiter deque empties (or `timeout`), returning its final
+    length. Closing a WS client-side leaves the server handler to cancel its
+    change_task and drain it off the event loop, which can lag the synchronous
+    sample on the test thread by a few ms — so a transient single waiter is a
+    settle artifact, not a leak. A genuine rc19 regression parks one Future per
+    cycle (~100), which never drains within the timeout, so the assertion below
+    still catches it."""
+    deadline = time.monotonic() + timeout
+    while len(waiters) > 0 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return len(waiters)
 
 
 def test_ws_open_close_no_leak():
@@ -78,13 +94,15 @@ def test_ws_condition_waiters_drain():
             with tc.websocket_connect("/ws") as ws:
                 ws.receive_json()
         # Baseline: deque should be empty after warmup cycles drain.
-        assert len(waiters) == 0, f"warmup did not drain waiters: {len(waiters)}"
+        assert _wait_drained(waiters) == 0, f"warmup did not drain waiters: {len(waiters)}"
         for _ in range(100):
             with tc.websocket_connect("/ws") as ws:
                 ws.receive_json()
-        # The deque can transiently contain Futures during a cycle, but after
-        # every cycle completes (TestClient context exits) it must drop to 0.
-        assert len(waiters) == 0, (
+        # The deque can transiently contain Futures during/just after a cycle —
+        # the last handler's cancellation may still be draining off the server
+        # loop when we sample — but it must settle to 0. A real rc19 regression
+        # parks one Future per cycle (~100) and never drains within the timeout.
+        assert _wait_drained(waiters) == 0, (
             f"Condition._waiters grew to {len(waiters)} after 100 WS cycles — "
             f"rc19 race regression suspected"
         )

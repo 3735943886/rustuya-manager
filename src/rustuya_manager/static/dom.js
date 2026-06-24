@@ -180,8 +180,18 @@ export function toast(msg, kind = "ok") {
   el.textContent = msg;
   $toasts.appendChild(el);
   setTimeout(() => el.remove(), 3000);
-  // Record for the Log menu, then notify any open log view.
-  toastLog.push({ msg: String(msg), kind, at: Date.now() });
-  if (toastLog.length > MAX_TOAST_LOG) toastLog.shift();
+  // Record for the Log menu, then notify any open log view. A consecutive
+  // repeat of the same message+kind collapses into the previous entry — bump
+  // its time and count instead of stacking duplicates ("last message repeated N
+  // times"). The live popup above still fires every time; only the log dedupes.
+  const text = String(msg);
+  const last = toastLog[toastLog.length - 1];
+  if (last && last.msg === text && last.kind === kind) {
+    last.at = Date.now();
+    last.count += 1;
+  } else {
+    toastLog.push({ msg: text, kind, at: Date.now(), count: 1 });
+    if (toastLog.length > MAX_TOAST_LOG) toastLog.shift();
+  }
   for (const fn of toastListeners) fn();
 }

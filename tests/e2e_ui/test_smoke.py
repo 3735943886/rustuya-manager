@@ -580,18 +580,21 @@ def test_log_menu_records_and_shows_toasts(page: Page, server_url: str) -> None:
     actions menu, see it listed, then clear it."""
     page.goto(server_url)
     expect(page.locator("#conn-badge")).to_contain_text("live")
-    # wait_for_function (not evaluate) re-runs across the initial-load context
-    # swap; the body is idempotent enough for the test (a stray re-emit just
-    # logs the message twice, which the assertions don't mind).
+    # Emit the same toast twice. wait_for_function (not evaluate) re-runs across
+    # the initial-load context swap; emitting the identical message repeatedly is
+    # exactly what the dedupe should collapse, so a stray re-run is harmless.
     page.wait_for_function(
         "() => (async () => { const m = await import('/static/dom.js');"
-        " m.toast('hello-log-test', 'ok'); return true; })()"
+        " m.toast('hello-log-test', 'ok'); m.toast('hello-log-test', 'ok'); return true; })()"
     )
     page.locator("#actions-menu > summary").click()
     page.locator("#log-btn").click()
     modal = page.locator("#log-modal")
     expect(modal).to_be_visible()
     expect(modal).to_contain_text("hello-log-test")
+    # Consecutive duplicates collapse to a single row with a ×N count badge.
+    expect(page.locator("#log-modal-body > div")).to_have_count(1)
+    expect(modal).to_contain_text("×")
     # Clear empties the list live (no reopen needed).
     page.locator("#log-modal-clear").click()
     expect(modal).to_contain_text("No notifications yet.")

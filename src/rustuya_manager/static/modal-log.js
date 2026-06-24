@@ -26,9 +26,15 @@ function renderRow(e) {
   const row = document.createElement("div");
   row.className = "flex items-start gap-2 text-sm";
   const dot = KIND_DOT[e.kind] || KIND_DOT.ok;
+  // Consecutive repeats collapse into one row with a ×N badge (see dom.js).
+  const count =
+    e.count > 1
+      ? `<span class="shrink-0 text-xs font-medium text-slate-500 dark:text-slate-400">×${e.count}</span>`
+      : "";
   row.innerHTML =
     `<span class="mt-1.5 w-2 h-2 rounded-full shrink-0 ${dot}"></span>` +
     `<span class="flex-1 min-w-0 break-words text-slate-700 dark:text-slate-200">${escapeHtml(e.msg)}</span>` +
+    count +
     // `at` is epoch ms; formatAgo wants seconds.
     `<span class="shrink-0 text-xs text-slate-400 dark:text-slate-500">${escapeHtml(formatAgo(e.at / 1000))}</span>`;
   return row;

@@ -310,7 +310,7 @@ function registerBuiltinActions() {
     onClick: doThemeToggle,
   });
   registerLanguageActions();
-  registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: t("header.refresh"), scope: "devices", order: 50, onClick: doRefresh });
+  registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: t("header.refresh"), scope: "devices", order: 50, title: t("header.refreshTitle"), onClick: doRefresh });
   registerHeaderAction({ id: "manage-plugins-btn", iconHtml: "🧩", labelHtml: t("header.managePlugins"), scope: "global", order: 55, title: t("header.managePluginsTitle"), onClick: openPluginsModal });
   registerHeaderAction({ id: "plugin-scan-btn", iconHtml: "📂", labelHtml: t("header.loadPlugins"), scope: "global", order: 60, title: t("header.loadPluginsTitle"), onClick: doLoadNewPlugins });
   registerHeaderAction({ id: "log-btn", iconHtml: "🔔", labelHtml: t("header.log"), scope: "global", order: 65, title: t("header.logTitle"), onClick: openLogModal });

@@ -189,8 +189,20 @@ class WizardManager:
         def qr_callback(qr_url: str | None) -> None:
             # Called from tuyawizard's thread — qr_url is set when the QR is
             # ready to be scanned, then called again with None when the scan
-            # completes (so login proceeds). We only act on the show-QR call.
+            # completes (so login proceeds).
             if qr_url is None:
+                # Scan completed. Clear the QR and flip to the transient
+                # "logging in" pane immediately — don't wait for the outer
+                # flow to advance the state. This matters on the token-expiry
+                # path: there `qr_login()` runs *inside* fetch_devices() (state
+                # already FETCHING), so without this the session would stay
+                # stuck at AWAITING_SCAN — QR still on screen — until the
+                # second device-cache fetch returns. Idempotent on the fresh-
+                # login path, where _run sets LOGGED_IN again right after.
+                self.session.qr_url = None
+                self.session.qr_image_data_url = None
+                self.session.state = WizardState.LOGGED_IN
+                self.session.message = "Logged in. Fetching devices..."
                 return
             self.session.qr_url = qr_url
             self.session.qr_image_data_url = _qr_to_data_url(qr_url)

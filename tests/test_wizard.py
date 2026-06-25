@@ -128,6 +128,58 @@ class TestWizardManager:
         assert wm.session.state == WizardState.DONE
         assert wm.session.qr_image_data_url is None
 
+    async def test_expiry_reauth_clears_qr_on_scan_done(self, tmp_path: Path):
+        """Token-expiry path: tuyawizard runs its QR re-login *inside*
+        fetch_devices (session already FETCHING), firing qr_callback(url) then
+        qr_callback(None) on scan success. The None call must clear the QR and
+        move to LOGGED_IN — otherwise the session stays stuck at AWAITING_SCAN
+        with the QR still on screen until the second device-cache fetch returns.
+        """
+        wm = WizardManager(creds_path=str(tmp_path / "creds.json"))
+
+        captured: dict[str, tuple] = {}
+        qr_holder: dict[str, object] = {}
+
+        def login_auto(user_code, creds, qr_callback):
+            # Saved-creds path: init_manager() succeeds (an expired token
+            # passes — it's not validated here), so no QR is shown yet.
+            qr_holder["cb"] = qr_callback
+            return True
+
+        def fetch_devices():
+            # First update_device_cache() fails on the stale token, so the
+            # library falls back to an internal qr_login(): show QR, wait for
+            # scan, then signal completion with qr_callback(None).
+            cb = qr_holder["cb"]
+            cb("tuyaSmart--qrLogin?token=expiry")
+            captured["after_show"] = (wm.session.state, wm.session.qr_image_data_url)
+            cb(None)
+            captured["after_done"] = (wm.session.state, wm.session.qr_image_data_url)
+            return SAMPLE_DEVICES
+
+        mock_wizard = MagicMock()
+        mock_wizard.info = {}
+        mock_wizard.login_auto.side_effect = login_auto
+        mock_wizard.fetch_devices.side_effect = fetch_devices
+
+        with (
+            patch("rustuya_manager.wizard.TuyaWizard", return_value=mock_wizard),
+            patch("rustuya_manager.wizard.postprocess_devices"),
+        ):
+            await wm.start()
+            await wm._task
+
+        # While the QR was up, the session showed AWAITING_SCAN with an image.
+        assert captured["after_show"][0] == WizardState.AWAITING_SCAN
+        assert captured["after_show"][1] is not None
+        # The scan-done callback cleared the QR and advanced to LOGGED_IN —
+        # so the frontend stops rendering the QR pane immediately.
+        assert captured["after_done"][0] == WizardState.LOGGED_IN
+        assert captured["after_done"][1] is None
+        # And the flow still runs to completion.
+        assert wm.session.state == WizardState.DONE
+        assert wm.session.devices_count == 2
+
     async def test_exception_in_fetch_yields_error(self, tmp_path: Path):
         wm = WizardManager(creds_path=str(tmp_path / "creds.json"))
         mock_wizard = _make_mock_wizard()

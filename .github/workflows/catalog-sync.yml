@@ -58,7 +58,7 @@ jobs:
         # Idempotent: reuses the same branch + PR across days, so repeated runs
         # update one PR instead of piling up. Skips entirely when the tree is
         # unchanged (no plugin updates available).
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           # A PAT (if configured) authors the PR — which both lets the bot open
           # PRs at all (the default GITHUB_TOKEN is blocked by the repo's "Allow

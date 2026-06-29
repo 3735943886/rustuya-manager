@@ -12,6 +12,29 @@ the plain `0.1.0` tag will publish to PyPI.
 
 ## [Unreleased]
 
+## [0.1.0rc73] — 2026-06-29
+
+### Added
+
+- **Plugin-declared topic/retain requirements, with a guided Info-panel fix.**
+  A plugin can now declare the bridge topic scheme it depends on —
+  `ctx.require_topic(source, template, must_have=…, must_not_have=…)` for
+  placeholder presence/absence on the command/event/message/scanner topics, and
+  `ctx.require_retain(source)` for `mqtt_retain=True` (`PLUGIN_API_VERSION` → 3).
+  The manager checks the live bridge config against every declaration and adds a
+  "Plugin requirements" section to the Info panel showing what's met/unmet; for
+  an unmet topic it offers a recommended template in an editable field, and
+  Apply pushes it via the bridge's `set_config` (behind a confirm that spells
+  out the reconfigure cost — retained state cleared + bridge restart). The
+  manager never rewrites the bridge config on its own.
+- Conflict rules keep any combination of plugins satisfiable: retain is
+  "requires True" only (so it can't conflict); a placeholder another plugin (or
+  the bridge's own routing) needs *present* beats one asked *absent*, and the
+  out-voted plugin is shown as "not honored" rather than silently green; the
+  bridge's default-scheme placeholders are protected routing minimums that a
+  `must_not_have` can never remove. The `bridge_requirements` snapshot key is
+  omitted entirely for a plugin-less build, so the wire format is unchanged.
+
 ## [0.1.0rc72] — 2026-06-29
 
 ### Fixed

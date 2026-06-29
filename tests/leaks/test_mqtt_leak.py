@@ -60,7 +60,13 @@ async def test_bridge_client_aenter_aexit_no_leak(monkeypatch: pytest.MonkeyPatc
         await one_cycle()
     async with assert_no_leak_async(
         max_kb=120,
-        max_objects=600,
+        # Discrete object count, not memory (max_kb is the real-leak guard and
+        # has wide headroom). py3.10's GC leaves more per-cycle residue than
+        # 3.12; 30 cycles each build a fresh State (now carrying a couple more
+        # default_factory lists for plugin requirements), so the count lands
+        # ~650 on 3.10. Widened to absorb that — same rationale as the other
+        # leak tests' py3.10 budget bumps; tracemalloc stays the real signal.
+        max_objects=900,
         max_tasks=2,
         label="BridgeClient aenter/aexit",
     ):

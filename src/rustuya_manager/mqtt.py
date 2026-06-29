@@ -725,6 +725,14 @@ class BridgeClient:
         await self.state.clear_warning("bridge_offline")
         await self.state.clear_warning("bridge_config_cleared")
 
+        # Refresh the stored raw config on every valid delivery — independent of
+        # the template-idempotence guard below. The payload can change while the
+        # templates stay the same, most commonly the bridge's `version` field
+        # after an in-place upgrade (systemd restart / bridgectl); the Info panel
+        # reads that version from here. set_bridge_config_raw self-guards on
+        # change (and only bumps then), so an identical re-delivery is a no-op.
+        await self.state.set_bridge_config_raw(cfg)
+
         # Idempotence check: the retained bridge/config message can be
         # re-delivered every time we subscribe to a wildcard that also matches
         # it (e.g. message_topic="{root}/{level}/{id}" → wildcard "{root}/+/+"
@@ -737,10 +745,6 @@ class BridgeClient:
 
         self.root = root
         await self.state.set_templates(templates)
-        # Keep the raw config dict around for plugins (read-only via
-        # PluginContext.bridge_config). Stored after the idempotence check so
-        # we only update it when the templates actually change.
-        await self.state.set_bridge_config_raw(cfg)
         await self._subscribe_runtime_topics(templates)
         await self._validate_payload_template(templates.payload)
         if not self._bootstrap_done.is_set():

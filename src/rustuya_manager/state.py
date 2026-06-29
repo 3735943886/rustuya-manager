@@ -172,15 +172,22 @@ class State:
             self._bump()
 
     async def set_bridge_config_raw(self, cfg: dict[str, Any]) -> None:
-        """Store the raw `{root}/bridge/config` payload dict for plugins.
+        """Store the raw `{root}/bridge/config` payload dict for plugins
+        (`PluginContext.bridge_config()`) and the Info panel's reported bridge
+        version (`web.serialize_state` reads `version` from here).
 
-        Not consumed by the manager itself (it uses `templates`); kept purely
-        so `PluginContext.bridge_config()` can hand plugins the original keys.
-        Doesn't bump the version — `set_templates`, called alongside it in
-        `_on_bridge_config`, already wakes WS listeners for the same config
-        change, so bumping here would be a redundant broadcast."""
+        Bumps the version when the payload actually changes so WS listeners
+        refresh live — the config can change without the *templates* changing,
+        most commonly the bridge's `version` field after an in-place upgrade
+        (systemd restart / bridgectl). Without this, the Info panel would show
+        the bridge version captured at manager boot forever. An identical
+        re-delivery (the retained message replayed on every matching wildcard
+        subscribe) is a no-op, so there's no redundant broadcast."""
         async with self._changed:
+            if self.bridge_config_raw == cfg:
+                return
             self.bridge_config_raw = cfg
+            self._bump()
 
     async def set_latest_versions(
         self, *, manager: str | None = None, bridge: str | None = None

@@ -713,6 +713,41 @@ class TestBridgeConfigClearedWarning:
         assert "bridge_config_cleared" not in client.state.warnings
 
 
+class TestBridgeVersionRefresh:
+    """An in-place bridge upgrade republishes `{root}/bridge/config` with a new
+    `version` field but unchanged templates. The Info panel reads that version
+    from `state.bridge_config_raw`, so the manager must pick up the new config
+    even though the template-idempotence guard short-circuits the re-subscribe.
+    Regression: previously `set_bridge_config_raw` sat after the guard, so the
+    reported version froze at the value captured at manager boot."""
+
+    @pytest.mark.asyncio
+    async def test_version_bump_with_unchanged_templates_updates_raw_config(self):
+        client, _ = _make_client()
+        v25 = {**CUSTOM_CONFIG, "version": "0.3.0-rc.25"}
+        await client._on_bridge_config(json.dumps(v25))
+        assert client._bootstrap_done.is_set()
+        assert client.state.bridge_config_raw["version"] == "0.3.0-rc.25"
+
+        # Upgrade: same templates, new version. Hits the idempotence guard.
+        ver = client.state.version
+        v27 = {**CUSTOM_CONFIG, "version": "0.3.0-rc.27"}
+        await client._on_bridge_config(json.dumps(v27))
+        assert client.state.bridge_config_raw["version"] == "0.3.0-rc.27"
+        # And it woke WS listeners so the UI refreshes live.
+        assert client.state.version > ver
+
+    @pytest.mark.asyncio
+    async def test_identical_redelivery_does_not_bump(self):
+        client, _ = _make_client()
+        await client._on_bridge_config(json.dumps(CUSTOM_CONFIG))
+        ver = client.state.version
+        # Retained re-delivery of the exact same payload (matching wildcard
+        # re-subscribe) must be a no-op — no redundant broadcast.
+        await client._on_bridge_config(json.dumps(CUSTOM_CONFIG))
+        assert client.state.version == ver
+
+
 class TestReconnectLoop:
     """Validates that the aiomqtt reconnect loop turns a connection failure
     into a `broker_unreachable` state warning (the signal the UI surfaces)

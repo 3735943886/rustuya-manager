@@ -414,13 +414,21 @@ async def test_serialize_exposes_bridge_version():
     assert serialize_state(state)["bridge_version"] == "0.3.0rc25"
 
 
-async def test_set_bridge_config_raw_does_not_bump_version():
-    # set_templates already broadcasts the same config change; storing the raw
-    # dict must not trigger a second redundant WS push.
+async def test_set_bridge_config_raw_bumps_on_change_only():
+    # A changed config must bump so the Info panel's bridge version refreshes
+    # live (e.g. after an in-place bridge upgrade republishes config with a new
+    # `version` but unchanged templates — that path never calls set_templates).
+    # An identical re-delivery must not bump (no redundant WS push).
     state = State()
     v0 = state.version
-    await state.set_bridge_config_raw({"mqtt_root_topic": "rustuya"})
-    assert state.version == v0
+    await state.set_bridge_config_raw({"mqtt_root_topic": "rustuya", "version": "0.3.0-rc.26"})
+    assert state.version == v0 + 1
+    # Same payload again → no-op.
+    await state.set_bridge_config_raw({"mqtt_root_topic": "rustuya", "version": "0.3.0-rc.26"})
+    assert state.version == v0 + 1
+    # New version field → bumps again.
+    await state.set_bridge_config_raw({"mqtt_root_topic": "rustuya", "version": "0.3.0-rc.27"})
+    assert state.version == v0 + 2
 
 
 # ── (f) publish_raw ──────────────────────────────────────────────────────

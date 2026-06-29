@@ -45,6 +45,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .requirements import TopicRequirement, validate_requirement
+
 if TYPE_CHECKING:
     from fastapi import APIRouter
 
@@ -56,8 +58,9 @@ logger = logging.getLogger(__name__)
 # Incremented when the `ctx` contract gains or breaks surface; plugins read it
 # via `ctx.api_version` (compare `>=`) to refuse to load against a host too old
 # for what they need. v2 added the reactive DP bus: watch_dps/watch_device/
-# watch_dp, derived_dp, set_device_dp.
-PLUGIN_API_VERSION = 2
+# watch_dp, derived_dp, set_device_dp. v3 added topic/retain requirements:
+# ctx.require_topic / ctx.require_retain.
+PLUGIN_API_VERSION = 3
 
 # Entry-point group plugins advertise their `register(ctx)` callable under.
 ENTRY_POINT_GROUP = "rustuya_manager.plugins"
@@ -150,6 +153,12 @@ class PluginRegistry:
         # factories the manager supervises over the app's lifespan — see
         # `ServiceSupervisor`.
         self.services: list[ServiceFactory] = []
+        # Plugin-declared topic placeholder requirements (ctx.require_topic) and
+        # the plugins requiring mqtt_retain=True (ctx.require_retain). Evaluated
+        # against the live bridge config in `web.serialize_state` (see
+        # `requirements.evaluate`) and surfaced in the Info panel.
+        self.topic_requirements: list[TopicRequirement] = []
+        self.retain_required_by: list[str] = []
 
 
 class StateNamespace:
@@ -396,6 +405,51 @@ class PluginContext:
         is the route for always-visible plugin UI — the item shows up without the
         user opening the plugin's tab."""
         self._registry.init_scripts.append({"id": id, "static_dir": static_dir, "entry": entry})
+
+    # ── topic / retain requirements (api_version >= 3) ───────────────────
+    def require_topic(
+        self,
+        source: str,
+        template: str,
+        *,
+        must_have: tuple[str, ...] = (),
+        must_not_have: tuple[str, ...] = (),
+    ) -> None:
+        """Declare that this plugin needs the bridge's `template` topic to carry
+        (`must_have`) or omit (`must_not_have`) certain placeholders.
+
+        `template` is one of "command", "event", "message", "scanner"; each
+        placeholder is a bare name without braces, e.g. `must_have=("id", "dp")`.
+        The manager evaluates the declaration against the live bridge config and
+        surfaces any gap in the Info panel with a guided fix — it never changes
+        the bridge's topics on its own. `source` is a short label (usually the
+        plugin's display name) used to attribute the requirement in the UI.
+
+        Conflict rules keep any combination of plugins satisfiable: a placeholder
+        another plugin (or the bridge's own routing) needs *present* wins over a
+        `must_not_have` (the losing plugin is shown as "not honored"), and the
+        bridge's default-scheme placeholders can't be required absent at all.
+        Raises ValueError immediately on an impossible declaration (unknown
+        template/placeholder, present-and-absent the same placeholder, or asking
+        to remove a routing minimum)."""
+        validate_requirement(template, tuple(must_have), tuple(must_not_have))
+        self._registry.topic_requirements.append(
+            TopicRequirement(
+                source=source,
+                template=template,
+                must_have=tuple(must_have),
+                must_not_have=tuple(must_not_have),
+            )
+        )
+
+    def require_retain(self, source: str) -> None:
+        """Declare that this plugin needs the bridge's `mqtt_retain=True` (so the
+        last value on each topic is retained for late subscribers).
+
+        Only "requires True" is expressible — there is no "requires False" — so
+        no two plugins can ever conflict on retain. Surfaced and fixed the same
+        way as `require_topic`. `source` is the plugin's label for the UI."""
+        self._registry.retain_required_by.append(source)
 
 
 class ServiceSupervisor:

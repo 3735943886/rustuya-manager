@@ -101,6 +101,14 @@ export const refreshCatalog = () => _postJson("/api/plugins/catalog/refresh", {}
 // returned latest versions are mainly for the toast.
 export const checkVersions = () => _postJson("/api/version-check", {});
 
+// Guided fix for plugin topic/retain requirements: push edited templates and/or
+// retain to the bridge via set_config (+reconfigure). `templates` is a map of
+// {event,command,message,scanner} → string; `retain` an optional bool. Resolves
+// {ok, ...} | {ok:false, error}. On success the bridge reconfigures and the
+// requirement report re-evaluates over the WS on its own.
+export const applyBridgeTemplates = (templates, retain) =>
+  _postJson("/api/bridge/apply-templates", { templates, retain });
+
 export const installPlugin = (id) => _postJson("/api/plugins/install", { id });
 export const updatePlugin = (id) => _postJson("/api/plugins/update", { id });
 export const uninstallPlugin = (id) => _postJson("/api/plugins/uninstall", { id });

@@ -29,7 +29,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, versions
+from . import __version__, requirements, versions
 from . import catalog as plugin_catalog
 from .cloud import CloudFormatError, parse_cloud_json, save_cloud_json
 from .models import Device
@@ -179,6 +179,15 @@ def serialize_state(state: State) -> dict[str, Any]:
     # wire format is byte-identical to a plugin-less build.
     if state._plugins:
         snapshot["plugins"] = dict(state._plugins)
+    # Plugin-declared topic/retain requirements, re-evaluated against the live
+    # bridge config each snapshot. `evaluate` returns None when no plugin
+    # declared anything, so the key is omitted for a plugin-less build (wire
+    # format unchanged).
+    req_report = requirements.evaluate(
+        state.bridge_config_raw, state.topic_requirements, state.retain_required_by
+    )
+    if req_report is not None:
+        snapshot["bridge_requirements"] = req_report
     return snapshot
 
 
@@ -448,6 +457,57 @@ def build_app(
             raise HTTPException(503, str(e)) from None
         return {"ok": True, "count": len(sightings)}
 
+    @app.post("/api/bridge/apply-templates")
+    async def post_apply_templates(body: dict[str, Any]) -> dict[str, Any]:
+        """Push edited topic templates / retain to the bridge via `set_config`,
+        the guided fix behind the Info panel's plugin-requirement section.
+
+        Body: `{templates: {event?: "...", command?, message?, scanner?},
+        retain?: bool}`. Each template is validated locally first
+        (`requirements.validate_topic_value`); a bad one returns 400 with a
+        per-field message and nothing is sent. On success the manager issues
+        `set_config` with `apply: true`, so the bridge writes the config file and
+        chains a `reconfigure` — which clears retained state under the old scheme
+        and restarts the bridge. The manager re-bootstraps from the republished
+        config (so the requirement report re-evaluates) without further action.
+
+        Requires a bridge that supports `set_config` (>= 0.3.0rc28) launched with
+        a config file; an older/file-less bridge will NACK — the manager can't
+        know that locally, so the UI also shows the manual diff as a fallback."""
+        templates = body.get("templates") or {}
+        retain = body.get("retain")
+        if not isinstance(templates, dict):
+            raise HTTPException(400, "'templates' must be an object")
+
+        extra: dict[str, Any] = {}
+        errors: dict[str, str] = {}
+        for key, value in templates.items():
+            if key not in requirements.TEMPLATE_SPECS:
+                errors[key] = "unknown template"
+                continue
+            if not isinstance(value, str):
+                errors[key] = "must be a string"
+                continue
+            ok, msg = requirements.validate_topic_value(key, value)
+            if not ok:
+                errors[key] = msg
+                continue
+            extra[requirements.TEMPLATE_SPECS[key].config_key] = value
+        if errors:
+            raise HTTPException(400, {"message": "invalid templates", "fields": errors})
+        if isinstance(retain, bool):
+            extra["mqtt_retain"] = retain
+        if not extra:
+            raise HTTPException(400, "nothing to change")
+
+        # apply:true → the bridge writes the config and self-reconfigures.
+        extra["apply"] = True
+        try:
+            await client.publish_command("set_config", target_id="bridge", extra=extra)
+        except RuntimeError as e:
+            raise HTTPException(503, str(e)) from None
+        return {"ok": True, "applied": extra}
+
     @app.post("/api/version-check")
     async def post_version_check() -> dict[str, Any]:
         """Force an immediate PyPI version check, bypassing the daily cache —
@@ -531,6 +591,10 @@ def build_app(
     # they're CWD-independent and survive plugin reinstalls.
     data_root = Path(managed_plugin_dir).parent if managed_plugin_dir else None
     ctx = PluginContext(registry, bridge_client=client, state=state, data_root=data_root)
+    # Bind the requirement accumulators by reference so serialize_state sees the
+    # live lists — including any a later rescan (_apply_new_plugins) appends.
+    state.topic_requirements = registry.topic_requirements
+    state.retain_required_by = registry.retain_required_by
     # Dedup state so a rescan only wires *new* plugins: register callables
     # already run, router objects already included, and plugin ids already
     # mounted. Routes/mounts can be added to a live Starlette app but not cleanly

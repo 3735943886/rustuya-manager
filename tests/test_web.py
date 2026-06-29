@@ -207,6 +207,76 @@ class TestHTTP:
             assert json.loads(payload) == {"action": "status", "id": "bridge"}
 
 
+class TestApplyTemplates:
+    """POST /api/bridge/apply-templates validates locally then issues set_config."""
+
+    def test_valid_templates_issue_set_config_with_apply(self):
+        state, client = _fixture_state()
+        with TestClient(build_app(state, client)) as tc:
+            r = tc.post(
+                "/api/bridge/apply-templates",
+                json={"templates": {"event": "rustuya/event/{type}/{id}/{dp}"}, "retain": True},
+            )
+            assert r.status_code == 200
+            assert r.json()["ok"] is True
+            client._client.publish.assert_awaited_once()
+            topic, payload = client._client.publish.await_args.args[:2]
+            assert topic == "rustuya/command"
+            body = json.loads(payload)
+            assert body["action"] == "set_config"
+            assert body["mqtt_event_topic"] == "rustuya/event/{type}/{id}/{dp}"
+            assert body["mqtt_retain"] is True
+            assert body["apply"] is True
+
+    def test_wildcard_template_is_rejected_and_nothing_published(self):
+        state, client = _fixture_state()
+        with TestClient(build_app(state, client)) as tc:
+            r = tc.post(
+                "/api/bridge/apply-templates",
+                json={"templates": {"event": "rustuya/event/+/{id}"}},
+            )
+            assert r.status_code == 400
+            client._client.publish.assert_not_awaited()
+
+    def test_unknown_placeholder_is_rejected(self):
+        state, client = _fixture_state()
+        with TestClient(build_app(state, client)) as tc:
+            r = tc.post(
+                "/api/bridge/apply-templates",
+                json={"templates": {"event": "rustuya/event/{type}/{id}/{bogus}"}},
+            )
+            assert r.status_code == 400
+            client._client.publish.assert_not_awaited()
+
+    def test_empty_change_is_rejected(self):
+        state, client = _fixture_state()
+        with TestClient(build_app(state, client)) as tc:
+            r = tc.post("/api/bridge/apply-templates", json={"templates": {}})
+            assert r.status_code == 400
+
+
+class TestRequirementsSnapshot:
+    """serialize_state surfaces plugin-declared requirements, evaluated against
+    the live bridge config; omitted entirely when no plugin declared any."""
+
+    def test_omitted_when_no_requirements(self):
+        from rustuya_manager.web import serialize_state
+
+        assert "bridge_requirements" not in serialize_state(State())
+
+    def test_reports_unmet_event_placeholder(self):
+        from rustuya_manager.requirements import TopicRequirement
+        from rustuya_manager.web import serialize_state
+
+        state = State()
+        state.bridge_config_raw = {"mqtt_event_topic": "{root}/event/{type}/{id}"}
+        state.topic_requirements = [TopicRequirement("PluginA", "event", must_have=("dp",))]
+        snap = serialize_state(state)
+        rep = snap["bridge_requirements"]
+        assert rep["satisfied"] is False
+        assert rep["topics"]["event"]["missing"] == ["dp"]
+
+
 class TestScanEndpoint:
     """The header's Scan button posts to /api/scan, which delegates to the
     shared LanScanCoordinator. The wire contract:

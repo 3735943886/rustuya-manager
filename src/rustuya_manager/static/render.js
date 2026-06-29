@@ -6,7 +6,8 @@ import { state, ALL_CATEGORIES } from "./state.js";
 import { escapeHtml, toast } from "./dom.js";
 import { deviceCard, missingParentCard, classifyDevice, primaryDevice } from "./cards.js";
 import { t } from "./i18n.js";
-import { checkVersions } from "./api.js";
+import { checkVersions, applyBridgeTemplates } from "./api.js";
+import { confirm } from "./modal-confirm.js";
 
 const $list = document.getElementById("device-list");
 const $empty = document.getElementById("empty-state");
@@ -22,6 +23,10 @@ const $syncBar = document.getElementById("sync-bar");
 // version chips over the WS (this re-render swaps in a fresh, idle button).
 if ($templates) {
   $templates.addEventListener("click", async (e) => {
+    if (e.target.closest("#req-apply-btn")) {
+      await applyRequirementFix(e.target.closest("#req-apply-btn"));
+      return;
+    }
     const btn = e.target.closest("#version-check-btn");
     if (!btn || btn.dataset.busy) return;
     btn.dataset.busy = "1";
@@ -40,6 +45,41 @@ if ($templates) {
     }
     toast(ok ? t("info.checkDone") : t("info.checkFailed"), ok ? "ok" : "error");
   });
+}
+
+// Gather the edited template fields + retain checkbox from the requirements
+// section, confirm the reconfigure cost, and push via set_config. The bridge
+// clears retained state under the old scheme and restarts, so this is gated
+// behind an explicit, danger-styled confirm — never silent.
+async function applyRequirementFix(btn) {
+  if (btn.dataset.busy) return;
+  const templates = {};
+  for (const inp of $templates.querySelectorAll("[data-req-template]")) {
+    templates[inp.dataset.reqTemplate] = inp.value.trim();
+  }
+  const retainBox = $templates.querySelector("[data-req-retain]");
+  const retain = retainBox ? !!retainBox.checked : undefined;
+  if (!Object.keys(templates).length && retain === undefined) return;
+
+  const ok = await confirm({
+    title: t("req.confirmTitle"),
+    message: t("req.confirmBody"),
+    okLabel: t("req.apply"),
+    danger: true,
+  });
+  if (!ok) return;
+
+  btn.dataset.busy = "1";
+  btn.disabled = true;
+  const res = await applyBridgeTemplates(templates, retain);
+  if (res && res.ok !== false) {
+    toast(t("req.applied"), "ok");
+  } else {
+    // 400 with field errors comes back as a JSON-ish string; surface as-is.
+    toast(t("req.applyFailed") + (res && res.error ? `: ${res.error}` : ""), "error");
+    btn.dataset.busy = "";
+    btn.disabled = false;
+  }
 }
 
 export function render() {
@@ -238,13 +278,24 @@ export function renderTemplates() {
     $templates.appendChild(diagRow(k, v, opts));
   }
 
+  // ── Plugin requirements ── topic/retain needs declared by plugins, checked
+  // against the live bridge config. Absent for a plugin-less build (the backend
+  // omits the key). Rendered after Status; carries the guided fix.
+  const req = snap.bridge_requirements;
+  if (req) renderRequirements(req);
+
   // Amber dot on the (possibly collapsed) summary whenever anything can be
-  // updated — the cue to expand and read which component it is.
+  // updated OR a plugin requirement is unmet — the cue to expand and look.
   const dot = document.getElementById("info-update-dot");
   if (dot) {
     const anyUpdate = !!(snap.manager_update || snap.bridge_update);
-    dot.classList.toggle("hidden", !anyUpdate);
-    dot.title = anyUpdate ? t("info.updateAvailable") : "";
+    const reqUnmet = !!(req && !req.satisfied);
+    dot.classList.toggle("hidden", !anyUpdate && !reqUnmet);
+    dot.title = reqUnmet
+      ? t("req.unmet")
+      : anyUpdate
+        ? t("info.updateAvailable")
+        : "";
   }
 
   // Spell out the conflict — a colored "external" value is easy to miss.
@@ -257,6 +308,92 @@ export function renderTemplates() {
       "⚠ " +
       ((warnMsg && warnMsg.message) || t("bridge.conflictNote"));
     $templates.appendChild(note);
+  }
+}
+
+// Render the "Plugin requirements" Info-panel section from snap.bridge_requirements.
+// Shows each constrained topic's met/unmet status; for unmet ones, an editable
+// field pre-filled with the manager's recommended template. A single Apply
+// button pushes every edit via set_config (behind a reconfigure-cost confirm).
+function renderRequirements(report) {
+  const divider = document.createElement("div");
+  divider.className = "border-t border-slate-200 dark:border-slate-700 my-1";
+  $templates.appendChild(divider);
+
+  const head = sectionHeading(t("req.heading"));
+  head.classList.add("flex", "items-center");
+  const pill = report.satisfied
+    ? `<span class="ml-auto shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">${escapeHtml(t("req.allMet"))}</span>`
+    : `<span class="ml-auto shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700">${escapeHtml(t("req.actionNeeded"))}</span>`;
+  head.insertAdjacentHTML("beforeend", pill);
+  $templates.appendChild(head);
+
+  for (const [key, info] of Object.entries(report.topics || {})) {
+    const row = document.createElement("div");
+    row.className = "mt-1";
+    const icon = info.satisfied ? "✓" : "⚠";
+    const iconCls = info.satisfied
+      ? "text-emerald-600 dark:text-emerald-400"
+      : "text-amber-600 dark:text-amber-400";
+    // Header line: "✓ event" + sources.
+    const who = (info.sources || []).map((s) => s.source).join(", ");
+    row.innerHTML =
+      `<div class="flex items-baseline gap-1"><span class="${iconCls} shrink-0">${icon}</span>` +
+      `<span class="font-medium">${escapeHtml(key)}</span>` +
+      `<span class="text-slate-400 dark:text-slate-500 truncate">${escapeHtml(who)}</span></div>`;
+
+    if (info.satisfied) {
+      row.insertAdjacentHTML(
+        "beforeend",
+        `<div class="pl-4 text-slate-400 dark:text-slate-500 break-all">${escapeHtml(info.current)}</div>`,
+      );
+    } else {
+      const bits = [];
+      if (info.missing.length) bits.push(t("req.needs") + " " + info.missing.map((p) => "{" + p + "}").join(" "));
+      if (info.forbidden.length) bits.push(t("req.remove") + " " + info.forbidden.map((p) => "{" + p + "}").join(" "));
+      row.insertAdjacentHTML(
+        "beforeend",
+        `<div class="pl-4 text-amber-700 dark:text-amber-300">${escapeHtml(bits.join(" · "))}</div>` +
+          `<input type="text" data-req-template="${escapeHtml(key)}" value="${escapeHtml(info.recommended)}" ` +
+          `class="mt-0.5 ml-4 w-[calc(100%-1rem)] px-1 py-0.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 font-mono text-xs break-all" />`,
+      );
+    }
+    // "Not honored" notes — a source's must_not_have overridden by present-wins.
+    for (const s of info.sources || []) {
+      if (s.unhonored && s.unhonored.length) {
+        row.insertAdjacentHTML(
+          "beforeend",
+          `<div class="pl-4 text-slate-400 dark:text-slate-500">${escapeHtml(
+            t("req.notHonored", { source: s.source, ph: s.unhonored.map((p) => "{" + p + "}").join(" ") }),
+          )}</div>`,
+        );
+      }
+    }
+    $templates.appendChild(row);
+  }
+
+  // Retain — only ever "needs True".
+  if (report.retain) {
+    const r = report.retain;
+    const row = document.createElement("div");
+    row.className = "mt-1";
+    if (r.satisfied) {
+      row.innerHTML = `<div class="flex items-baseline gap-1"><span class="text-emerald-600 dark:text-emerald-400 shrink-0">✓</span><span class="font-medium">retain</span><span class="text-slate-400 dark:text-slate-500">${escapeHtml((r.sources || []).join(", "))}</span></div>`;
+    } else {
+      row.innerHTML =
+        `<div class="flex items-baseline gap-1"><span class="text-amber-600 dark:text-amber-400 shrink-0">⚠</span><span class="font-medium">retain</span><span class="text-slate-400 dark:text-slate-500">${escapeHtml((r.sources || []).join(", "))}</span></div>` +
+        `<label class="pl-4 flex items-center gap-1 text-amber-700 dark:text-amber-300"><input type="checkbox" data-req-retain checked /> ${escapeHtml(t("req.setRetain"))}</label>`;
+    }
+    $templates.appendChild(row);
+  }
+
+  if (!report.satisfied) {
+    const actions = document.createElement("div");
+    actions.className = "mt-2 pl-4";
+    actions.innerHTML =
+      `<button id="req-apply-btn" type="button" class="text-sm px-2 py-0.5 rounded bg-amber-600 hover:bg-amber-700 text-white">${escapeHtml(t("req.apply"))}</button>` +
+      `<div class="mt-1 text-[11px] text-slate-400 dark:text-slate-500 break-words whitespace-normal">${escapeHtml(t("req.applyNote"))}</div>`;
+    $templates.appendChild(actions);
   }
 }
 

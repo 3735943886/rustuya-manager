@@ -135,6 +135,14 @@ class State:
     # plugin-less manager stays byte-identical on the wire.
     _plugins: dict[str, Any] = field(default_factory=dict)
 
+    # Plugin-declared requirements, copied from the PluginRegistry after register
+    # (see build_app). Static for the process lifetime; `serialize_state`
+    # re-evaluates them against the live bridge config each snapshot via
+    # `requirements.evaluate`. Empty lists → the `bridge_requirements` snapshot
+    # key is omitted, so a plugin-less manager stays byte-identical on the wire.
+    topic_requirements: list[Any] = field(default_factory=list)
+    retain_required_by: list[str] = field(default_factory=list)
+
     _version: int = 0
     _changed: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
 

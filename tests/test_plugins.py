@@ -98,6 +98,38 @@ async def test_plugin_mqtt_handler_receives_matching_messages():
     assert received == [("hello/world", '{"a":1}', True)]
 
 
+async def test_require_topic_and_retain_accumulate():
+    state = State()
+    client = _make_client(state)
+    registry = PluginRegistry()
+    ctx = PluginContext(registry, bridge_client=client, state=state)
+
+    ctx.require_topic("PluginA", "event", must_have=("dp",), must_not_have=("name",))
+    ctx.require_retain("PluginA")
+
+    assert len(registry.topic_requirements) == 1
+    req = registry.topic_requirements[0]
+    assert req.source == "PluginA"
+    assert req.template == "event"
+    assert req.must_have == ("dp",)
+    assert req.must_not_have == ("name",)
+    assert registry.retain_required_by == ["PluginA"]
+
+
+async def test_require_topic_rejects_impossible_declaration():
+    state = State()
+    ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
+    # {id} is a routing minimum on the event topic — can't be required absent.
+    with pytest.raises(ValueError, match="routing"):
+        ctx.require_topic("PluginA", "event", must_not_have=("id",))
+
+
+async def test_api_version_is_3():
+    state = State()
+    ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
+    assert ctx.api_version >= 3
+
+
 async def test_add_mqtt_subscription_via_ctx_records_and_routes():
     state = State()
     client = _make_client(state)

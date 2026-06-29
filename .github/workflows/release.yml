@@ -26,7 +26,9 @@ on:
     tags:
       - "v*"
 
-# OIDC needs id-token write; no other write permissions required.
+# OIDC needs id-token write. The publish job additionally needs contents:write
+# to create the GitHub Release; that's granted at the job level (below) so the
+# reusable test job inherits only read.
 permissions:
   contents: read
   id-token: write
@@ -40,6 +42,10 @@ jobs:
     name: Build + publish
     needs: test
     runs-on: ubuntu-latest
+    # id-token for OIDC trusted publishing; contents for the GitHub Release.
+    permissions:
+      contents: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v7
@@ -72,9 +78,13 @@ jobs:
           if [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "url=https://upload.pypi.org/legacy/" >> "$GITHUB_OUTPUT"
             echo "name=PyPI" >> "$GITHUB_OUTPUT"
+            # Plain semver = final release → not a GitHub pre-release.
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
           else
             echo "url=https://test.pypi.org/legacy/" >> "$GITHUB_OUTPUT"
             echo "name=TestPyPI" >> "$GITHUB_OUTPUT"
+            # rc/a/b/dev = pre-release on GitHub too (keeps it off "latest").
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
           fi
           echo "Target: $TAG → $(grep '^name=' "$GITHUB_OUTPUT" | tail -1)"
 
@@ -90,3 +100,30 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: ${{ steps.target.outputs.url }}
+
+      - name: Extract this release's section from CHANGELOG.md
+        # The hand-curated CHANGELOG.md is the single source of truth for release
+        # notes. Pull only the `## [<version>]` section (up to the next `## [`)
+        # for the GitHub Release body. GitHub's own generate_release_notes only
+        # lists merged PRs — most changes here land as direct commits, so they'd
+        # be invisible — and its "previous tag" heuristic skips pre-releases.
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VER" '
+            $0 ~ ("^## \\[" ver "\\]") { cap=1; next }
+            cap && /^## \[/ { exit }
+            cap { print }
+          ' CHANGELOG.md | sed '1{/^$/d}' > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "Release ${GITHUB_REF_NAME}. See CHANGELOG.md for details." > RELEASE_NOTES.md
+          fi
+
+      - name: Create or update the GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          body_path: RELEASE_NOTES.md
+          files: dist/*
+          draft: false
+          prerelease: ${{ steps.target.outputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

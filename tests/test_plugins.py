@@ -648,6 +648,42 @@ async def test_service_supervisor_starts_runs_then_stops_clean():
     assert sup._tasks == []  # invariant: no orphan service
 
 
+async def test_service_supervisor_start_new_supervises_only_the_delta():
+    """A plugin installed/scanned at runtime appends to registry.services after
+    the lifespan already ran start(); start_new() must supervise just the added
+    service and not re-spawn the ones start() already covers."""
+    reg = PluginRegistry()
+    ran_a = asyncio.Event()
+    ran_b = asyncio.Event()
+    a_starts: list = []
+
+    async def factory_a():
+        a_starts.append(1)
+        ran_a.set()
+        await asyncio.Event().wait()
+
+    async def factory_b():
+        ran_b.set()
+        await asyncio.Event().wait()
+
+    reg.services.append(factory_a)
+    sup = ServiceSupervisor(reg)
+    await sup.start()
+    await asyncio.wait_for(ran_a.wait(), 1.0)
+    assert len(sup._tasks) == 1
+
+    # Runtime install/scan registers a second service.
+    reg.services.append(factory_b)
+    assert await sup.start_new() == 1  # only the delta
+    await asyncio.wait_for(ran_b.wait(), 1.0)
+    assert len(sup._tasks) == 2
+    assert a_starts == [1]  # factory_a was not re-spawned
+
+    assert await sup.start_new() == 0  # no-op when nothing new registered
+    assert len(sup._tasks) == 2
+    await sup.stop()
+
+
 async def test_service_supervisor_respawns_on_crash():
     reg = PluginRegistry()
     calls: list = []

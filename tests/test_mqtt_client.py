@@ -1239,6 +1239,103 @@ class TestPluginRuntimeDpBus:
             await client.publish_derived_dp("D1", "99", 1, retain=False)
 
 
+_DEFAULT_TEMPLATES = BridgeTemplates(
+    root="rustuya",
+    command="rustuya/command",
+    event="rustuya/event/{type}/{id}",
+    message="rustuya/{level}/{id}",
+    scanner="rustuya/scanner",
+    payload="{value}",
+)
+
+
+class TestRetainedLiveness:
+    @pytest.mark.asyncio
+    async def test_retained_event_does_not_mark_online(self):
+        """A retained event is the broker's stale last-known snapshot with no
+        publish timestamp. merge_dps deliberately withholds last_seen and flags
+        it retained_only; the live dot must stay off it too, or a device powered
+        off for days reads 'online' on cold-start replay with nothing to correct
+        it. Contrast test_event_marks_device_online (the live, non-retained path)."""
+        state = State()
+        await state.set_templates(_DEFAULT_TEMPLATES)
+        client, _ = _make_client(state)
+        client.root = "rustuya"
+        await client._dispatch(
+            "rustuya/event/active/devX", json.dumps({"dps": {"1": True}}), retain=True
+        )
+        assert state.dps.get("devX")  # data still merged
+        assert "devX" in state.retained_only  # but flagged stale
+        assert "devX" not in state.live_status  # and NOT marked online
+        assert "devX" not in state.last_seen
+
+
+class TestStatusSingleFlight:
+    """A paginated `status` cycle must single-flight: a second request that
+    arrives mid-pagination cannot interleave its offset-0 page into the shared
+    accumulator (which truncated the committed fleet before the fix)."""
+
+    def _page(self, devices, *, offset, returned, has_more, count):
+        return {
+            "devices": {d: {"id": d} for d in devices},
+            "offset": offset,
+            "returned": returned,
+            "has_more": has_more,
+            "device_count": count,
+        }
+
+    @pytest.mark.asyncio
+    async def test_concurrent_request_is_coalesced_not_truncated(self):
+        state = State()
+        await state.set_templates(_DEFAULT_TEMPLATES)
+        client, aio = _make_client(state)
+
+        await client._request_status()  # cycle A opens (offset-0 emitted)
+        assert client._status_active is True
+        await client._handle_status_page(
+            self._page(["a", "b"], offset=0, returned=2, has_more=True, count=4)
+        )
+        # A second trigger (e.g. an `add` ack) lands mid-pagination.
+        await client._request_status()
+        assert client._status_rerun is True  # coalesced, not a new cycle
+        assert set(client._status_accum) == {"a", "b"}  # buffer NOT reset
+        # Cycle A's final page commits the whole fleet — not just page 1.
+        await client._handle_status_page(
+            self._page(["c", "d"], offset=2, returned=2, has_more=False, count=4)
+        )
+        assert set(state.bridge) == {"a", "b", "c", "d"}
+        # The coalesced request fired exactly one fresh cycle after commit.
+        assert client._status_active is True
+        assert client._status_rerun is False
+
+    @pytest.mark.asyncio
+    async def test_unpaginated_reply_commits_and_clears_active(self):
+        """Old bridge (no has_more) still commits immediately and releases the
+        single-flight guard so the next trigger isn't suppressed."""
+        state = State()
+        await state.set_templates(_DEFAULT_TEMPLATES)
+        client, _ = _make_client(state)
+        await client._request_status()
+        await client._handle_status_page({"devices": {"a": {"id": "a"}}, "device_count": 1})
+        assert set(state.bridge) == {"a"}
+        assert client._status_active is False
+
+    @pytest.mark.asyncio
+    async def test_stalled_cycle_is_reclaimed_after_timeout(self):
+        """A cycle whose reply was lost must not wedge status forever: once its
+        clock ages past the timeout, a new trigger opens a fresh cycle."""
+        state = State()
+        await state.set_templates(_DEFAULT_TEMPLATES)
+        client, aio = _make_client(state)
+        await client._request_status()
+        assert aio.publish.await_count == 1
+        # Simulate a dead cycle: active, but last page long ago.
+        client._status_started -= client._STATUS_CYCLE_TIMEOUT + 1
+        await client._request_status()  # not coalesced — reclaims and re-emits
+        assert aio.publish.await_count == 2
+        assert client._status_rerun is False
+
+
 # pytest-asyncio integration — auto mode is the simplest setup for our needs.
 def pytest_collection_modifyitems(items):
     for item in items:

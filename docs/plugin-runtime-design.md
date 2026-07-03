@@ -1,6 +1,7 @@
 # Design: manager plugin runtime — reactive DPs & in-process daemons
 
-> **Status: implemented — Pillars 1 & 2 shipped (`PLUGIN_API_VERSION = 2`).**
+> **Status: implemented — Pillars 1 & 2 shipped, plus declared topic/retain
+> requirements (`PLUGIN_API_VERSION = 3`).**
 > This started as a pre-implementation design record and is kept current. It
 > fixes the decisions and explains *why* the runtime is shaped as it is; the live
 > API is in `plugins.py` (`PluginContext`) and `mqtt.py` (`BridgeClient._route`
@@ -143,12 +144,36 @@ ctx.add_service(coro_factory)
 #   persist to disk (re-exec re-runs register() and re-starts the service).
 ```
 
+```python
+# ── Read-side helpers ─────────────────────────────────────────────────────
+ctx.current_dps(device_id)      # snapshot of a device's last-known decoded DPS
+ctx.data_dir(name)              # per-plugin writable dir for state that should
+                                #   survive a restart; `name` is validated (single
+                                #   path segment, no '.'/'..'/absolute)
+
+# ── Plugin API v3: declared topic/retain requirements ────────────────────
+ctx.require_topic(source, template, *, must_have=(), must_not_have=())
+#   Declare the bridge topic scheme the plugin depends on: which `{placeholder}`s
+#   must be present / absent on a given topic. `source` is one of
+#   "command" | "event" | "message" | "scanner".
+ctx.require_retain(source)
+#   Declare that the plugin needs `mqtt_retain = True`.
+#   The manager evaluates every declaration against the live bridge config and
+#   surfaces met/unmet in the Info panel, offering a recommended template and a
+#   one-click Apply that pushes it via the bridge's `set_config` (behind a
+#   confirm spelling out the reconfigure cost). The manager never rewrites the
+#   bridge config on its own. Declarations are registration-time only and
+#   validated then (an impossible must_have ∩ must_not_have is rejected); the
+#   conflict rules keep any combination of plugins jointly satisfiable.
+```
+
 Existing surfaces (`add_mqtt_subscription`, `publish_raw`, `state_namespace`,
 `add_api_router`, pages) are unchanged — and are exactly how a plugin talks to
 an *external* service (§7). `derived_dp` is a thin wrapper over `publish_raw`;
 full control stays available via `publish_raw` + `bridge_config()`.
-`PLUGIN_API_VERSION` is now `2`; a plugin gates on these methods with
-`ctx.api_version >= 2`.
+`PLUGIN_API_VERSION` is now `3`; a plugin gates on a method with
+`ctx.api_version >= N` for the version that introduced it — Pillars 1 & 2 at
+`>= 2`, the topic/retain requirements at `>= 3`.
 
 ---
 

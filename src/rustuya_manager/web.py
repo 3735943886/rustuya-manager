@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import hmac
 import json
 import logging
 import os
@@ -212,7 +213,13 @@ class _BasicAuthMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] in ("http", "websocket"):
             headers = dict(scope.get("headers") or [])
-            if headers.get(b"authorization") != self.expected_header:
+            # Constant-time compare so the configured credential can't be
+            # recovered byte-by-byte via response-timing when the UI is bound
+            # to a non-loopback interface (`--host 0.0.0.0 --auth`). A missing
+            # header short-circuits before compare_digest (which needs two
+            # same-type operands).
+            provided = headers.get(b"authorization")
+            if provided is None or not hmac.compare_digest(provided, self.expected_header):
                 if scope["type"] == "http":
                     await send(
                         {
@@ -658,6 +665,19 @@ def build_app(
                 )
         return added
 
+    async def _start_new_services() -> None:
+        """Supervise any background service (`ctx.add_service`) a just-applied
+        plugin registered. `_apply_new_plugins` runs the plugin's `register(ctx)`
+        but only wires routes/pages/mounts; a service-registering plugin
+        installed or scanned at runtime would otherwise sit dormant until the
+        next restart. The supervisor started the build-time services at lifespan
+        startup, so this covers only the runtime delta (idempotent when none)."""
+        supervisor = getattr(app.state, "service_supervisor", None)
+        if supervisor is not None:
+            started = await supervisor.start_new()
+            if started:
+                logger.info("started %d newly-registered plugin service(s)", started)
+
     def _scan_dirs() -> list[str]:
         """Existing directories to scan for drop-in plugins: the managed install
         dir (where the catalog drops things) plus any explicit `plugin_dirs`.
@@ -718,6 +738,7 @@ def build_app(
         Add-only: returns `{ok, added, pages, init_scripts}`. Cannot reload
         edited plugin code or unload a plugin — that needs POST /api/restart."""
         added = _apply_new_plugins(_discover())
+        await _start_new_services()
         logger.info("plugin scan: %d new plugin(s) loaded", added)
         return {"ok": True, "added": added, **_plugin_manifest()}
 
@@ -809,6 +830,7 @@ def build_app(
         except plugin_catalog.CatalogError as exc:
             raise HTTPException(400, str(exc)) from exc
         added = _apply_new_plugins(_discover())
+        await _start_new_services()
         logger.info("installed plugin %r; %d new plugin(s) wired", plugin_id, added)
         return {
             "ok": True,

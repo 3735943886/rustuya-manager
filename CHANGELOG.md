@@ -12,6 +12,46 @@ the plain `0.1.0` tag will publish to PyPI.
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-07-03
+
+First stable release. The `0.1.0rc1`–`0.1.0rc73` series is consolidated under
+this tag; the sections below record only what changed since rc73. The full
+pre-release history remains in the rc entries that follow.
+
+### Fixed
+
+- **Paginated `status` replies are now single-flighted.** A large fleet's
+  `status` reply is paginated across several round-trips into a single
+  accumulator; two overlapping requests (e.g. a reconnect and an `add` ack)
+  could interleave their pages and commit a truncated device list. Only one
+  page-through runs at a time now, and a request that arrives mid-cycle is
+  coalesced into one fresh cycle once the current one commits. A cycle whose
+  reply is lost is reclaimed after a timeout, so a lost reply cannot suppress
+  status updates indefinitely.
+- **A retained event no longer marks a device "online".** A retained event is
+  the broker's stale last-known snapshot with no publish timestamp; `merge_dps`
+  already withheld `last_seen` and flagged the device `retained_only`, but the
+  live-status dot was still set to online. It now stays off until a live event
+  arrives, so a device powered off before a manager cold-start no longer reads
+  as online with nothing to correct it.
+- **Basic-auth credential comparison is constant-time** (`hmac.compare_digest`),
+  closing a response-timing side channel on the configured credential when the
+  UI is bound to a non-loopback interface (`--host 0.0.0.0 --auth`).
+- **The manager is again the sole owner of SIGINT/SIGTERM.** uvicorn's embedded
+  server installed its own signal handlers, overriding the manager's; that
+  capture is now disabled so shutdown — including embedded-bridge teardown —
+  runs through the manager's handlers as documented.
+- **A plugin service registered at runtime now starts immediately.** A plugin
+  installed or scanned in through the UI that registered a background service
+  (`ctx.add_service`) stayed dormant until the next restart; its service is now
+  supervised as soon as the plugin is wired.
+
+### Docs
+
+- The plugin-runtime design doc is updated to the v3 API surface
+  (`PLUGIN_API_VERSION = 3`, `ctx.require_topic`/`ctx.require_retain`, and the
+  `ctx.current_dps`/`ctx.data_dir` additions).
+
 ## [0.1.0rc73] — 2026-06-29
 
 ### Added

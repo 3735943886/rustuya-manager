@@ -31,6 +31,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, NamedTuple
 
@@ -144,6 +145,9 @@ class BridgeClient:
     # attributes so tests can override them to 0 for fast suites.
     _INITIAL_BACKOFF_SEC: float = 1.0
     _MAX_BACKOFF_SEC: float = 60.0
+    # A paginated `status` cycle with no page for this long is assumed dead (its
+    # reply was lost) so a stalled cycle can't wedge `_request_status` forever.
+    _STATUS_CYCLE_TIMEOUT: float = 30.0
     # Cap the internal aiomqtt incoming queue so a wedged dispatch surfaces as
     # a paho-side warning rather than unbounded memory growth. 1000 is well
     # above any realistic manager-side burst (bridge `status` reply is the
@@ -214,6 +218,15 @@ class BridgeClient:
         # `_handle_status_page`). None when no page-through is active; a partial
         # {id: Device} map while one is. Committed to state on the final page.
         self._status_accum: dict[str, Device] | None = None
+        # Single-flight guard for the paginated `status` cycle. `_status_active`
+        # is True from the moment we emit an offset-0 request until the final
+        # page commits; `_status_started` is the monotonic time of the last page
+        # (or the emission), used to declare a cycle dead if its reply is lost;
+        # `_status_rerun` coalesces any request that arrived mid-cycle into a
+        # single fresh cycle once the current one commits. See `_request_status`.
+        self._status_active = False
+        self._status_started: float | None = None
+        self._status_rerun = False
 
     def _client_kwargs(self) -> dict[str, Any]:
         """Build the aiomqtt.Client constructor kwargs.
@@ -291,13 +304,21 @@ class BridgeClient:
                         self._client = client
                         await self._subscribe_initial(client)
                         self._connected.set()
+                        # A broker reconnect voids any status pagination that was
+                        # in flight on the old connection; reset the single-flight
+                        # state (and drop the partial accumulator) so the
+                        # re-request below opens a clean cycle instead of being
+                        # coalesced away as "still active".
+                        self._status_active = False
+                        self._status_accum = None
+                        self._status_rerun = False
                         # On a *re*connect after bootstrap, re-request status so
                         # the device list reflects whatever changed during the
                         # gap. First-connect path triggers status from
                         # `_on_bridge_config` after templates resolve, so don't
                         # double-fire here.
                         if was_disconnected_after_bootstrap and self._bootstrap_done.is_set():
-                            asyncio.create_task(self.publish_command("status", target_id="bridge"))
+                            asyncio.create_task(self._request_status())
                             was_disconnected_after_bootstrap = False
                         # First-time bootstrap fallback — if bridge/config never
                         # arrives, apply defaults so the UI isn't frozen waiting
@@ -512,7 +533,7 @@ class BridgeClient:
                     # ended up storing; ask for a status refresh so state.bridge
                     # picks up the new/updated entry authoritatively.
                     await self.state.record_response(target, parsed, retained=retain)
-                    asyncio.create_task(self.publish_command("status", target_id="bridge"))
+                    asyncio.create_task(self._request_status())
                 elif (
                     action == "clear"
                     and status_val == "ok"
@@ -547,13 +568,20 @@ class BridgeClient:
                 dps = await self._extract_dps_from_event(vars_, parsed, payload_str)
                 if key and dps:
                     await self.state.merge_dps(key, dps, retained=retain)
-                    # Data flowing means the device is alive — mark online.
+                    # Live data flowing means the device is alive — mark online.
+                    # But a *retained* event is the broker's stale last-known
+                    # snapshot with no publish timestamp: merge_dps deliberately
+                    # withholds last_seen and flags it retained_only for exactly
+                    # this reason, so we must not flip the live dot to green off
+                    # it either — a device powered off for days would falsely read
+                    # "online" on cold-start replay with nothing to correct it.
                     # Leave message empty: the bridge's error-channel sends
                     # human-readable strings like "Connection Successful",
                     # and event-derived liveness has no equivalent to put
                     # in the MSG row. The online dot + edge color already
                     # convey state; MSG should only fire for real diagnostics.
-                    await self.state.set_live_status(key, "online", code=0, message="")
+                    if not retain:
+                        await self.state.set_live_status(key, "online", code=0, message="")
                     # Fan out to plugin DP watchers. After merge_dps returns
                     # (so the lock is released and state reflects the update),
                     # never under it.
@@ -589,12 +617,15 @@ class BridgeClient:
         offset = parsed.get("offset", 0)
         returned = parsed.get("returned", len(devices))
         has_more = bool(parsed.get("has_more", False))
+        # A page arrived → the cycle is progressing; refresh the staleness clock
+        # so a long-but-healthy page-through isn't reclaimed mid-stream.
+        self._status_started = time.monotonic()
 
         # offset 0 starts a fresh snapshot (covers the unpaginated and first-page
-        # cases). A mid-stream restart (another trigger re-issued status) simply
-        # begins again; the id-keyed merge keeps the result convergent. A
-        # non-zero offset arriving with no buffer (e.g. page 0 lost across a
-        # reconnect) still opens one rather than dropping the data.
+        # cases). Single-flighting (see _request_status) means no *concurrent*
+        # offset-0 resets a live buffer; a non-zero offset arriving with no
+        # buffer (e.g. page 0 lost across a reconnect) still opens one rather
+        # than dropping the data.
         if offset == 0 or self._status_accum is None:
             self._status_accum = {}
         for did, d in devices.items():
@@ -610,9 +641,11 @@ class BridgeClient:
             return
 
         # Final page (or unpaginated reply) — commit the assembled snapshot and
-        # the bridge diagnostics in a single state bump.
+        # the bridge diagnostics in a single state bump. The cycle is done, so
+        # release the single-flight guard before checking for a coalesced re-run.
         accum = self._status_accum
         self._status_accum = None
+        self._status_active = False
         drop_count = parsed.get("mqtt_drop_count", 0)
         await self.state.set_bridge(
             accum,
@@ -620,6 +653,11 @@ class BridgeClient:
             mqtt_drop_count=drop_count,
         )
         await self._surface_mqtt_drops(drop_count)
+        # A trigger that fired while this cycle was in flight was coalesced into
+        # a single pending re-run; honour it now so the snapshot reflects any
+        # change (e.g. an `add`) that landed mid-pagination.
+        if self._status_rerun:
+            await self._request_status()
 
     async def _surface_mqtt_drops(self, drop_count: Any) -> None:
         """Raise (or clear) a UI warning for bridge-side MQTT publish drops.
@@ -748,7 +786,7 @@ class BridgeClient:
         await self._subscribe_runtime_topics(templates)
         await self._validate_payload_template(templates.payload)
         if not self._bootstrap_done.is_set():
-            await self._request_initial_status()
+            await self._request_status()
             self._bootstrap_done.set()
             logger.info("Bootstrap complete — templates resolved for root %r", root)
         else:
@@ -840,8 +878,37 @@ class BridgeClient:
             await self._client.subscribe(w)
             logger.info("Subscribed: %s", w)
 
-    async def _request_initial_status(self) -> None:
-        await self.publish_command("status", target_id="bridge")
+    async def _request_status(self) -> None:
+        """Request a full `status` snapshot, single-flighting the paginated cycle.
+
+        The bridge paginates a large fleet's `status` reply across several
+        round-trips, accumulated in `_status_accum` and committed on the final
+        page. Multiple triggers (reconnect, an `add` ack, bootstrap) can each
+        want a fresh snapshot; emitting a second offset-0 cycle while one is
+        mid-pagination resets the shared accumulator and commits a *truncated*
+        device list. So only one cycle runs at a time: a request that arrives
+        mid-cycle sets `_status_rerun`, which fires exactly one fresh cycle once
+        the current one commits. A cycle whose reply is lost is reclaimed after
+        `_STATUS_CYCLE_TIMEOUT` so a stall can't suppress status forever."""
+        now = time.monotonic()
+        if (
+            self._status_active
+            and self._status_started is not None
+            and now - self._status_started < self._STATUS_CYCLE_TIMEOUT
+        ):
+            self._status_rerun = True
+            return
+        self._status_active = True
+        self._status_started = now
+        self._status_rerun = False
+        try:
+            await self.publish_command("status", target_id="bridge")
+        except Exception:
+            # Emission failed (broker dropped between trigger and publish) —
+            # clear the in-flight flag so the next trigger isn't suppressed
+            # waiting on a reply that will never arrive.
+            self._status_active = False
+            raise
 
     # ── command publishing ──────────────────────────────────────────────
     async def publish_command(

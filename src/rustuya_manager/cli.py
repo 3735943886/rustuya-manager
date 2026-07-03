@@ -243,6 +243,12 @@ async def _serve_web(host: str, port: int, app: Any) -> None:
 
     config = uvicorn.Config(app, host=host, port=port, log_level="info", access_log=False)
     server = uvicorn.Server(config)
+    # The manager owns SIGINT/SIGTERM (loop.add_signal_handler → stop_event, set
+    # up in run()); the embedded-bridge no-signals design depends on that single
+    # owner. uvicorn.Server.serve() otherwise installs its own handlers and
+    # overrides ours — so disable its capture and let the manager's handlers
+    # drive shutdown.
+    server.install_signal_handlers = lambda: None
     await server.serve()
 
 

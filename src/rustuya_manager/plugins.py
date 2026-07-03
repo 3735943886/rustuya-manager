@@ -7,7 +7,7 @@ A plugin is anything exposing a `register(ctx)` callable, found one of two ways:
     `/data/plugins`), loaded by `_discover_dir_plugins` — no pip install needed.
 
 At startup `build_app` discovers both and calls `register(ctx)` once each.
-Through `ctx` a plugin can contribute five things:
+Through `ctx` a plugin can contribute seven things:
 
   1. a FastAPI `APIRouter`            (ctx.add_api_router)
   2. an MQTT subscription + handler   (ctx.add_mqtt_subscription)
@@ -20,6 +20,13 @@ Through `ctx` a plugin can contribute five things:
                                       + derived-DP output (ctx.derived_dp) and
                                       device control (ctx.set_device_dp) — the
                                       in-process DP bus, api_version >= 2
+  7. an in-process service            (ctx.add_service) — one supervised async
+                                      coroutine, started after bootstrap and
+                                      restarted with crash backoff, api_version >= 2
+
+A plugin can also *declare* the bridge topic/retain scheme it depends on
+(ctx.require_topic / ctx.require_retain, api_version >= 3); the manager surfaces
+met/unmet in the Info panel with a guided fix but never rewrites the config.
 
 It can also *read* two host-owned snapshots — the cloud devices
 (`ctx.devices`) and the raw bridge config (`ctx.bridge_config`) — and publish
@@ -222,10 +229,11 @@ class DerivedDp:
 class PluginContext:
     """The single object handed to every plugin's `register(ctx)`.
 
-    Intentionally small and host-agnostic — it exposes the four contribution
-    surfaces, two read-only snapshots (`devices`, `bridge_config`), the API
-    version, and the live `BridgeClient` (for publishing). Plugins must not
-    reach past this into manager internals.
+    Intentionally small and host-agnostic — it exposes the contribution surfaces
+    (see the module docstring), the topic/retain requirement declarations, two
+    read-only snapshots (`devices`, `bridge_config`), the API version, and the
+    live `BridgeClient` (for publishing). Plugins must not reach past this into
+    manager internals.
     """
 
     def __init__(
@@ -477,10 +485,25 @@ class ServiceSupervisor:
     async def start(self) -> None:
         """Spawn a supervised task per registered service. Call once per
         lifespan (paired with `stop()`)."""
-        for idx, factory in enumerate(self._registry.services):
+        started = await self.start_new()
+        if started:
+            logger.info("started %d plugin service(s)", started)
+
+    async def start_new(self) -> int:
+        """Supervise any services registered since the last start()/start_new().
+
+        Runtime plugin install/scan (web._apply_new_plugins) can append to
+        `registry.services` *after* the lifespan already ran start(); those
+        services would otherwise never run until a restart. Supervises only the
+        delta (a service's index in `registry.services` is stable — it is
+        append-only — and `_tasks` grows one-per-service), so already-running
+        services are never double-spawned. Returns the count newly supervised;
+        a no-op (returns 0) when nothing was added."""
+        already = len(self._tasks)
+        for idx in range(already, len(self._registry.services)):
+            factory = self._registry.services[idx]
             self._tasks.append(asyncio.create_task(self._supervise(idx, factory)))
-        if self._tasks:
-            logger.info("started %d plugin service(s)", len(self._tasks))
+        return len(self._tasks) - already
 
     async def _supervise(self, idx: int, factory: ServiceFactory) -> None:
         exits: list[float] = []

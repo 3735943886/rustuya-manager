@@ -249,8 +249,10 @@ async function loadInitScripts(urls) {
 
 // Apply a /api/plugins manifest incrementally: update the page list, run any new
 // init scripts, and add any new tabs. Idempotent — re-applying the same manifest
-// is a no-op, so this backs both the initial boot and a later rescan.
-async function applyManifest(data) {
+// is a no-op, so this backs the initial boot, a later rescan, AND a live install
+// (the install/scan endpoints return the fresh manifest so the new tab appears
+// without a page reload). Exported for the plugins modal's post-install wire-up.
+export async function applyManifest(data) {
   manifest = Array.isArray(data?.pages) ? data.pages : [];
   const initScripts = Array.isArray(data?.init_scripts) ? data.init_scripts : [];
   await loadInitScripts(initScripts);

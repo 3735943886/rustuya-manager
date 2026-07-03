@@ -17,6 +17,7 @@
 import { escapeHtml, toast, button } from "./dom.js";
 import { confirm } from "./modal-confirm.js";
 import { setHeaderAttention } from "./header-actions.js";
+import { applyManifest } from "./plugins.js";
 import { t } from "./i18n.js";
 import {
   getCatalog,
@@ -204,7 +205,15 @@ async function act(fn, id, verb) {
     return;
   }
   toast(t("plugins.actionOk", { verb, id }), "ok");
-  if (res.restart_required) setRestart();
+  if (res.restart_required) {
+    setRestart();
+  } else if (Array.isArray(res.pages)) {
+    // A live install (add-only, no restart) returns the fresh manifest. Apply
+    // it to the plugin host now so the new tab appears immediately — otherwise
+    // it wouldn't show until the next page reload (initPluginHost runs once, at
+    // boot). Idempotent, so re-applying an unchanged manifest is a no-op.
+    await applyManifest(res);
+  }
   await refresh();
 }
 

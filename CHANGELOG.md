@@ -45,6 +45,10 @@ pre-release history remains in the rc entries that follow.
   installed or scanned in through the UI that registered a background service
   (`ctx.add_service`) stayed dormant until the next restart; its service is now
   supervised as soon as the plugin is wired.
+- **A newly installed plugin's tab now appears immediately.** The web UI builds
+  its plugin tab bar once at page load, so a plugin installed live from the
+  Manage-plugins modal did not show its tab until the next reload. The modal now
+  re-applies the manifest the install returns, so the tab appears at once.
 
 ### Docs
 

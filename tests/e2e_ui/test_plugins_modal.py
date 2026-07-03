@@ -46,6 +46,28 @@ def _make_zip(tmp_path, pkg, route):
     return zpath.as_uri(), hashlib.sha256(data).hexdigest()
 
 
+# A page plugin: register a UI tab whose static assets live alongside the
+# package. `add_page` needs a real static_dir on disk (the unpacked plugin dir)
+# and a mountable ES module — index.js exports mount(rootEl).
+_PAGE_REGISTER_SRC = """
+from pathlib import Path
+
+def register(ctx):
+    ctx.add_page("PID", "LABEL", static_dir=str(Path(__file__).parent), entry="index.js")
+"""
+_PAGE_INDEX_JS = "export function mount(rootEl) { rootEl.textContent = 'e2e page mounted'; }\n"
+
+
+def _make_page_zip(tmp_path, pkg, pid, label):
+    zpath = tmp_path / f"{pkg}.zip"
+    src = _PAGE_REGISTER_SRC.replace("PID", pid).replace("LABEL", label)
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr(f"{pkg}/__init__.py", src)
+        zf.writestr(f"{pkg}/index.js", _PAGE_INDEX_JS)
+    data = zpath.read_bytes()
+    return zpath.as_uri(), hashlib.sha256(data).hexdigest()
+
+
 @pytest.fixture()
 def plugin_server(tmp_path, monkeypatch):
     pkg = f"e2eplug_{uuid.uuid4().hex[:8]}"
@@ -55,6 +77,29 @@ def plugin_server(tmp_path, monkeypatch):
         "id": "e2e-fake",
         "name": "E2E Fake Plugin",
         "description": "A throwaway plugin used by the e2e suite.",
+        "version": "9.9.9",
+        "min_api": 1,
+        "url": uri,
+        "sha256": sha,
+    }
+    monkeypatch.setattr(catalog, "load_bundled_catalog", lambda: [entry])
+    managed = tmp_path / "managed"
+    app = build_app(State(), _StubBridgeClient(), managed_plugin_dir=str(managed))
+    url, server, thread = _start_server(app)
+    yield url
+    _stop_server(server, thread)
+
+
+@pytest.fixture()
+def page_plugin_server(tmp_path, monkeypatch):
+    """Server whose catalog offers a single *page* plugin (contributes a UI tab),
+    so the install round-trip can assert the tab appears live."""
+    pkg = f"e2epage_{uuid.uuid4().hex[:8]}"
+    uri, sha = _make_page_zip(tmp_path, pkg, "e2epage", "E2E Page")
+    entry = {
+        "id": "e2e-page",
+        "name": "E2E Page Plugin",
+        "description": "A throwaway page plugin used by the e2e suite.",
         "version": "9.9.9",
         "min_api": 1,
         "url": uri,
@@ -92,6 +137,30 @@ def test_install_round_trip(page, plugin_server):
     expect(body).to_contain_text("installed")
     expect(body.get_by_role("button", name="Disable")).to_be_visible()
     expect(body.get_by_role("button", name="Uninstall")).to_be_visible()
+
+
+def test_install_page_plugin_adds_tab_live(page, page_plugin_server):
+    """Regression: installing the first page plugin must add its tab to the shell
+    immediately — the tab bar is built at boot (initPluginHost runs once), so
+    before the fix the tab only appeared after a full page reload (F5). The
+    install response carries the fresh manifest; the modal re-applies it live."""
+    # No tab bar at all before any plugin is installed.
+    expect(page.locator("#page-tabs")).to_have_count(0)
+
+    _open_modal(page, page_plugin_server)
+    body = page.locator("#plugins-modal-body")
+    body.get_by_role("button", name="Install").click()
+    expect(body).to_contain_text("installed")
+
+    # The tab appears live, without reloading the page.
+    tab = page.locator('#page-tabs button[data-page="e2epage"]')
+    expect(tab).to_be_visible()
+    expect(tab).to_have_text("E2E Page")
+
+    # And it actually works: closing the modal and clicking the tab mounts the page.
+    page.click("#plugins-modal-done")
+    tab.click()
+    expect(page.locator('[data-plugin-page="e2epage"]')).to_contain_text("e2e page mounted")
 
 
 def test_restart_attention_dot_persists(page, plugin_server):

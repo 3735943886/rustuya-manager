@@ -12,12 +12,20 @@ consume the same change stream.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from .diff import DiffResult, diff
 from .models import Device
+
+logger = logging.getLogger(__name__)
+
+# A zero-arg async callback fired after the cloud device set changes
+# (registered via ctx.watch_devices). See `State.add_device_listener`.
+DeviceListener = Callable[[], Awaitable[None]]
 
 
 def _now() -> float:
@@ -143,6 +151,10 @@ class State:
     topic_requirements: list[Any] = field(default_factory=list)
     retain_required_by: list[str] = field(default_factory=list)
 
+    # Callbacks fired after the cloud device set changes (ctx.watch_devices).
+    # Not on the wire and not part of equality/repr — pure runtime wiring.
+    _device_listeners: list[DeviceListener] = field(default_factory=list, repr=False, compare=False)
+
     _version: int = 0
     _changed: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
 
@@ -158,6 +170,25 @@ class State:
         async with self._changed:
             self.cloud = devices
             self._bump()
+        # Notify device-set watchers *after* releasing the lock: a watcher
+        # typically recomputes and calls StateNamespace.set → set_plugin_data,
+        # which re-acquires `self._changed` (asyncio locks are not reentrant, so
+        # firing inside the block would deadlock).
+        await self._notify_device_listeners()
+
+    def add_device_listener(self, handler: DeviceListener) -> None:
+        """Register a zero-arg async callback fired whenever the cloud device set
+        changes (a devices upload or the login wizard). Backs `ctx.watch_devices`;
+        the handler re-reads `devices()` for the new set. Fired outside the state
+        lock, isolated per handler."""
+        self._device_listeners.append(handler)
+
+    async def _notify_device_listeners(self) -> None:
+        for handler in self._device_listeners:
+            try:
+                await handler()
+            except Exception:  # noqa: BLE001 - one bad watcher must not break others
+                logger.exception("device listener raised")
 
     async def set_bridge(
         self,

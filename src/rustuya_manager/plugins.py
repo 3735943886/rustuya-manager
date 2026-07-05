@@ -7,7 +7,7 @@ A plugin is anything exposing a `register(ctx)` callable, found one of two ways:
     `/data/plugins`), loaded by `_discover_dir_plugins` — no pip install needed.
 
 At startup `build_app` discovers both and calls `register(ctx)` once each.
-Through `ctx` a plugin can contribute seven things:
+Through `ctx` a plugin can contribute eight things:
 
   1. a FastAPI `APIRouter`            (ctx.add_api_router)
   2. an MQTT subscription + handler   (ctx.add_mqtt_subscription)
@@ -23,6 +23,8 @@ Through `ctx` a plugin can contribute seven things:
   7. an in-process service            (ctx.add_service) — one supervised async
                                       coroutine, started after bootstrap and
                                       restarted with crash backoff, api_version >= 2
+  8. a device-set watcher            (ctx.watch_devices) — fires when the cloud
+                                      device list changes, api_version >= 4
 
 A plugin can also *declare* the bridge topic/retain scheme it depends on
 (ctx.require_topic / ctx.require_retain, api_version >= 3); the manager surfaces
@@ -66,8 +68,9 @@ logger = logging.getLogger(__name__)
 # via `ctx.api_version` (compare `>=`) to refuse to load against a host too old
 # for what they need. v2 added the reactive DP bus: watch_dps/watch_device/
 # watch_dp, derived_dp, set_device_dp. v3 added topic/retain requirements:
-# ctx.require_topic / ctx.require_retain.
-PLUGIN_API_VERSION = 3
+# ctx.require_topic / ctx.require_retain. v4 added the device-set bus:
+# ctx.watch_devices (fires when the cloud device list changes).
+PLUGIN_API_VERSION = 4
 
 # Entry-point group plugins advertise their `register(ctx)` callable under.
 ENTRY_POINT_GROUP = "rustuya_manager.plugins"
@@ -347,6 +350,19 @@ class PluginContext:
         """Command a real device's DP (external → Tuya), via the bridge's
         `set` action. The same path the web UI uses."""
         await self.bridge_client.set_device_dp(device_id, str(dp), value)
+
+    # ── device-set changes (api_version >= 4) ────────────────────────────
+    def watch_devices(self, handler: Callable[[], Awaitable[None]]) -> None:
+        """Fire `handler()` whenever the cloud device set changes — a devices
+        upload or the login wizard adding/removing devices.
+
+        The handler takes no args and re-reads `devices()` for the new set; use
+        it to recompute anything derived from the device list (e.g. a discovery
+        status grid) so it reflects a newly added device without waiting for an
+        unrelated event. Runs in-process after the change commits, isolated per
+        handler (a raising handler is logged; others still run). This is the
+        device-*membership* bus — for DP-*value* changes use `watch_dps`."""
+        self._state.add_device_listener(handler)
 
     def add_service(self, coro_factory: ServiceFactory) -> None:
         """Register a long-lived in-process async daemon (api_version >= 2).

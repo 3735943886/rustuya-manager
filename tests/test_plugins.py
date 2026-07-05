@@ -124,10 +124,10 @@ async def test_require_topic_rejects_impossible_declaration():
         ctx.require_topic("PluginA", "event", must_not_have=("id",))
 
 
-async def test_api_version_is_3():
+async def test_api_version_current():
     state = State()
     ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
-    assert ctx.api_version >= 3
+    assert ctx.api_version >= 4  # v4 added the device-set bus (ctx.watch_devices)
 
 
 async def test_add_mqtt_subscription_via_ctx_records_and_routes():
@@ -582,6 +582,47 @@ async def test_reactive_dp_bus_wires_and_dispatches():
     assert seen == [("D1", {"1": True}, "device")]
 
     assert isinstance(ctx.derived_dp("D1", "99"), DerivedDp)
+
+
+# ── device-set bus (api_version >= 4) ────────────────────────────────────
+async def test_watch_devices_fires_on_cloud_change():
+    """ctx.watch_devices registers a handler that fires after set_cloud commits,
+    seeing the new device set via devices()."""
+    state = State()
+    ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
+
+    seen: list = []
+
+    async def on_devices() -> None:
+        seen.append(sorted(ctx.devices().keys()))
+
+    ctx.watch_devices(on_devices)
+    assert seen == []  # not fired at registration
+
+    await state.set_cloud({"D1": Device(id="D1")})
+    await state.set_cloud({"D1": Device(id="D1"), "D2": Device(id="D2")})
+    assert seen == [["D1"], ["D1", "D2"]]  # each change, latest set visible
+
+
+async def test_watch_devices_isolation_and_no_deadlock():
+    """A raising handler is isolated (others still run), and a handler that
+    writes plugin state (set_plugin_data re-acquires the state lock) does not
+    deadlock — listeners fire after set_cloud releases the lock."""
+    state = State()
+    ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
+    ns = ctx.state_namespace("probe")
+
+    async def boom() -> None:
+        raise RuntimeError("bad watcher")
+
+    async def writes_state() -> None:
+        await ns.set({"devices": len(ctx.devices())})
+
+    ctx.watch_devices(boom)
+    ctx.watch_devices(writes_state)
+
+    await asyncio.wait_for(state.set_cloud({"D1": Device(id="D1")}), timeout=2)
+    assert ns.get() == {"devices": 1}  # ran despite the earlier handler raising
 
 
 async def test_current_dps_snapshot_is_readonly_copy():

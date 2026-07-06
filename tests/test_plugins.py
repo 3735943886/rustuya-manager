@@ -627,6 +627,46 @@ async def test_watch_devices_isolation_and_no_deadlock():
     assert ns.get() == {"devices": 1}  # ran despite the earlier handler raising
 
 
+async def test_set_cloud_skips_bus_when_unchanged():
+    """An identical re-upload must not re-fire the device-set bus — Device is a
+    value-equality dataclass, so set_cloud detects the no-op and skips it (the WS
+    bump stays unconditional; only the plugin bus is gated)."""
+    state = State()
+    fires: list = []
+
+    async def handler(devices) -> None:
+        fires.append(sorted(devices))
+
+    state.add_device_listener(handler)
+    await state.set_cloud({"D1": Device(id="D1")})
+    await state.set_cloud({"D1": Device(id="D1")})  # identical content → skipped
+    await state.set_cloud({"D1": Device(id="D1"), "D2": Device(id="D2")})  # changed → fires
+    assert fires == [["D1"], ["D1", "D2"]]
+
+
+def test_watch_devices_replays_current_set_at_startup():
+    """The current cloud set is delivered to a watch_devices handler once at
+    web-app startup (before serving), so a reactive plugin isn't blank for
+    boot-time devices — the initial load lands before plugins register, so
+    without this replay the bus would never fire for it. Mirrors the DP bus's
+    retained replay on connect."""
+    state = State()
+    # Cloud loaded at bootstrap, before plugins register (mirrors cli.py order).
+    state.cloud = {"D1": Device(id="D1"), "D2": Device(id="D2")}
+    seen: list = []
+
+    def register(ctx):
+        async def on_devices(devices):
+            seen.append(sorted(devices))
+
+        ctx.watch_devices(on_devices)
+
+    client = _make_client(state)
+    with TestClient(build_app(state, client, plugins=[register])):
+        pass  # entering/exiting runs the lifespan; startup fires the replay
+    assert seen == [["D1", "D2"]]  # boot set delivered exactly once
+
+
 async def test_current_dps_snapshot_is_readonly_copy():
     """ctx.current_dps() exposes the live DP map (whole or per-device) so a
     plugin can seed from values already ingested, and hands back fresh dicts

@@ -173,10 +173,12 @@ ctx.watch_devices(handler)
 #   in the same `{id: raw_data}` shape as `devices()`. Use it to recompute
 #   anything derived from the device list (e.g. a discovery status grid) without
 #   waiting for an unrelated event. Fired in-process after the change commits,
-#   isolated per handler. This is the device-*membership* bus — for DP-*value*
-#   changes use `watch_dps`. The initial cloud load at startup happens before
-#   plugins register, so the bus does not fire for it: seed from `devices()` at
-#   registration/mount and rely on the bus for later changes.
+#   isolated per handler; fires only when the set actually changed (an identical
+#   re-upload is skipped). The current set is also delivered once at web-app
+#   startup, before serving — the device-set analogue of the DP bus's retained
+#   replay on connect — so a handler seeds itself from its argument with no
+#   separate `devices()` read and no upload-vs-seed race. This is the
+#   device-*membership* bus — for DP-*value* changes use `watch_dps`.
 ```
 
 Existing surfaces (`add_mqtt_subscription`, `publish_raw`, `state_namespace`,

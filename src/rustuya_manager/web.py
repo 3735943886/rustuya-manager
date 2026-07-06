@@ -278,6 +278,13 @@ def build_app(
         supervisor = getattr(app.state, "service_supervisor", None)
         if supervisor is not None:
             await supervisor.start()
+        # Deliver the current cloud device set to any ctx.watch_devices plugin
+        # once, here — before uvicorn starts accepting requests. The initial
+        # cloud load ran during bootstrap, before plugins registered, so the bus
+        # never fired for it; replaying now (the device-set analogue of the DP
+        # bus's retained replay) means a reactive plugin isn't blank for
+        # boot-time devices and no /api/cloud upload can race the delivery.
+        await state.replay_device_listeners()
         version_task = asyncio.create_task(_version_check_loop())
         try:
             yield

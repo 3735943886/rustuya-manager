@@ -25,9 +25,12 @@ pre-release history remains in the rc entries that follow.
   list changed — a devices upload or a login-wizard add only surfaced after some
   unrelated event. `ctx.watch_devices(handler)` now fires `handler(devices)` when
   the cloud device set changes, passing the new set in the same `{id: raw_data}`
-  shape as `ctx.devices()`. Fired in-process after the change commits, isolated
-  per handler. (The initial startup load lands before plugins register, so seed
-  from `ctx.devices()` at registration and rely on the bus for later changes.)
+  shape as `ctx.devices()`. The current set is also delivered once at web-app
+  startup (before serving) — the device-set analogue of the DP bus's retained
+  replay — so a handler seeds from its argument with no separate `devices()` read
+  and no upload-vs-seed race; a reactive plugin isn't blank for boot-time devices
+  after a restart. Fires only when the set actually changed (an identical
+  re-upload is skipped), in-process and isolated per handler.
 
 ### Fixed
 

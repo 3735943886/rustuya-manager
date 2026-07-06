@@ -168,6 +168,11 @@ class State:
     # ── mutators ──────────────────────────────────────────────────────────
     async def set_cloud(self, devices: dict[str, Device]) -> None:
         async with self._changed:
+            # Compare before assigning so an identical re-upload doesn't fire the
+            # device-set bus (Device is a value-equality dataclass, so this is a
+            # true content check, not identity). The WS bump stays unconditional
+            # so a re-upload still refreshes connected clients.
+            changed = devices != self.cloud
             self.cloud = devices
             self._bump()
         # Notify device-set watchers *after* releasing the lock: a watcher
@@ -176,7 +181,8 @@ class State:
         # firing inside the block would deadlock). Pass the exact set applied by
         # this change, not a re-read of self.cloud, so a listener sees the set
         # its notification is for even if a later set_cloud is already in flight.
-        await self._notify_device_listeners(devices)
+        if changed:
+            await self._notify_device_listeners(devices)
 
     def add_device_listener(self, handler: DeviceListener) -> None:
         """Register an async callback fired whenever the cloud device set changes
@@ -184,6 +190,18 @@ class State:
         handler receives the new `{id: Device}` set. Fired outside the state lock,
         isolated per handler."""
         self._device_listeners.append(handler)
+
+    async def replay_device_listeners(self) -> None:
+        """Deliver the current cloud set to every device listener once — the
+        device-set analogue of the DP bus's retained-snapshot replay on connect.
+
+        The web app calls this at startup (before it begins serving), so a
+        `ctx.watch_devices` plugin receives the boot-time device set exactly once
+        without a separate seed, and no `/api/cloud` upload can race the initial
+        delivery. Snapshots the set under the lock, then fires outside it."""
+        async with self._changed:
+            current = dict(self.cloud)
+        await self._notify_device_listeners(current)
 
     async def _notify_device_listeners(self, devices: dict[str, Device]) -> None:
         for handler in self._device_listeners:

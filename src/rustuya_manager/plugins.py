@@ -366,13 +366,14 @@ class PluginContext:
         `devices()`** (a fresh outer dict per call; inner dicts shared by
         reference — read, don't mutate). Use it to recompute anything derived
         from the device list (e.g. a discovery status grid) so it reflects a
-        newly added device without waiting for an unrelated event. Note the
-        initial cloud load at startup happens before plugins register, so this
-        does not fire for it — seed from `devices()` at registration/mount and
-        rely on the bus for subsequent changes. Runs in-process after the change
-        commits, isolated per handler (a raising handler is logged; others still
-        run). This is the device-*membership* bus — for DP-*value* changes use
-        `watch_dps`."""
+        newly added device without waiting for an unrelated event. The current
+        set is also delivered **once at web-app startup** (before serving), so a
+        handler that seeds from its `devices` argument needs no separate
+        `devices()` read — mirrors how `watch_dps` replays the retained snapshot
+        on connect. Fires only when the set actually changes (an identical
+        re-upload is skipped). Runs in-process after the change commits, isolated
+        per handler (a raising handler is logged; others still run). This is the
+        device-*membership* bus — for DP-*value* changes use `watch_dps`."""
 
         # State emits its native {id: Device} map; project to the plugin-facing
         # {id: raw_data} shape here (identical to devices()) so a plugin sees one

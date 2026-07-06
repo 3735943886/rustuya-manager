@@ -23,9 +23,9 @@ from .models import Device
 
 logger = logging.getLogger(__name__)
 
-# A zero-arg async callback fired after the cloud device set changes
-# (registered via ctx.watch_devices). See `State.add_device_listener`.
-DeviceListener = Callable[[], Awaitable[None]]
+# An async callback fired with the new `{id: Device}` set after the cloud device
+# set changes (registered via ctx.watch_devices). See `State.add_device_listener`.
+DeviceListener = Callable[[dict[str, Device]], Awaitable[None]]
 
 
 def _now() -> float:
@@ -173,20 +173,22 @@ class State:
         # Notify device-set watchers *after* releasing the lock: a watcher
         # typically recomputes and calls StateNamespace.set → set_plugin_data,
         # which re-acquires `self._changed` (asyncio locks are not reentrant, so
-        # firing inside the block would deadlock).
-        await self._notify_device_listeners()
+        # firing inside the block would deadlock). Pass the exact set applied by
+        # this change, not a re-read of self.cloud, so a listener sees the set
+        # its notification is for even if a later set_cloud is already in flight.
+        await self._notify_device_listeners(devices)
 
     def add_device_listener(self, handler: DeviceListener) -> None:
-        """Register a zero-arg async callback fired whenever the cloud device set
-        changes (a devices upload or the login wizard). Backs `ctx.watch_devices`;
-        the handler re-reads `devices()` for the new set. Fired outside the state
-        lock, isolated per handler."""
+        """Register an async callback fired whenever the cloud device set changes
+        (a devices upload or the login wizard). Backs `ctx.watch_devices`; the
+        handler receives the new `{id: Device}` set. Fired outside the state lock,
+        isolated per handler."""
         self._device_listeners.append(handler)
 
-    async def _notify_device_listeners(self) -> None:
+    async def _notify_device_listeners(self, devices: dict[str, Device]) -> None:
         for handler in self._device_listeners:
             try:
-                await handler()
+                await handler(devices)
             except Exception:  # noqa: BLE001 - one bad watcher must not break others
                 logger.exception("device listener raised")
 

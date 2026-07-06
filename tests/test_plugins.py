@@ -585,23 +585,25 @@ async def test_reactive_dp_bus_wires_and_dispatches():
 
 
 # ── device-set bus (api_version >= 4) ────────────────────────────────────
-async def test_watch_devices_fires_on_cloud_change():
-    """ctx.watch_devices registers a handler that fires after set_cloud commits,
-    seeing the new device set via devices()."""
+async def test_watch_devices_fires_with_new_set_on_cloud_change():
+    """ctx.watch_devices fires after set_cloud commits, receiving the new device
+    set as an argument in the same {id: raw_data} shape as ctx.devices()."""
     state = State()
     ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
 
     seen: list = []
 
-    async def on_devices() -> None:
-        seen.append(sorted(ctx.devices().keys()))
+    async def on_devices(devices) -> None:
+        # `devices` is the same shape ctx.devices() returns: {id: raw_data}.
+        assert devices == ctx.devices()
+        seen.append(sorted(devices))
 
     ctx.watch_devices(on_devices)
     assert seen == []  # not fired at registration
 
     await state.set_cloud({"D1": Device(id="D1")})
     await state.set_cloud({"D1": Device(id="D1"), "D2": Device(id="D2")})
-    assert seen == [["D1"], ["D1", "D2"]]  # each change, latest set visible
+    assert seen == [["D1"], ["D1", "D2"]]  # each change, new set passed in
 
 
 async def test_watch_devices_isolation_and_no_deadlock():
@@ -612,11 +614,11 @@ async def test_watch_devices_isolation_and_no_deadlock():
     ctx = PluginContext(PluginRegistry(), bridge_client=_make_client(state), state=state)
     ns = ctx.state_namespace("probe")
 
-    async def boom() -> None:
+    async def boom(devices) -> None:
         raise RuntimeError("bad watcher")
 
-    async def writes_state() -> None:
-        await ns.set({"devices": len(ctx.devices())})
+    async def writes_state(devices) -> None:
+        await ns.set({"devices": len(devices)})
 
     ctx.watch_devices(boom)
     ctx.watch_devices(writes_state)

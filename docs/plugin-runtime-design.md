@@ -1,7 +1,7 @@
 # Design: manager plugin runtime — reactive DPs & in-process daemons
 
 > **Status: implemented — Pillars 1 & 2 shipped, plus declared topic/retain
-> requirements (`PLUGIN_API_VERSION = 3`).**
+> requirements and the device-set bus (`PLUGIN_API_VERSION = 4`).**
 > This started as a pre-implementation design record and is kept current. It
 > fixes the decisions and explains *why* the runtime is shaped as it is; the live
 > API is in `plugins.py` (`PluginContext`) and `mqtt.py` (`BridgeClient._route`
@@ -165,15 +165,27 @@ ctx.require_retain(source)
 #   bridge config on its own. Declarations are registration-time only and
 #   validated then (an impossible must_have ∩ must_not_have is rejected); the
 #   conflict rules keep any combination of plugins jointly satisfiable.
+
+# ── Plugin API v4: device-set bus ────────────────────────────────────────
+ctx.watch_devices(handler)
+#   Fire `handler(devices)` whenever the cloud device *set* changes — a devices
+#   upload or the login wizard adding/removing devices. `devices` is the new set
+#   in the same `{id: raw_data}` shape as `devices()`. Use it to recompute
+#   anything derived from the device list (e.g. a discovery status grid) without
+#   waiting for an unrelated event. Fired in-process after the change commits,
+#   isolated per handler. This is the device-*membership* bus — for DP-*value*
+#   changes use `watch_dps`. The initial cloud load at startup happens before
+#   plugins register, so the bus does not fire for it: seed from `devices()` at
+#   registration/mount and rely on the bus for later changes.
 ```
 
 Existing surfaces (`add_mqtt_subscription`, `publish_raw`, `state_namespace`,
 `add_api_router`, pages) are unchanged — and are exactly how a plugin talks to
 an *external* service (§7). `derived_dp` is a thin wrapper over `publish_raw`;
 full control stays available via `publish_raw` + `bridge_config()`.
-`PLUGIN_API_VERSION` is now `3`; a plugin gates on a method with
+`PLUGIN_API_VERSION` is now `4`; a plugin gates on a method with
 `ctx.api_version >= N` for the version that introduced it — Pillars 1 & 2 at
-`>= 2`, the topic/retain requirements at `>= 3`.
+`>= 2`, the topic/retain requirements at `>= 3`, the device-set bus at `>= 4`.
 
 ---
 

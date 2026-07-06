@@ -18,6 +18,17 @@ First stable release. The `0.1.0rc1`–`0.1.0rc73` series is consolidated under
 this tag; the sections below record only what changed since rc73. The full
 pre-release history remains in the rc entries that follow.
 
+### Added
+
+- **Device-set bus for plugins (`ctx.watch_devices`, `PLUGIN_API_VERSION` → 4).**
+  A plugin generating output from the cloud device list had no way to learn the
+  list changed — a devices upload or a login-wizard add only surfaced after some
+  unrelated event. `ctx.watch_devices(handler)` now fires `handler(devices)` when
+  the cloud device set changes, passing the new set in the same `{id: raw_data}`
+  shape as `ctx.devices()`. Fired in-process after the change commits, isolated
+  per handler. (The initial startup load lands before plugins register, so seed
+  from `ctx.devices()` at registration and rely on the bus for later changes.)
+
 ### Fixed
 
 - **Paginated `status` replies are now single-flighted.** A large fleet's
@@ -52,9 +63,9 @@ pre-release history remains in the rc entries that follow.
 
 ### Docs
 
-- The plugin-runtime design doc is updated to the v3 API surface
-  (`PLUGIN_API_VERSION = 3`, `ctx.require_topic`/`ctx.require_retain`, and the
-  `ctx.current_dps`/`ctx.data_dir` additions).
+- The plugin-runtime design doc is updated to the current API surface
+  (`PLUGIN_API_VERSION = 4`, `ctx.require_topic`/`ctx.require_retain`,
+  `ctx.watch_devices`, and the `ctx.current_dps`/`ctx.data_dir` additions).
 
 ## [0.1.0rc73] — 2026-06-29
 

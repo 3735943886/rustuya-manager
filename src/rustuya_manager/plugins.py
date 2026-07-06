@@ -23,8 +23,9 @@ Through `ctx` a plugin can contribute eight things:
   7. an in-process service            (ctx.add_service) — one supervised async
                                       coroutine, started after bootstrap and
                                       restarted with crash backoff, api_version >= 2
-  8. a device-set watcher            (ctx.watch_devices) — fires when the cloud
-                                      device list changes, api_version >= 4
+  8. a device-set watcher            (ctx.watch_devices) — fires with the new
+                                      cloud device set when it changes,
+                                      api_version >= 4
 
 A plugin can also *declare* the bridge topic/retain scheme it depends on
 (ctx.require_topic / ctx.require_retain, api_version >= 3); the manager surfaces
@@ -81,6 +82,11 @@ MqttHandler = Callable[[str, str, bool], Awaitable[None]]
 # A DP watcher: async (device_id, dps, origin) -> None. `dps` is the decoded
 # {dp: value} delta from one device event; `origin` is "device".
 DpWatcher = Callable[[str, "dict[str, Any]", str], Awaitable[None]]
+
+# A device-set watcher: async (devices) -> None, where `devices` is the new
+# cloud set in `{id: raw_data}` shape (same as ctx.devices()). Fired on cloud
+# device-set changes via ctx.watch_devices.
+DeviceSetWatcher = Callable[["dict[str, Any]"], Awaitable[None]]
 
 # A plugin service: a zero-arg factory returning the long-lived coroutine the
 # manager supervises (started after bootstrap, crash-backoff restart, cancelled
@@ -352,17 +358,29 @@ class PluginContext:
         await self.bridge_client.set_device_dp(device_id, str(dp), value)
 
     # ── device-set changes (api_version >= 4) ────────────────────────────
-    def watch_devices(self, handler: Callable[[], Awaitable[None]]) -> None:
-        """Fire `handler()` whenever the cloud device set changes — a devices
-        upload or the login wizard adding/removing devices.
+    def watch_devices(self, handler: DeviceSetWatcher) -> None:
+        """Fire `handler(devices)` whenever the cloud device set changes — a
+        devices upload or the login wizard adding/removing devices.
 
-        The handler takes no args and re-reads `devices()` for the new set; use
-        it to recompute anything derived from the device list (e.g. a discovery
-        status grid) so it reflects a newly added device without waiting for an
-        unrelated event. Runs in-process after the change commits, isolated per
-        handler (a raising handler is logged; others still run). This is the
-        device-*membership* bus — for DP-*value* changes use `watch_dps`."""
-        self._state.add_device_listener(handler)
+        `devices` is the new set in the **same `{id: raw_data}` shape as
+        `devices()`** (a fresh outer dict per call; inner dicts shared by
+        reference — read, don't mutate). Use it to recompute anything derived
+        from the device list (e.g. a discovery status grid) so it reflects a
+        newly added device without waiting for an unrelated event. Note the
+        initial cloud load at startup happens before plugins register, so this
+        does not fire for it — seed from `devices()` at registration/mount and
+        rely on the bus for subsequent changes. Runs in-process after the change
+        commits, isolated per handler (a raising handler is logged; others still
+        run). This is the device-*membership* bus — for DP-*value* changes use
+        `watch_dps`."""
+
+        # State emits its native {id: Device} map; project to the plugin-facing
+        # {id: raw_data} shape here (identical to devices()) so a plugin sees one
+        # consistent device shape across both surfaces.
+        async def _projected(cloud: dict[str, Any]) -> None:
+            await handler({did: dev.raw_data for did, dev in cloud.items()})
+
+        self._state.add_device_listener(_projected)
 
     def add_service(self, coro_factory: ServiceFactory) -> None:
         """Register a long-lived in-process async daemon (api_version >= 2).

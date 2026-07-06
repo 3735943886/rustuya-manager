@@ -12,11 +12,10 @@ the plain `0.1.0` tag will publish to PyPI.
 
 ## [Unreleased]
 
-## [0.1.0] — 2026-07-03
+## [0.1.0rc74] — 2026-07-06
 
-First stable release. The `0.1.0rc1`–`0.1.0rc73` series is consolidated under
-this tag; the sections below record only what changed since rc73. The full
-pre-release history remains in the rc entries that follow.
+Release candidate for `0.1.0`: the plugin device-set bus plus final hardening
+and docs sync. The sections below record what changed since rc73.
 
 ### Added
 

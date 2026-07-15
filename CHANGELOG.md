@@ -12,34 +12,22 @@ the plain `0.1.0` tag will publish to PyPI.
 
 ## [Unreleased]
 
-## [0.1.0rc75] — 2026-07-15
+## [0.1.0] — 2026-07-15
 
-### Added
-
-- **"System" theme mode that follows the OS.** The header theme control was a
-  two-state light/dark toggle; it now cycles System → Light → Dark. "System" is
-  the default for a fresh install (an absent stored choice is treated as system,
-  so existing installs keep following the OS as before) and resolves against the
-  OS `prefers-color-scheme`. The menu item's glyph and label show the currently
-  selected mode rather than the one a click would switch to, since with three
-  states the next mode isn't self-evident.
-
-### Changed
-
-- **System mode tracks an OS theme change live.** Previously an absent stored
-  choice followed the OS only at page load, so flipping the OS between light and
-  dark required a reload to take effect. A `matchMedia` change listener now
-  re-applies the theme in place while the selection is "system"; an explicit
-  light/dark pin still ignores the OS.
-
-## [0.1.0] — 2026-07-14
-
-First stable release. The `0.1.0rc1`–`0.1.0rc73` series is consolidated under
+First stable release. The `0.1.0rc1`–`0.1.0rc75` series is consolidated under
 this tag; the sections below record only what changed since rc73 — the plugin
-device-set bus plus final hardening and docs sync. The full pre-release history
-remains in the rc entries that follow.
+device-set bus, the theme control's OS-following mode, plus final hardening and
+docs sync. The full pre-release history remains in the rc entries that follow.
 
 ### Added
+
+- **Theme control with a System mode that follows the OS.** The header theme
+  control cycles System → Light → Dark. "System" is the default (an absent stored
+  choice is treated as system, so an existing install keeps following the OS) and
+  resolves against the OS `prefers-color-scheme`, re-applying live when the OS
+  theme changes with no reload; an explicit Light/Dark pin ignores the OS. The
+  menu item's glyph and label ("System theme") show the currently selected mode
+  rather than the one a click would switch to.
 
 - **Device-set bus for plugins (`ctx.watch_devices`, `PLUGIN_API_VERSION` → 4).**
   A plugin generating output from the cloud device list had no way to learn the

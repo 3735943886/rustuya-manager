@@ -18,7 +18,7 @@
   "header.scanLan": "LAN 검색",
   "header.darkMode": "다크 모드",
   "header.lightMode": "라이트 모드",
-  "header.systemMode": "시스템 설정",
+  "header.systemMode": "시스템 테마",
   "header.refresh": "기기 새로고침",
   "header.refreshTitle": "브리지에서 기기 목록과 상태를 다시 불러옵니다",
   "header.managePlugins": "플러그인 관리",

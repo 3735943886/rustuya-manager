@@ -12,6 +12,26 @@ the plain `0.1.0` tag will publish to PyPI.
 
 ## [Unreleased]
 
+## [0.1.0rc75] — 2026-07-15
+
+### Added
+
+- **"System" theme mode that follows the OS.** The header theme control was a
+  two-state light/dark toggle; it now cycles System → Light → Dark. "System" is
+  the default for a fresh install (an absent stored choice is treated as system,
+  so existing installs keep following the OS as before) and resolves against the
+  OS `prefers-color-scheme`. The menu item's glyph and label show the currently
+  selected mode rather than the one a click would switch to, since with three
+  states the next mode isn't self-evident.
+
+### Changed
+
+- **System mode tracks an OS theme change live.** Previously an absent stored
+  choice followed the OS only at page load, so flipping the OS between light and
+  dark required a reload to take effect. A `matchMedia` change listener now
+  re-applies the theme in place while the selection is "system"; an explicit
+  light/dark pin still ignores the OS.
+
 ## [0.1.0] — 2026-07-14
 
 First stable release. The `0.1.0rc1`–`0.1.0rc73` series is consolidated under

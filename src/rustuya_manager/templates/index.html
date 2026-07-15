@@ -20,12 +20,14 @@
   </script>
   <script>
     // Apply theme before first paint to avoid a flash of light content.
+    // Stored 'theme' is 'dark' | 'light' | 'system'; a missing value (older
+    // installs) is treated as 'system', so both follow the OS preference.
     (() => {
       const saved = localStorage.getItem('theme');
       const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      if (saved === 'dark' || (saved === null && sysDark)) {
-        document.documentElement.classList.add('dark');
-      }
+      const dark = saved === 'dark' ||
+        ((saved === 'system' || saved === null) && sysDark);
+      if (dark) document.documentElement.classList.add('dark');
     })();
   </script>
   <style>

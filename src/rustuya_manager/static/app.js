@@ -180,11 +180,60 @@ async function doScan(_ev, btn) {
   }
 }
 
-// Theme toggle — flips the `dark` class on <html> and persists the choice. The
-// initial application happens inline in <head> to avoid FOUC.
-function doThemeToggle() {
-  const dark = document.documentElement.classList.toggle("dark");
-  localStorage.setItem("theme", dark ? "dark" : "light");
+// Theme — three modes cycled in this order: System → Light → Dark → System.
+// "system" is the default for a fresh install (no stored value) and follows the
+// OS prefers-color-scheme live; "light"/"dark" pin the choice. Persisted in
+// localStorage["theme"]; the initial `dark` class is applied inline in <head> to
+// avoid FOUC, so this module only handles user-driven changes and OS flips.
+const THEME_ORDER = ["system", "light", "dark"];
+const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+
+function getThemePref() {
+  const v = localStorage.getItem("theme");
+  return THEME_ORDER.includes(v) ? v : "system";
+}
+
+function applyTheme(pref) {
+  const dark = pref === "dark" || (pref === "system" && themeMedia.matches);
+  document.documentElement.classList.toggle("dark", dark);
+}
+
+// In system mode, follow an OS theme flip live — no reload needed. Explicit
+// light/dark ignore the OS, so gate on the stored preference.
+themeMedia.addEventListener("change", () => {
+  if (getThemePref() === "system") applyTheme("system");
+});
+
+// Icon + label reflect the *current* selection, not the next one: with three
+// states the next mode isn't obvious, so showing where you are is clearer than
+// the old two-state "click to switch to X" label.
+const THEME_SPEC = {
+  system: { icon: "🖥", key: "header.systemMode" },
+  light: { icon: "☀", key: "header.lightMode" },
+  dark: { icon: "🌙", key: "header.darkMode" },
+};
+
+// Register (or replace) the theme menu item for the current mode. Re-called on a
+// cycle and on a language switch (via registerBuiltinActions), so both the glyph
+// and the translated label stay in sync.
+function registerThemeAction() {
+  const spec = THEME_SPEC[getThemePref()];
+  registerHeaderAction({
+    id: "theme-btn",
+    iconHtml: spec.icon,
+    labelHtml: t(spec.key),
+    scope: "global",
+    order: 40,
+    onClick: doThemeCycle,
+  });
+}
+
+function doThemeCycle() {
+  const next = THEME_ORDER[(THEME_ORDER.indexOf(getThemePref()) + 1) % THEME_ORDER.length];
+  localStorage.setItem("theme", next);
+  applyTheme(next);
+  registerThemeAction();
+  renderActionsMenu();
 }
 
 function doAddDevice() {
@@ -300,14 +349,7 @@ function registerBuiltinActions() {
   registerHeaderAction({ id: "device-add-btn", iconHtml: "+", labelHtml: t("header.addDevice"), scope: "devices", order: 10, onClick: doAddDevice });
   registerHeaderAction({ id: "wizard-header-btn", iconHtml: "☁", labelHtml: t("header.fetchCloud"), scope: "global", order: 20, onClick: openWizardModal });
   registerHeaderAction({ id: "scan-btn", iconHtml: "📡", labelHtml: t("header.scanLan"), scope: "devices", order: 30, onClick: doScan });
-  registerHeaderAction({
-    id: "theme-btn",
-    iconHtml: `<span class="dark:hidden">🌙</span><span class="hidden dark:inline">☀</span>`,
-    labelHtml: `<span class="dark:hidden">${t("header.darkMode")}</span><span class="hidden dark:inline">${t("header.lightMode")}</span>`,
-    scope: "global",
-    order: 40,
-    onClick: doThemeToggle,
-  });
+  registerThemeAction();
   registerLanguageActions();
   registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: t("header.refresh"), scope: "devices", order: 50, title: t("header.refreshTitle"), onClick: doRefresh });
   registerHeaderAction({ id: "manage-plugins-btn", iconHtml: "🧩", labelHtml: t("header.managePlugins"), scope: "global", order: 55, title: t("header.managePluginsTitle"), onClick: openPluginsModal });

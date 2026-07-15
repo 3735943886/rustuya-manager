@@ -18,6 +18,7 @@
   "header.scanLan": "Scan LAN",
   "header.darkMode": "Dark mode",
   "header.lightMode": "Light mode",
+  "header.systemMode": "System mode",
   "header.refresh": "Refresh devices",
   "header.refreshTitle": "Reload the device list and live status from the bridge",
   "header.managePlugins": "Manage plugins",

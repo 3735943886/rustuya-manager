@@ -48,15 +48,62 @@ def test_root_page_renders(page: Page, server_url: str) -> None:
     expect(page.locator("h1")).to_have_text("rustuya-manager")
 
 
-def test_theme_toggle_flips_html_dark_class(page: Page, server_url: str) -> None:
-    page.goto(server_url)
-    html = page.locator("html")
-    initial_dark = "dark" in (html.get_attribute("class") or "")
-    # All header actions live in the single #actions-menu now; open it first.
+_DARK_CLASS = re.compile(r"\bdark\b")
+
+
+def _cycle_theme(page: Page) -> None:
+    """Open the actions menu and click the theme item once (advances one mode).
+
+    The menu closes on any item click (header-actions has no keepOpen on the
+    theme item), so each step re-opens it — mirroring how a user drives it and
+    keeping the item visible for the next click."""
     page.locator("#actions-menu > summary").click()
     page.locator("#theme-btn").click()
-    final_dark = "dark" in (html.get_attribute("class") or "")
-    assert initial_dark != final_dark, "theme toggle did not flip the html class"
+
+
+def test_theme_cycle_system_light_dark(page: Page, server_url: str) -> None:
+    # The theme item cycles System → Light → Dark → System. A fresh install has
+    # no stored choice, so it starts in "system" mode, which follows the OS
+    # preference. Pin the emulated OS scheme to light so the starting class (and
+    # every system-mode step) is deterministic.
+    page.emulate_media(color_scheme="light")
+    page.goto(server_url)
+    html = page.locator("html")
+    expect(html).not_to_have_class(_DARK_CLASS)  # system + light OS → no dark
+
+    # system → light: an explicit light pin, class stays off.
+    _cycle_theme(page)
+    expect(html).not_to_have_class(_DARK_CLASS)
+    assert page.evaluate("() => localStorage.getItem('theme')") == "light"
+
+    # light → dark: the dark class turns on.
+    _cycle_theme(page)
+    expect(html).to_have_class(_DARK_CLASS)
+    assert page.evaluate("() => localStorage.getItem('theme')") == "dark"
+
+    # dark → system: back to following the (light) OS → class off again.
+    _cycle_theme(page)
+    expect(html).not_to_have_class(_DARK_CLASS)
+    assert page.evaluate("() => localStorage.getItem('theme')") == "system"
+
+
+def test_theme_system_mode_follows_os_change_live(page: Page, server_url: str) -> None:
+    # In system mode (the default), an OS theme flip updates the page live — no
+    # reload — via the matchMedia change listener.
+    page.emulate_media(color_scheme="light")
+    page.goto(server_url)
+    # The change listener is attached when app.js runs registerBuiltinActions;
+    # wait for its theme item to exist so the live flip below can't race module
+    # load (count, not visibility — the item lives in the collapsed menu).
+    expect(page.locator("#theme-btn")).to_have_count(1)
+    html = page.locator("html")
+    expect(html).not_to_have_class(_DARK_CLASS)
+
+    page.emulate_media(color_scheme="dark")
+    expect(html).to_have_class(_DARK_CLASS)
+
+    page.emulate_media(color_scheme="light")
+    expect(html).not_to_have_class(_DARK_CLASS)
 
 
 def test_i18n_html_renders_trusted_markup_but_not_dom_attribute_text(

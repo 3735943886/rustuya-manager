@@ -24,3 +24,4 @@ dist/
 .claude/
 .vscode/
 .idea/
+.ruff_cache/

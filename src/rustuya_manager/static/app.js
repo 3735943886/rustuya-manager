@@ -224,6 +224,7 @@ function registerThemeAction() {
     labelHtml: t(spec.key),
     scope: "global",
     order: 40,
+    title: t("header.themeTitle"),
     onClick: doThemeCycle,
   });
 }
@@ -347,8 +348,8 @@ function registerLanguageActions() {
 // language switch can re-register the built-ins with freshly translated text.
 function registerBuiltinActions() {
   registerHeaderAction({ id: "device-add-btn", iconHtml: "+", labelHtml: t("header.addDevice"), scope: "devices", order: 10, onClick: doAddDevice });
-  registerHeaderAction({ id: "wizard-header-btn", iconHtml: "☁", labelHtml: t("header.fetchCloud"), scope: "global", order: 20, onClick: openWizardModal });
-  registerHeaderAction({ id: "scan-btn", iconHtml: "📡", labelHtml: t("header.scanLan"), scope: "devices", order: 30, onClick: doScan });
+  registerHeaderAction({ id: "wizard-header-btn", iconHtml: "☁", labelHtml: t("header.fetchCloud"), scope: "global", order: 20, title: t("header.fetchCloudTitle"), onClick: openWizardModal });
+  registerHeaderAction({ id: "scan-btn", iconHtml: "📡", labelHtml: t("header.scanLan"), scope: "devices", order: 30, title: t("header.scanLanTitle"), onClick: doScan });
   registerThemeAction();
   registerLanguageActions();
   registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: t("header.refresh"), scope: "devices", order: 50, title: t("header.refreshTitle"), onClick: doRefresh });

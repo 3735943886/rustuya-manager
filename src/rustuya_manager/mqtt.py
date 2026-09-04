@@ -512,11 +512,14 @@ class BridgeClient:
                         code=code,
                         message=msg,
                     )
-                # Reactive state updates after action-result responses. The
-                # bridge republishes its retained `bridge/config` when devices
-                # change, but that handler is idempotent on templates and
-                # doesn't refresh device lists — we have to act on the action
-                # response ourselves.
+                # Reactive state updates after action-result responses. A
+                # bridge >=0.4.0-dev also republishes `bridge/config` on the same
+                # debounce that flushes a registry change to disk (see
+                # `_on_bridge_config`'s `devices_updated_at` handling), but that
+                # lags by the bridge's save-debounce interval and a pre-0.4
+                # bridge doesn't send it at all — so still act on our own
+                # action's ack here for an immediate, version-independent
+                # refresh.
                 action = parsed.get("action")
                 status_val = parsed.get("status")
                 if action == "remove" and status_val == "ok":
@@ -613,6 +616,26 @@ class BridgeClient:
         first page. Older bridges that don't paginate omit `has_more`, so a lone
         reply commits immediately — behaviour-identical to the pre-paging path.
         """
+        if not self._status_active:
+            # No cycle of ours is outstanding — this page is a reply to
+            # someone else's `status` request landing on the same broadcast
+            # response topic (another manager instance polling the same
+            # bridge, a stray broker redelivery, a manual mosquitto_pub).
+            # `_status_accum is None` here looks identical to "my own page 0
+            # was lost, recover by opening a fresh buffer" (see below), but
+            # without this gate a single unrelated final page would reset and
+            # immediately commit `state.bridge` to just that page's devices —
+            # confirmed by reproducing it: a 100-device fleet collapsed to 1
+            # entry from one stray page. `_status_active` is set the moment
+            # *we* call `_request_status()` and only clears on our own final
+            # commit, so this can't suppress our own lost-page-0 recovery —
+            # only pages we never asked for.
+            logger.debug(
+                "Unsolicited status page (offset=%s); ignoring, no active cycle",
+                parsed.get("offset", 0),
+            )
+            return
+
         devices = parsed["devices"]
         offset = parsed.get("offset", 0)
         returned = parsed.get("returned", len(devices))
@@ -763,6 +786,28 @@ class BridgeClient:
         await self.state.clear_warning("bridge_offline")
         await self.state.clear_warning("bridge_config_cleared")
 
+        # A bridge >=0.4.0-dev stamps `devices_updated_at` (ms) into this payload
+        # and republishes it on every debounced registry mutation (add/remove/
+        # clear — see rustuya-bridge's `spawn_state_saver`), regardless of who
+        # triggered the change. That's a push signal for "the device list may
+        # have moved" that `state.bridge` otherwise only learns about via our
+        # own `add`/`remove`/`clear` acks or a reconnect — missing e.g. a device
+        # bound outside the manager, or a bridge-only restart that raced a
+        # registry change. Compare against the *old* raw config (captured before
+        # the overwrite below) so a same-payload re-delivery (redelivery-loop
+        # guard territory) can't trip it: an unpaired re-delivery carries the same
+        # timestamp. A pre-0.4 bridge never sets the field, so both sides are
+        # None and this is a no-op — fully backward compatible. Gated on
+        # bootstrap being done because the initial `_request_status()` below
+        # already covers the first-ever delivery.
+        old_devices_ts = (self.state.bridge_config_raw or {}).get("devices_updated_at")
+        new_devices_ts = cfg.get("devices_updated_at")
+        registry_changed = (
+            new_devices_ts is not None
+            and new_devices_ts != old_devices_ts
+            and self._bootstrap_done.is_set()
+        )
+
         # Refresh the stored raw config on every valid delivery — independent of
         # the template-idempotence guard below. The payload can change while the
         # templates stay the same, most commonly the bridge's `version` field
@@ -770,6 +815,9 @@ class BridgeClient:
         # reads that version from here. set_bridge_config_raw self-guards on
         # change (and only bumps then), so an identical re-delivery is a no-op.
         await self.state.set_bridge_config_raw(cfg)
+
+        if registry_changed:
+            asyncio.create_task(self._request_status())
 
         # Idempotence check: the retained bridge/config message can be
         # re-delivered every time we subscribe to a wildcard that also matches

@@ -6,11 +6,43 @@ tag are the matching `## [version]` section extracted from here by the release
 workflow.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and the project versions are [PEP 440](https://peps.python.org/pep-0440/)
-pre-releases (`0.1.0rcN`) until the `0.1.0` final. rc tags publish to TestPyPI;
-the plain `0.1.0` tag will publish to PyPI.
+and the project versions are [PEP 440](https://peps.python.org/pep-0440/). A
+pre-release tag (`0.1.1rcN`, `.dev`, etc.) publishes to TestPyPI; a plain
+`MAJOR.MINOR.PATCH` tag publishes to PyPI.
 
 ## [Unreleased]
+
+## [0.1.1] — 2026-09-05
+
+### Added
+
+- **Tooltips on non-obvious header menu items.** "Scan LAN", "Fetch from cloud",
+  and the theme cycler didn't say what clicking them would do beyond the icon +
+  short label. Added a `title` tooltip to each; self-explanatory items ("Add
+  device", "Language") were left as-is.
+
+### Fixed
+
+- **Bridge-side device registry changes now trigger a live device-list refresh.**
+  A bridge (>=0.4.0-dev) stamps `devices_updated_at` into `bridge/config` and
+  republishes it whenever its device registry changes, regardless of who
+  triggered the change. The manager previously only refreshed `state.bridge` on
+  its own `add`/`remove`/`clear` acks or a reconnect, so a device bound outside
+  the manager (or a bridge-only restart racing a registry change) could sit
+  shown as unregistered until a manual refresh. The manager now compares
+  `devices_updated_at` across config deliveries and requests a fresh `status`
+  when it advances. Fully backward compatible — a pre-0.4 bridge never sends
+  the field, so behavior is unchanged.
+
+- **A `status` reply from another MQTT client could wipe the device list.**
+  The `status` response topic is a broadcast — any client's reply lands on it,
+  not just the requester's own. With no cycle of ours in flight, a single such
+  page (another manager instance polling the same bridge, a stray broker
+  redelivery, a manual `mosquitto_pub`) was accepted as if it were our own,
+  resetting the accumulator and, if it happened to be a final page,
+  immediately committing `state.bridge` to just that page's devices —
+  reproduced collapsing a 100-device fleet down to 1. `_handle_status_page`
+  now drops any page that arrives while no request of ours is outstanding.
 
 ## [0.1.0] — 2026-07-15
 

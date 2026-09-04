@@ -106,6 +106,17 @@ def test_theme_system_mode_follows_os_change_live(page: Page, server_url: str) -
     expect(html).not_to_have_class(_DARK_CLASS)
 
 
+def test_header_menu_nonobvious_items_have_tooltips(page: Page, server_url: str) -> None:
+    # Menu items whose label alone doesn't say what clicking does (cloud fetch,
+    # LAN scan, the theme cycler) must carry a `title` tooltip; items that are
+    # self-explanatory (Add device, Language) are exempt.
+    page.goto(server_url)
+    page.locator("#actions-menu > summary").click()
+    for item_id in ("wizard-header-btn", "scan-btn", "theme-btn"):
+        title = page.locator(f"#{item_id}").get_attribute("title")
+        assert title, f"#{item_id} has no tooltip"
+
+
 def test_i18n_html_renders_trusted_markup_but_not_dom_attribute_text(
     page: Page, server_url: str
 ) -> None:

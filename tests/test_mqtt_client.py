@@ -141,6 +141,57 @@ class TestDispatch:
         assert aio.subscribe.await_count == first_subscribe_count
         assert aio.publish.await_count == first_publish_count
 
+    @staticmethod
+    def _status_reply(**extra) -> str:
+        body = {"action": "status", "id": "bridge", "status": "ok", "devices": {}}
+        body.update(extra)
+        return json.dumps(body)
+
+    @pytest.mark.asyncio
+    async def test_bridge_config_devices_updated_at_change_triggers_status_refresh(self):
+        """A bridge >=0.4.0-dev stamps `devices_updated_at` (ms) into bridge/config
+        and republishes it on every debounced registry mutation (add/remove/clear),
+        regardless of who triggered the change — including a bridge-side add/remove
+        the manager was never told about directly. A later delivery with a newer
+        timestamp must kick off a fresh `status` request so `state.bridge` doesn't
+        silently drift stale until the next manual refresh or reconnect."""
+        state = State()
+        client, aio = _make_client(state)
+        cfg_topic = BRIDGE_CONFIG_TOPIC_TPL.replace("{root}", "myhome/tuya")
+        base_cfg = {**CUSTOM_CONFIG, "devices_updated_at": 1000}
+
+        # Bootstrap opens a status cycle; complete it so `_status_active` clears
+        # and the trigger below isn't coalesced away as "still in flight".
+        await client._dispatch(cfg_topic, json.dumps(base_cfg))
+        await client._dispatch("tuyalog/response/bridge", self._status_reply())
+        first_publish_count = aio.publish.await_count
+
+        newer_cfg = {**base_cfg, "devices_updated_at": 2000}
+        await client._dispatch(cfg_topic, json.dumps(newer_cfg))
+        await asyncio.sleep(0)  # let the create_task'd _request_status() run
+
+        assert aio.publish.await_count > first_publish_count
+        assert state.bridge_config_raw["devices_updated_at"] == 2000
+
+    @pytest.mark.asyncio
+    async def test_bridge_config_same_devices_updated_at_does_not_retrigger(self):
+        """An unchanged `devices_updated_at` on a re-delivery (e.g. the wildcard
+        redelivery the 0.2.1 postmortem guards against) must not fire a second
+        status request — only an actual bump means the registry moved."""
+        state = State()
+        client, aio = _make_client(state)
+        cfg_topic = BRIDGE_CONFIG_TOPIC_TPL.replace("{root}", "myhome/tuya")
+        cfg = {**CUSTOM_CONFIG, "devices_updated_at": 1000}
+
+        await client._dispatch(cfg_topic, json.dumps(cfg))
+        await client._dispatch("tuyalog/response/bridge", self._status_reply())
+        first_publish_count = aio.publish.await_count
+
+        await client._dispatch(cfg_topic, json.dumps(cfg))
+        await asyncio.sleep(0)
+
+        assert aio.publish.await_count == first_publish_count
+
     @pytest.mark.asyncio
     async def test_bridge_config_resolves_templates(self):
         state = State()
@@ -293,6 +344,10 @@ class TestDispatch:
             )
         )
         client, _ = _make_client(state)
+        # A status reply only ever exists because *someone* asked for it; the
+        # `_status_active` gate (see `_handle_status_page`) requires a locally
+        # outstanding request before accepting one, so simulate that here.
+        client._status_active = True
         await client._dispatch(
             "tuyalog/response/bridge",
             json.dumps(
@@ -916,7 +971,12 @@ class TestStatusPagination:
                 payload="{value}",
             )
         )
-        return _make_client(state)
+        client, aio = _make_client(state)
+        # A status reply only ever exists because *someone* asked for it; the
+        # `_status_active` gate (see `_handle_status_page`) requires a locally
+        # outstanding request before accepting one, so simulate that here.
+        client._status_active = True
+        return client, aio
 
     @staticmethod
     def _status(devices: dict, **extra) -> str:
@@ -1004,7 +1064,11 @@ class TestStatusPagination:
         assert state.mqtt_drop_count == 4
         assert "mqtt_drops" in state.warnings
 
-        # A later reply with no drops clears the banner.
+        # A later reply with no drops clears the banner. The first cycle's
+        # final page already cleared `_status_active`; a real second reply
+        # only exists because a follow-up `_request_status()` ran, so
+        # re-arm it here rather than reaching into `_status_accum` too.
+        client._status_active = True
         await client._dispatch(
             "tuyalog/response/bridge",
             self._status(
@@ -1031,6 +1095,46 @@ class TestStatusPagination:
         assert set(state.bridge) == {"a", "b"}
         assert state.device_count is None
         aio.publish.assert_not_called()
+
+    async def test_unsolicited_page_with_no_active_cycle_is_ignored(self):
+        """Regression: the `status` response topic is a broadcast — any MQTT
+        client can trigger a reply on it (another manager instance polling the
+        same bridge, a stray broker redelivery, a manual mosquitto_pub). Before
+        the `_status_active` gate, a single such page landing with no cycle of
+        ours in flight would reset `_status_accum` (since it was `None`) and,
+        if it happened to be a final page, immediately commit `state.bridge` to
+        just that page's devices — a 100-device fleet collapsing to 1 entry was
+        reproduced this way. `_handle_status_page` must drop any page that
+        arrives while `_status_active` is False."""
+        state = State()
+        client, aio = await self._templated_client(state)
+        client._status_active = False  # no cycle of ours outstanding
+
+        await client._dispatch(
+            "tuyalog/response/bridge",
+            self._status({"z": {"id": "z"}}, offset=50, returned=1, has_more=False),
+        )
+
+        assert state.bridge == {}
+        aio.publish.assert_not_called()
+
+    async def test_lost_page_zero_recovery_is_not_blocked_by_the_gate(self):
+        """The gate must not break the one legitimate case that looks the
+        same on the surface: *our own* cycle's page 0 got lost (e.g. across a
+        reconnect) and a later page of *our own* cycle arrives with no buffer
+        open yet. `_status_active` stays True for our whole cycle regardless
+        of which pages actually arrive, so this must still commit."""
+        state = State()
+        client, aio = await self._templated_client(state)
+        assert client._status_active  # set by _templated_client, as if we asked
+
+        # Page 0 never arrived; page 1 (offset=50) is the first one we see.
+        await client._dispatch(
+            "tuyalog/response/bridge",
+            self._status({"b": {"id": "b"}}, offset=50, returned=1, has_more=False),
+        )
+
+        assert set(state.bridge) == {"b"}
 
 
 class TestBrokerEndpointAndTls:

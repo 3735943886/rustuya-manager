@@ -8,6 +8,7 @@ import { deviceCard, missingParentCard, classifyDevice, primaryDevice } from "./
 import { t } from "./i18n.js";
 import { checkVersions, applyBridgeTemplates } from "./api.js";
 import { confirm } from "./modal-confirm.js";
+import { setHeaderAttention } from "./header-actions.js";
 
 const $list = document.getElementById("device-list");
 const $empty = document.getElementById("empty-state");
@@ -202,15 +203,17 @@ export function renderSyncBar() {
 
 export function renderTemplates() {
   const snap = state.snapshot;
-  // Mode badge on the <summary> — visible even while the drawer is collapsed.
   // Conflict = --embed-bridge was requested but we're on an external bridge
   // (an external one already owned the root, so the embed was aborted). The
-  // backend also carries this as the `embedded_bridge_aborted` warning.
+  // backend also carries this as the `embedded_bridge_aborted` warning. Mode
+  // itself (embedded/external) surfaces inline on the "bridge" status row
+  // below — this used to also drive a badge on the panel's collapsed
+  // <summary>, but that panel is now the About modal (opened on demand, not
+  // visible-while-collapsed), so the standalone badge was dropped.
   const mode = snap.bridge_mode || "external";
   const conflict =
     (snap.embed_requested && mode === "external") ||
     !!(snap.warnings && snap.warnings.embedded_bridge_aborted);
-  renderBridgeModeBadge(mode, conflict);
 
   // NB: the i18n function is imported as `t` at module scope, so the resolved
   // templates object must NOT shadow it here — later rows call t("…") for the
@@ -284,19 +287,11 @@ export function renderTemplates() {
   const req = snap.bridge_requirements;
   if (req) renderRequirements(req);
 
-  // Amber dot on the (possibly collapsed) summary whenever anything can be
-  // updated OR a plugin requirement is unmet — the cue to expand and look.
-  const dot = document.getElementById("info-update-dot");
-  if (dot) {
-    const anyUpdate = !!(snap.manager_update || snap.bridge_update);
-    const reqUnmet = !!(req && !req.satisfied);
-    dot.classList.toggle("hidden", !anyUpdate && !reqUnmet);
-    dot.title = reqUnmet
-      ? t("req.unmet")
-      : anyUpdate
-        ? t("info.updateAvailable")
-        : "";
-  }
+  // The "About" menu item's attention dot lights whenever anything can be
+  // updated OR a plugin requirement is unmet — the cue to open it and look.
+  const anyUpdate = !!(snap.manager_update || snap.bridge_update);
+  const reqUnmet = !!(req && !req.satisfied);
+  setHeaderAttention("about-btn", anyUpdate || reqUnmet);
 
   // Spell out the conflict — a colored "external" value is easy to miss.
   if (conflict) {
@@ -433,29 +428,6 @@ function diagRow(label, value, { warn = false, suffix = null, chip = null } = {}
     `<span class="${valueCls}">${escapeHtml(value)}${suffixHtml}</span>` +
     chipHtml;
   return row;
-}
-
-// Fill the mode badge on the Info <summary> so embedded/external (and the
-// conflict) is visible even with the drawer collapsed.
-function renderBridgeModeBadge(mode, conflict) {
-  const el = document.getElementById("bridge-info-badge");
-  if (!el) return;
-  el.classList.remove("hidden");
-  // Standalone on the summary it needs the "bridge" noun to read on its own
-  // (the inline row suffix can stay terse — its row is already labelled).
-  if (conflict) {
-    el.textContent = `${t("bridge.modeExternalBadge")} ⚠`;
-    el.className =
-      "text-xs px-2 py-0.5 rounded-full border bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 border-amber-300 dark:border-amber-700 font-medium";
-  } else if (mode === "embedded") {
-    el.textContent = t("bridge.modeEmbeddedBadge");
-    el.className =
-      "text-xs px-2 py-0.5 rounded-full border bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700";
-  } else {
-    el.textContent = t("bridge.modeExternalBadge");
-    el.className =
-      "text-xs px-2 py-0.5 rounded-full border bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600";
-  }
 }
 
 // Filter tab styling. Each tab is colored per sync class so the row

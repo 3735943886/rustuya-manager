@@ -12,6 +12,18 @@ pre-release tag (`0.1.1rcN`, `.dev`, etc.) publishes to TestPyPI; a plain
 
 ## [Unreleased]
 
+### Changed
+
+- **The Info panel moved from an in-page collapsible to an "About" menu item
+  + modal.** Frees up page space below the device list; content (topics,
+  manager/bridge versions with the update check, device/drop counts, unmet
+  plugin requirements) is unchanged. The standalone embedded/external mode
+  badge on the old collapsed `<summary>` is gone — that mode still shows
+  inline on the "bridge" status row inside the modal — and the "update
+  available" cue moved to the header menu's shared attention-dot system (the
+  same one "Restart manager" already used), which now lights for *any*
+  registered item that needs it, not just this one.
+
 ## [0.1.1] — 2026-09-05
 
 ### Added

@@ -597,19 +597,25 @@ def _bridge_info_snap(*, bridge_mode: str, embed_requested: bool, warnings=None)
     }
 
 
-def test_bridge_info_drawer_label_and_external_badge(page: Page, server_url: str) -> None:
+def _open_about_modal(page: Page) -> None:
+    page.locator("#actions-menu > summary").click()
+    page.locator("#about-btn").click()
+
+
+def test_about_modal_opens_from_menu_and_shows_bridge_mode(page: Page, server_url: str) -> None:
+    # The Info/diagnostics panel moved from an in-page collapsible to an
+    # "About" menu item that opens a modal — bridge mode still renders inline
+    # on the "bridge" status row (no more standalone summary badge).
     page.goto(server_url)
     expect(page.locator("#conn-badge")).to_contain_text("live")
     _apply_snapshot(page, _bridge_info_snap(bridge_mode="external", embed_requested=False))
-    # Renamed drawer ("Info") + a neutral "external" mode badge on the summary.
-    summary = page.locator("#bridge-info-badge").locator("xpath=..")
-    expect(summary).to_contain_text("Info")
-    badge = page.locator("#bridge-info-badge")
-    expect(badge).to_be_visible()
-    expect(badge).to_have_text("external bridge")
+    _open_about_modal(page)
+    modal = page.locator("#about-modal")
+    expect(modal).to_be_visible()
+    expect(modal).to_contain_text("external")
 
 
-def test_bridge_info_badge_flags_embed_external_conflict(page: Page, server_url: str) -> None:
+def test_about_modal_flags_embed_external_conflict(page: Page, server_url: str) -> None:
     page.goto(server_url)
     expect(page.locator("#conn-badge")).to_contain_text("live")
     _apply_snapshot(
@@ -625,11 +631,34 @@ def test_bridge_info_badge_flags_embed_external_conflict(page: Page, server_url:
             },
         ),
     )
-    badge = page.locator("#bridge-info-badge")
-    expect(badge).to_contain_text("external")
-    expect(badge).to_contain_text("⚠")
-    # Amber emphasis on the conflict (visible while the drawer is collapsed).
-    assert "amber" in (badge.get_attribute("class") or "")
+    _open_about_modal(page)
+    modal = page.locator("#about-modal")
+    expect(modal).to_contain_text("external")
+    expect(modal).to_contain_text("⚠")
+    expect(modal).to_contain_text("already running on root")
+
+
+def test_about_menu_item_gets_attention_dot_on_update_available(
+    page: Page, server_url: str
+) -> None:
+    # Moving the panel behind a menu item loses the "visible while collapsed"
+    # ambient cue — the hamburger's shared attention-dot system (already used
+    # by "Restart manager") replaces it: any registered item can light it, and
+    # the hamburger itself shows a dot whenever any one of them does.
+    page.goto(server_url)
+    expect(page.locator("#conn-badge")).to_contain_text("live")
+    dot = page.locator("#actions-menu-dot")
+    expect(dot).to_be_hidden()
+
+    snap = _bridge_info_snap(bridge_mode="external", embed_requested=False)
+    snap["manager_version"] = "0.1.0"
+    snap["manager_latest"] = "0.2.0"
+    snap["manager_update"] = True
+    _apply_snapshot(page, snap)
+
+    expect(dot).to_be_visible()
+    page.locator("#actions-menu > summary").click()
+    expect(page.locator("#about-btn span.bg-amber-500")).to_be_visible()
 
 
 def test_log_menu_records_and_shows_toasts(page: Page, server_url: str) -> None:

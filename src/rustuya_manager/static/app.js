@@ -25,6 +25,7 @@ import { initDeviceModal, openAddModal } from "./modal-device.js";
 import { initConfirmModal, confirm } from "./modal-confirm.js";
 import { initPluginsModal, openPluginsModal } from "./modal-plugins.js";
 import { initLogModal, openLogModal } from "./modal-log.js";
+import { initAboutModal, openAboutModal } from "./modal-about.js";
 import { initPluginHost } from "./plugins.js";
 import { registerHeaderAction, unregisterHeaderActions, renderActionsMenu } from "./header-actions.js";
 import { initI18n, applyDom, t, getLocales, getLocaleName, getLang, setLang } from "./i18n.js";
@@ -354,6 +355,7 @@ function registerBuiltinActions() {
   registerLanguageActions();
   registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: t("header.refresh"), scope: "devices", order: 50, title: t("header.refreshTitle"), onClick: doRefresh });
   registerHeaderAction({ id: "manage-plugins-btn", iconHtml: "🧩", labelHtml: t("header.managePlugins"), scope: "global", order: 55, title: t("header.managePluginsTitle"), onClick: openPluginsModal });
+  registerHeaderAction({ id: "about-btn", iconHtml: "ℹ", labelHtml: t("info.title"), scope: "global", order: 60, onClick: openAboutModal });
   registerHeaderAction({ id: "log-btn", iconHtml: "🔔", labelHtml: t("header.log"), scope: "global", order: 65, title: t("header.logTitle"), onClick: openLogModal });
   registerHeaderAction({
     id: "reconfigure-btn",
@@ -448,6 +450,7 @@ async function boot() {
   initConfirmModal();
   initPluginsModal();
   initLogModal();
+  initAboutModal();
   connect();
   // Boot the plugin host. No-op (no tab bar, no DOM change) when no plugins
   // are installed — GET /api/plugins returns [].

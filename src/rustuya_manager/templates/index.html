@@ -191,24 +191,6 @@
     </div>
   </section>
 
-  <!-- Info: manager + bridge versions (with an online "update available"
-       check), device count, MQTT drops, bridge mode (embedded/external), and
-       the resolved topic templates. The summary carries a mode badge that
-       render.js fills (so embedded-vs-external and the embed→external conflict
-       are visible while collapsed) and an amber dot that lights when any
-       component has a newer version — the cue to expand the panel. -->
-  <section>
-    <details class="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-      <summary class="px-4 py-2 text-sm text-slate-600 dark:text-slate-300 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-center gap-2">
-        <span data-i18n="info.title">Info</span>
-        <span id="info-update-dot" class="hidden w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
-        <span id="bridge-info-badge" class="hidden text-xs px-2 py-0.5 rounded-full border"></span>
-      </summary>
-      <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 text-xs font-mono text-slate-700 dark:text-slate-300 space-y-1" id="templates-block">
-        <div class="text-slate-400 dark:text-slate-500" data-i18n="bridge.waiting">(waiting for bootstrap)</div>
-      </div>
-    </details>
-  </section>
 
 </main>
 
@@ -358,6 +340,29 @@
     <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2">
       <button id="log-modal-clear" class="text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200" data-i18n="log.clear">Clear</button>
       <button id="log-modal-done" class="ml-auto text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200" data-i18n="common.done">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- About modal — manager + bridge versions (with an online "update
+     available" check), device count, MQTT drops, bridge mode (embedded vs
+     external, and the embed→external conflict), the resolved MQTT topics,
+     and any unmet plugin requirements. Content is (re)built by render.js's
+     renderTemplates() into #templates-block, same logic as before this moved
+     out of an in-page collapsible — only the container changed. The "About"
+     menu item's own attention dot (see header-actions.js) is the update/
+     unmet-requirement cue now, instead of a badge on a collapsed summary. -->
+<div id="about-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3">
+  <div class="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+    <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-3">
+      <h2 class="text-base font-semibold" data-i18n="info.title">Info</h2>
+      <button id="about-modal-close" class="ml-auto text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 text-xl leading-none">×</button>
+    </div>
+    <div id="templates-block" class="flex-1 min-h-0 overflow-y-auto px-4 py-3 text-xs font-mono text-slate-700 dark:text-slate-300 space-y-1">
+      <div class="text-slate-400 dark:text-slate-500 font-sans text-sm" data-i18n="bridge.waiting">(waiting for bootstrap)</div>
+    </div>
+    <div class="px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center">
+      <button id="about-modal-done" class="ml-auto text-sm px-4 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200" data-i18n="common.done">Done</button>
     </div>
   </div>
 </div>

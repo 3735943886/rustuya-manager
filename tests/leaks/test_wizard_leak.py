@@ -60,7 +60,12 @@ async def test_wizard_start_close_no_leak(tmp_path: Path):
         await one_cycle()
     async with assert_no_leak_async(
         max_kb=120,
-        max_objects=800,
+        # gc.get_objects() counts every live object process-wide, not just
+        # this cycle's — on Python 3.14 (unlike the py3.10/3.12 CI matrix)
+        # unrelated threading/thread-pool churn pushes the raw count to
+        # ~856-881 on a totally flat run (tracemalloc stays pinned at +7.4 KB,
+        # nowhere near the 120 KB budget), so 800 was flaky noise, not signal.
+        max_objects=1000,
         max_tasks=2,
         label="wizard start/close cycle",
     ):

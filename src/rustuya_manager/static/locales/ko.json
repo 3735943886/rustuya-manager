@@ -21,7 +21,6 @@
   "header.darkMode": "다크 모드",
   "header.lightMode": "라이트 모드",
   "header.systemMode": "시스템 테마",
-  "header.themeTitle": "클릭할 때마다 시스템 → 라이트 → 다크 순서로 전환합니다",
   "header.refresh": "기기 새로고침",
   "header.refreshTitle": "브리지에서 기기 목록과 상태를 다시 불러옵니다",
   "header.managePlugins": "플러그인 관리",

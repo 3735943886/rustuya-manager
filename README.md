@@ -85,16 +85,18 @@ Requires Python 3.10+ and a running [rustuya-bridge](https://github.com/37359438
 ```bash
 sudo apt install -y pipx                          # if not already
 pipx ensurepath
-pipx install rustuya-manager
+pipx install "rustuya-manager[web]"
 ```
 
 **venv + pip** — alternative install without pipx:
 ```bash
 python3 -m venv ~/.venvs/rustuya-manager
-~/.venvs/rustuya-manager/bin/pip install rustuya-manager
+~/.venvs/rustuya-manager/bin/pip install "rustuya-manager[web]"
 ~/.venvs/rustuya-manager/bin/rustuya-manager --help
 ```
 Run it by full path, or activate the venv first (`source ~/.venvs/rustuya-manager/bin/activate`). The systemd unit in the next section assumes the pipx path — change `ExecStart` to `%h/.venvs/rustuya-manager/bin/rustuya-manager` for the venv install.
+
+The `[web]` extra pulls in FastAPI/uvicorn for the `--web` UI shown below. Using rustuya-manager purely as a library (`from rustuya_manager import Manager`) needs neither — a plain `pip install rustuya-manager` covers that case.
 
 ### Run
 
@@ -150,7 +152,7 @@ sudo loginctl enable-linger $USER
 ```bash
 pipx upgrade rustuya-manager                                   # pipx install
 # or, for the venv install:
-~/.venvs/rustuya-manager/bin/pip install -U rustuya-manager
+~/.venvs/rustuya-manager/bin/pip install -U "rustuya-manager[web]"
 systemctl --user restart rustuya-manager
 ```
 

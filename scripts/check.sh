@@ -464,14 +464,14 @@ print_recommendation() {
             printf '  To update:\n'
             if [ "$HAS_PIPX" -eq 1 ]; then
                 printf '    pipx upgrade rustuya-manager\n'
-                printf '    %s(or: pipx reinstall rustuya-manager — rebuilds the venv from scratch)%s\n' "$C_DIM" "$C_RESET"
+                printf '    %s(or: pipx reinstall "rustuya-manager[web]" — rebuilds the venv from scratch)%s\n' "$C_DIM" "$C_RESET"
             else
                 printf '    Update with whichever tool you originally used (pip, system pkg mgr, docker).\n'
             fi
         fi
     elif [ "$HAS_PIPX" -eq 1 ]; then
         printf '\n%sRecommended install%s\n' "$C_BOLD" "$C_RESET"
-        printf '  pipx install rustuya-manager\n'
+        printf '  pipx install "rustuya-manager[web]"\n'
         if [ "$HAS_DOCKER" -eq 1 ]; then
             printf '  %sAlternatively (docker): docker run -d --network host -v /var/lib/rustuya-manager:/data%s%s 3735943886/rustuya-manager:latest%s\n' \
                 "$C_DIM" "$(docker_embed_env)" "$C_DIM" "$C_RESET"
@@ -479,7 +479,7 @@ print_recommendation() {
     elif [ "$HAS_PYTHON_OK" -eq 1 ] && [ "$HAS_PIP" -eq 1 ]; then
         printf '\n%sRecommended install%s\n' "$C_BOLD" "$C_RESET"
         printf '  python3 -m pip install --user pipx && python3 -m pipx ensurepath\n'
-        printf '  pipx install rustuya-manager\n'
+        printf '  pipx install "rustuya-manager[web]"\n'
         printf '  %s(pipx is the cleanest install — pip-managed apps in isolated venvs)%s\n' "$C_DIM" "$C_RESET"
         if [ "$HAS_DOCKER" -eq 1 ]; then
             printf '  %sAlternatively (docker): docker run -d --network host -v /var/lib/rustuya-manager:/data%s%s 3735943886/rustuya-manager:latest%s\n' \

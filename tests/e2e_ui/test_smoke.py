@@ -51,40 +51,42 @@ def test_root_page_renders(page: Page, server_url: str) -> None:
 _DARK_CLASS = re.compile(r"\bdark\b")
 
 
-def _cycle_theme(page: Page) -> None:
-    """Open the actions menu and click the theme item once (advances one mode).
-
-    The menu closes on any item click (header-actions has no keepOpen on the
-    theme item), so each step re-opens it — mirroring how a user drives it and
-    keeping the item visible for the next click."""
-    page.locator("#actions-menu > summary").click()
-    page.locator("#theme-btn").click()
-
-
-def test_theme_cycle_system_light_dark(page: Page, server_url: str) -> None:
-    # The theme item cycles System → Light → Dark → System. A fresh install has
-    # no stored choice, so it starts in "system" mode, which follows the OS
-    # preference. Pin the emulated OS scheme to light so the starting class (and
-    # every system-mode step) is deterministic.
+def test_theme_picker_switches_and_persists(page: Page, server_url: str) -> None:
+    # Theme is a collapsible submenu like Language: a single row showing the
+    # current mode expands into a checkmarked System/Light/Dark list. A fresh
+    # install has no stored choice, so it starts in "system" mode, which
+    # follows the OS preference. Pin the emulated OS scheme to light so the
+    # starting state is deterministic.
     page.emulate_media(color_scheme="light")
     page.goto(server_url)
     html = page.locator("html")
     expect(html).not_to_have_class(_DARK_CLASS)  # system + light OS → no dark
 
-    # system → light: an explicit light pin, class stays off.
-    _cycle_theme(page)
-    expect(html).not_to_have_class(_DARK_CLASS)
-    assert page.evaluate("() => localStorage.getItem('theme')") == "light"
+    page.locator("#actions-menu > summary").click()
+    # Collapsed by default — per-mode options are hidden until expanded.
+    expect(page.locator("#theme-opt-dark")).to_have_count(0)
+    # Expanding does NOT dismiss the dropdown (keepOpen), and reveals the list
+    # with the active mode checked.
+    page.locator("#theme-toggle").click()
+    expect(page.locator("#theme-opt-system")).to_contain_text("✓")
 
-    # light → dark: the dark class turns on.
-    _cycle_theme(page)
+    # Picking "dark" turns the dark class on and persists the choice.
+    page.locator("#theme-opt-dark").click()
     expect(html).to_have_class(_DARK_CLASS)
     assert page.evaluate("() => localStorage.getItem('theme')") == "dark"
 
-    # dark → system: back to following the (light) OS → class off again.
-    _cycle_theme(page)
+    # The choice survives a reload, and the checkmark sits on "dark" once the
+    # submenu is reopened.
+    page.reload()
+    expect(html).to_have_class(_DARK_CLASS)
+    page.locator("#actions-menu > summary").click()
+    page.locator("#theme-toggle").click()
+    expect(page.locator("#theme-opt-dark")).to_contain_text("✓")
+
+    # Picking "light" turns the dark class back off.
+    page.locator("#theme-opt-light").click()
     expect(html).not_to_have_class(_DARK_CLASS)
-    assert page.evaluate("() => localStorage.getItem('theme')") == "system"
+    assert page.evaluate("() => localStorage.getItem('theme')") == "light"
 
 
 def test_theme_system_mode_follows_os_change_live(page: Page, server_url: str) -> None:
@@ -95,7 +97,7 @@ def test_theme_system_mode_follows_os_change_live(page: Page, server_url: str) -
     # The change listener is attached when app.js runs registerBuiltinActions;
     # wait for its theme item to exist so the live flip below can't race module
     # load (count, not visibility — the item lives in the collapsed menu).
-    expect(page.locator("#theme-btn")).to_have_count(1)
+    expect(page.locator("#theme-toggle")).to_have_count(1)
     html = page.locator("html")
     expect(html).not_to_have_class(_DARK_CLASS)
 
@@ -108,11 +110,12 @@ def test_theme_system_mode_follows_os_change_live(page: Page, server_url: str) -
 
 def test_header_menu_nonobvious_items_have_tooltips(page: Page, server_url: str) -> None:
     # Menu items whose label alone doesn't say what clicking does (cloud fetch,
-    # LAN scan, the theme cycler) must carry a `title` tooltip; items that are
-    # self-explanatory (Add device, Language) are exempt.
+    # LAN scan) must carry a `title` tooltip; items that are self-explanatory
+    # (Add device, and the Theme/Language submenus, which show their current
+    # selection plus an expand caret) are exempt.
     page.goto(server_url)
     page.locator("#actions-menu > summary").click()
-    for item_id in ("wizard-header-btn", "scan-btn", "theme-btn"):
+    for item_id in ("wizard-header-btn", "scan-btn"):
         title = page.locator(f"#{item_id}").get_attribute("title")
         assert title, f"#{item_id} has no tooltip"
 

@@ -31,7 +31,11 @@ RUN apt-get update \
 # pyrustuyabridge ships a manylinux wheel that bundles the Rust binary,
 # so the runtime image needs no compilers — just the Python deps.
 COPY --from=builder /build/dist/*.whl /tmp/
-RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl
+# fastapi/uvicorn live in the optional [web] extra (core installs stay lean
+# for library use); this image always runs --web (see docker-entrypoint.sh),
+# so it must request the extra explicitly — plain `pip install /tmp/*.whl`
+# would silently skip fastapi/uvicorn and the entrypoint would fail at startup.
+RUN pip install --no-cache-dir "$(ls /tmp/*.whl)[web]" && rm /tmp/*.whl
 
 # Pre-create the manager user. The actual UID/GID is reset by the
 # entrypoint from PUID/PGID env vars so that bind-mounts owned by any

@@ -268,6 +268,8 @@ def build_app(
     plugins: list[Any] | None = None,
     plugin_dirs: list[str] | None = None,
     managed_plugin_dir: str | None = None,
+    wizard: WizardManager | None = None,
+    scan_coordinator: LanScanCoordinator | None = None,
 ) -> FastAPI:
     @contextlib.asynccontextmanager
     async def _lifespan(app: FastAPI) -> Any:
@@ -357,16 +359,20 @@ def build_app(
 
     # Single coordinator shared between the wizard (bakes scan results into
     # cloud devices) and the Scan button (surfaces sightings to the UI).
-    # See scan.py for the single-flight rationale.
-    scan_coordinator = LanScanCoordinator(client, state)
+    # See scan.py for the single-flight rationale. A caller that already built
+    # one (e.g. cli.py, via the Manager facade) passes it in so the manager
+    # and the web UI share the same instance instead of double-wiring.
+    if scan_coordinator is None:
+        scan_coordinator = LanScanCoordinator(client, state)
     app.state.scan_coordinator = scan_coordinator
 
-    wizard_creds = creds_path or "tuyacreds.json"
-    wizard = WizardManager(
-        creds_path=wizard_creds,
-        on_devices=_on_wizard_devices,
-        scan_coordinator=scan_coordinator,
-    )
+    if wizard is None:
+        wizard_creds = creds_path or "tuyacreds.json"
+        wizard = WizardManager(
+            creds_path=wizard_creds,
+            on_devices=_on_wizard_devices,
+            scan_coordinator=scan_coordinator,
+        )
     app.state.wizard = wizard
 
     @app.get("/api/state")

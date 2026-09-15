@@ -1,4 +1,4 @@
-"""Unit tests for cli helpers that don't need a broker.
+"""Unit tests for manager.py helpers that don't need a broker.
 
 The full embedded-bridge flow is covered in `tests/test_e2e_bridge.py`
 (real broker, real PyBridgeServer); the tests here exercise the bits
@@ -19,7 +19,7 @@ def _make_args(tmp_path, **overrides) -> SimpleNamespace:
     base = {
         "broker": "mqtt://localhost:1883",
         "root": "test_root",
-        "cloud": str(tmp_path / "tuyadevices.json"),
+        "cloud_path": str(tmp_path / "tuyadevices.json"),
         "bridge_state": None,
         "log_level": "warn",
         "bridge_config": None,
@@ -72,7 +72,7 @@ class TestSpawnEmbeddedBridgeKwargs:
     """
 
     async def test_default_state_file_is_next_to_cloud_path(self, tmp_path, monkeypatch):
-        from rustuya_manager.cli import _spawn_embedded_bridge
+        from rustuya_manager.manager import _spawn_embedded_bridge
 
         _stub_pyrustuyabridge(monkeypatch)
         sup, t = _spawn_embedded_bridge(_make_args(tmp_path))
@@ -87,7 +87,7 @@ class TestSpawnEmbeddedBridgeKwargs:
             await _drain_supervisor(sup, t)
 
     async def test_explicit_bridge_state_wins(self, tmp_path, monkeypatch):
-        from rustuya_manager.cli import _spawn_embedded_bridge
+        from rustuya_manager.manager import _spawn_embedded_bridge
 
         _stub_pyrustuyabridge(monkeypatch)
         explicit = str(tmp_path / "elsewhere" / "state.json")
@@ -98,7 +98,7 @@ class TestSpawnEmbeddedBridgeKwargs:
             await _drain_supervisor(sup, t)
 
     async def test_bridge_config_propagates_as_config_path(self, tmp_path, monkeypatch):
-        from rustuya_manager.cli import _spawn_embedded_bridge
+        from rustuya_manager.manager import _spawn_embedded_bridge
 
         _stub_pyrustuyabridge(monkeypatch)
         cfg = str(tmp_path / "bridge-config.json")
@@ -117,7 +117,7 @@ class TestSpawnEmbeddedBridgeKwargs:
         # --mqtt-user/--mqtt-pass (or their env fallback) forward to the
         # embedded bridge as kwargs so a single-process deploy is configured
         # once. pyrustuyabridge resolves kwargs > config file, so these win.
-        from rustuya_manager.cli import _spawn_embedded_bridge
+        from rustuya_manager.manager import _spawn_embedded_bridge
 
         _stub_pyrustuyabridge(monkeypatch)
         sup, t = _spawn_embedded_bridge(_make_args(tmp_path, mqtt_user="u", mqtt_pass="p"))
@@ -130,7 +130,7 @@ class TestSpawnEmbeddedBridgeKwargs:
     async def test_no_mqtt_credentials_means_no_cred_kwargs(self, tmp_path, monkeypatch):
         # Unauthenticated broker: the credential kwargs must be absent entirely
         # (not None), so the binding falls through to config-file/defaults.
-        from rustuya_manager.cli import _spawn_embedded_bridge
+        from rustuya_manager.manager import _spawn_embedded_bridge
 
         _stub_pyrustuyabridge(monkeypatch)
         sup, t = _spawn_embedded_bridge(_make_args(tmp_path))
@@ -145,7 +145,7 @@ class TestSpawnEmbeddedBridgeKwargs:
         # so the embedded bridge must be told NOT to install its own —
         # otherwise two handlers race in one process. The supervisor
         # forces no_signals=True regardless of caller input (§1.3).
-        from rustuya_manager.cli import _spawn_embedded_bridge
+        from rustuya_manager.manager import _spawn_embedded_bridge
 
         _stub_pyrustuyabridge(monkeypatch)
         sup, t = _spawn_embedded_bridge(_make_args(tmp_path))
@@ -160,7 +160,7 @@ class TestResolveMqttCredentials:
     Values are never logged (only presence), so these tests cover resolution."""
 
     def test_env_fallback_fills_missing(self, monkeypatch):
-        from rustuya_manager.cli import _resolve_mqtt_credentials
+        from rustuya_manager.manager import _resolve_mqtt_credentials
 
         monkeypatch.setenv("RUSTUYA_MQTT_USER", "envu")
         monkeypatch.setenv("RUSTUYA_MQTT_PASSWORD", "envp")
@@ -170,7 +170,7 @@ class TestResolveMqttCredentials:
         assert args.mqtt_pass == "envp"
 
     def test_flag_wins_over_env(self, monkeypatch):
-        from rustuya_manager.cli import _resolve_mqtt_credentials
+        from rustuya_manager.manager import _resolve_mqtt_credentials
 
         monkeypatch.setenv("RUSTUYA_MQTT_USER", "envu")
         monkeypatch.setenv("RUSTUYA_MQTT_PASSWORD", "envp")
@@ -180,7 +180,7 @@ class TestResolveMqttCredentials:
         assert args.mqtt_pass == "flagp"
 
     def test_absent_everywhere_stays_none(self, monkeypatch):
-        from rustuya_manager.cli import _resolve_mqtt_credentials
+        from rustuya_manager.manager import _resolve_mqtt_credentials
 
         monkeypatch.delenv("RUSTUYA_MQTT_USER", raising=False)
         monkeypatch.delenv("RUSTUYA_MQTT_PASSWORD", raising=False)
@@ -202,13 +202,13 @@ class TestEmbeddedBridgeSupervisor:
     """
 
     def test_no_signals_is_forced_even_if_caller_overrides(self):
-        from rustuya_manager.cli import _EmbeddedBridgeSupervisor
+        from rustuya_manager.manager import _EmbeddedBridgeSupervisor
 
         sup = _EmbeddedBridgeSupervisor(no_signals=False)
         assert sup._kwargs["no_signals"] is True
 
     async def test_stop_before_run_does_not_spawn_any_server(self, monkeypatch):
-        from rustuya_manager.cli import _EmbeddedBridgeSupervisor
+        from rustuya_manager.manager import _EmbeddedBridgeSupervisor
 
         seen = _stub_pyrustuyabridge(monkeypatch)
         sup = _EmbeddedBridgeSupervisor()
@@ -220,7 +220,7 @@ class TestEmbeddedBridgeSupervisor:
         """Each clean exit (reconfigure path) triggers a respawn.
         Without an external stop the supervisor still terminates when
         the rate limit fires — proving the cap is wired."""
-        from rustuya_manager.cli import _EmbeddedBridgeSupervisor
+        from rustuya_manager.manager import _EmbeddedBridgeSupervisor
 
         seen = _stub_pyrustuyabridge(monkeypatch)
         # Tighten the cap so the test exits quickly via the rate limit.
@@ -241,7 +241,7 @@ class TestEmbeddedBridgeSupervisor:
         time the bridge happened to crash near shutdown."""
         import pyrustuyabridge as pb
 
-        from rustuya_manager.cli import _EmbeddedBridgeSupervisor
+        from rustuya_manager.manager import _EmbeddedBridgeSupervisor
 
         # Use a very long backoff so the test reliably catches the
         # supervisor inside it.
@@ -281,31 +281,31 @@ class TestPeekBridgeConfig:
     reporting via pyrustuyabridge."""
 
     def test_returns_empty_dict_when_path_is_none(self):
-        from rustuya_manager.cli import _peek_bridge_config
+        from rustuya_manager.manager import _peek_bridge_config
 
         assert _peek_bridge_config(None) == {}
 
     def test_returns_empty_dict_when_file_missing(self, tmp_path):
-        from rustuya_manager.cli import _peek_bridge_config
+        from rustuya_manager.manager import _peek_bridge_config
 
         assert _peek_bridge_config(str(tmp_path / "nope.json")) == {}
 
     def test_returns_empty_dict_on_invalid_json(self, tmp_path):
-        from rustuya_manager.cli import _peek_bridge_config
+        from rustuya_manager.manager import _peek_bridge_config
 
         p = tmp_path / "broken.json"
         p.write_text("{ not valid json")
         assert _peek_bridge_config(str(p)) == {}
 
     def test_returns_empty_dict_when_top_level_is_not_object(self, tmp_path):
-        from rustuya_manager.cli import _peek_bridge_config
+        from rustuya_manager.manager import _peek_bridge_config
 
         p = tmp_path / "list.json"
         p.write_text('["not", "an", "object"]')
         assert _peek_bridge_config(str(p)) == {}
 
     def test_returns_parsed_dict_on_well_formed_file(self, tmp_path):
-        from rustuya_manager.cli import _peek_bridge_config
+        from rustuya_manager.manager import _peek_bridge_config
 
         p = tmp_path / "ok.json"
         p.write_text('{"mqtt_broker": "mqtt://x:1883", "mqtt_root_topic": "r"}')
@@ -328,7 +328,7 @@ class TestApplyBridgeConfigDefaults:
         return str(p)
 
     def test_noop_without_embed_bridge_flag(self, tmp_path):
-        from rustuya_manager.cli import DEFAULT_BROKER, _apply_bridge_config_defaults
+        from rustuya_manager.manager import DEFAULT_BROKER, _apply_bridge_config_defaults
 
         # bridge-config present but --embed-bridge not set → don't touch args.
         cfg = self._write_cfg(tmp_path, mqtt_broker="mqtt://from-cfg:1883", mqtt_root_topic="rcfg")
@@ -338,14 +338,14 @@ class TestApplyBridgeConfigDefaults:
         assert args.root == "test_root"  # _make_args set it explicitly; untouched
 
     def test_noop_without_bridge_config_flag(self, tmp_path):
-        from rustuya_manager.cli import DEFAULT_BROKER, _apply_bridge_config_defaults
+        from rustuya_manager.manager import DEFAULT_BROKER, _apply_bridge_config_defaults
 
         args = _make_args(tmp_path, embed_bridge=True, bridge_config=None)
         _apply_bridge_config_defaults(args)
         assert args.broker == DEFAULT_BROKER  # nothing to fall back to
 
     def test_fills_broker_when_cli_not_passed(self, tmp_path):
-        from rustuya_manager.cli import _apply_bridge_config_defaults
+        from rustuya_manager.manager import _apply_bridge_config_defaults
 
         cfg = self._write_cfg(tmp_path, mqtt_broker="mqtt://from-cfg:1883")
         # None is the parser default — distinguishes "flag absent" from
@@ -355,7 +355,7 @@ class TestApplyBridgeConfigDefaults:
         assert args.broker == "mqtt://from-cfg:1883"
 
     def test_fills_root_when_cli_not_passed(self, tmp_path):
-        from rustuya_manager.cli import _apply_bridge_config_defaults
+        from rustuya_manager.manager import _apply_bridge_config_defaults
 
         cfg = self._write_cfg(tmp_path, mqtt_root_topic="root-from-cfg")
         args = _make_args(tmp_path, embed_bridge=True, bridge_config=cfg, root=None)
@@ -372,7 +372,7 @@ class TestApplyBridgeConfigDefaults:
         bridge-config" branch. The sentinel-None default fixes that."""
         import logging
 
-        from rustuya_manager.cli import DEFAULT_BROKER, _apply_bridge_config_defaults
+        from rustuya_manager.manager import DEFAULT_BROKER, _apply_bridge_config_defaults
 
         cfg = self._write_cfg(tmp_path, mqtt_broker="mqtt://from-cfg:1883")
         # broker is explicitly DEFAULT_BROKER — as if the user typed it on
@@ -388,7 +388,7 @@ class TestApplyBridgeConfigDefaults:
     def test_cli_value_wins_over_bridge_config(self, tmp_path, caplog):
         import logging
 
-        from rustuya_manager.cli import _apply_bridge_config_defaults
+        from rustuya_manager.manager import _apply_bridge_config_defaults
 
         cfg = self._write_cfg(
             tmp_path, mqtt_broker="mqtt://from-cfg:1883", mqtt_root_topic="root-from-cfg"
@@ -414,7 +414,7 @@ class TestApplyBridgeConfigDefaults:
     def test_matching_cli_and_cfg_does_not_warn(self, tmp_path, caplog):
         import logging
 
-        from rustuya_manager.cli import _apply_bridge_config_defaults
+        from rustuya_manager.manager import _apply_bridge_config_defaults
 
         cfg = self._write_cfg(tmp_path, mqtt_broker="mqtt://same:1883", mqtt_root_topic="same-root")
         args = _make_args(
@@ -429,7 +429,7 @@ class TestApplyBridgeConfigDefaults:
         assert "disagree" not in caplog.text.lower()
 
     def test_fills_state_file_when_cli_unset(self, tmp_path):
-        from rustuya_manager.cli import _apply_bridge_config_defaults
+        from rustuya_manager.manager import _apply_bridge_config_defaults
 
         cfg = self._write_cfg(tmp_path, state_file="/var/lib/rustuya/state.json")
         # bridge_state=None means the user didn't pass --bridge-state.
@@ -440,7 +440,7 @@ class TestApplyBridgeConfigDefaults:
     def test_cli_state_file_wins_over_bridge_config(self, tmp_path, caplog):
         import logging
 
-        from rustuya_manager.cli import _apply_bridge_config_defaults
+        from rustuya_manager.manager import _apply_bridge_config_defaults
 
         cfg = self._write_cfg(tmp_path, state_file="/from/cfg/state.json")
         args = _make_args(
@@ -457,7 +457,7 @@ class TestApplyBridgeConfigDefaults:
     def test_matching_state_file_does_not_warn(self, tmp_path, caplog):
         import logging
 
-        from rustuya_manager.cli import _apply_bridge_config_defaults
+        from rustuya_manager.manager import _apply_bridge_config_defaults
 
         cfg = self._write_cfg(tmp_path, state_file="/same/state.json")
         args = _make_args(
@@ -478,21 +478,21 @@ class TestApplyManagerDefaults:
     fill happens for unset flags and that non-None values are preserved."""
 
     def test_fills_broker_when_still_none(self, tmp_path):
-        from rustuya_manager.cli import DEFAULT_BROKER, _apply_manager_defaults
+        from rustuya_manager.manager import DEFAULT_BROKER, _apply_manager_defaults
 
         args = _make_args(tmp_path, broker=None)
         _apply_manager_defaults(args)
         assert args.broker == DEFAULT_BROKER
 
     def test_fills_root_when_still_none(self, tmp_path):
-        from rustuya_manager.cli import DEFAULT_ROOT, _apply_manager_defaults
+        from rustuya_manager.manager import DEFAULT_ROOT, _apply_manager_defaults
 
         args = _make_args(tmp_path, root=None)
         _apply_manager_defaults(args)
         assert args.root == DEFAULT_ROOT
 
     def test_preserves_user_set_values(self, tmp_path):
-        from rustuya_manager.cli import _apply_manager_defaults
+        from rustuya_manager.manager import _apply_manager_defaults
 
         args = _make_args(tmp_path, broker="mqtt://x:1883", root="myroot")
         _apply_manager_defaults(args)

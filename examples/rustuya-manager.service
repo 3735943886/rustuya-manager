@@ -1,5 +1,5 @@
 # Drop this file at ~/.config/systemd/user/rustuya-manager.service
-# (after installing via `pipx install rustuya-manager`), then:
+# (after installing via `pipx install "rustuya-manager[web]"`), then:
 #
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now rustuya-manager

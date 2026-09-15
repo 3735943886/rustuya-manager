@@ -205,36 +205,64 @@ themeMedia.addEventListener("change", () => {
   if (getThemePref() === "system") applyTheme("system");
 });
 
-// Icon + label reflect the *current* selection, not the next one: with three
-// states the next mode isn't obvious, so showing where you are is clearer than
-// the old two-state "click to switch to X" label.
+// Icon + label on the toggle row reflect the *current* selection, same as the
+// language toggle showing the active locale's name.
 const THEME_SPEC = {
   system: { icon: "🖥", key: "header.systemMode" },
   light: { icon: "☀", key: "header.lightMode" },
   dark: { icon: "🌙", key: "header.darkMode" },
 };
 
-// Register (or replace) the theme menu item for the current mode. Re-called on a
-// cycle and on a language switch (via registerBuiltinActions), so both the glyph
-// and the translated label stay in sync.
-function registerThemeAction() {
-  const spec = THEME_SPEC[getThemePref()];
+// Collapsed by default, same rationale as the language submenu below.
+let themeMenuOpen = false;
+
+// Render the theme picker as a collapsible submenu — a single row showing the
+// current mode that expands an indented, checkmarked System/Light/Dark list on
+// click. Mirrors registerLanguageActions() below so the two "pick a global
+// preference" controls behave identically instead of one cycling on click and
+// the other expanding. Re-runnable — clears its own rows each time so a
+// collapse leaves nothing stale behind. Re-called on a language switch (via
+// registerBuiltinActions) so the translated labels stay in sync.
+function registerThemeActions() {
+  unregisterHeaderActions((id) => id === "theme-toggle" || id.startsWith("theme-opt-"));
+  const current = getThemePref();
+  const spec = THEME_SPEC[current];
+  const caret = `<span class="ml-1 text-xs text-slate-400 dark:text-slate-500">${themeMenuOpen ? "▾" : "▸"}</span>`;
   registerHeaderAction({
-    id: "theme-btn",
+    id: "theme-toggle",
     iconHtml: spec.icon,
-    labelHtml: t(spec.key),
+    labelHtml: `${t(spec.key)}${caret}`,
     scope: "global",
-    order: 40,
-    title: t("header.themeTitle"),
-    onClick: doThemeCycle,
+    order: 50,
+    dividerBefore: true,
+    keepOpen: true, // expanding/collapsing must not dismiss the dropdown
+    onClick: () => {
+      themeMenuOpen = !themeMenuOpen;
+      registerThemeActions();
+      renderActionsMenu();
+    },
+  });
+  if (!themeMenuOpen) return;
+
+  THEME_ORDER.forEach((pref, i) => {
+    const s = THEME_SPEC[pref];
+    const check = `<span class="w-3 text-center text-emerald-600 dark:text-emerald-400">${pref === current ? "✓" : ""}</span>`;
+    registerHeaderAction({
+      id: `theme-opt-${pref}`,
+      iconHtml: "",
+      labelHtml: `<span class="inline-flex items-center gap-1.5 pl-4">${check}${s.icon} ${t(s.key)}</span>`,
+      scope: "global",
+      order: 50 + (i + 1) * 0.01,
+      onClick: () => selectTheme(pref),
+    });
   });
 }
 
-function doThemeCycle() {
-  const next = THEME_ORDER[(THEME_ORDER.indexOf(getThemePref()) + 1) % THEME_ORDER.length];
-  localStorage.setItem("theme", next);
-  applyTheme(next);
-  registerThemeAction();
+function selectTheme(pref) {
+  if (pref === getThemePref()) return;
+  localStorage.setItem("theme", pref);
+  applyTheme(pref);
+  registerThemeActions();
   renderActionsMenu();
 }
 
@@ -315,8 +343,10 @@ function registerLanguageActions() {
     iconHtml: "🌐",
     labelHtml: `${t("header.language")}${caret}`,
     scope: "global",
-    order: 45,
-    dividerBefore: true,
+    order: 55,
+    // No dividerBefore — grouped with the theme toggle right above it under
+    // one "preferences" divider (theme-toggle carries it) rather than each
+    // getting its own separator line.
     keepOpen: true, // expanding/collapsing must not dismiss the dropdown
     onClick: () => {
       langMenuOpen = !langMenuOpen;
@@ -335,28 +365,45 @@ function registerLanguageActions() {
       // Indent under the toggle so the list reads as a nested group.
       labelHtml: `<span class="inline-flex items-center gap-1.5 pl-4">${check}${getLocaleName(code)}</span>`,
       scope: "global",
-      order: 45 + (i + 1) * 0.01,
+      order: 55 + (i + 1) * 0.01,
       onClick: () => selectLanguage(code),
     });
   });
 }
 
-// Built-in items — ids/order preserved so the menu (and the e2e suite) looks and
-// behaves as before. `scope` is explicit so the manager's own actions split the
-// same way plugins' do: "devices" = manager's Devices view only; "global" = every
-// tab. Device-specific actions are manager-only; process/app-level ones global.
+// Built-in items grouped into four bands (top to bottom), each one a natural
+// unit rather than an arbitrary order number:
+//   10-40  device actions   — everything that adds/finds/updates devices;
+//                             devices-tab only, no divider (top of menu)
+//   50-56  preferences      — theme + language, both "pick one of a few
+//                             global options" controls using the same
+//                             collapsible-submenu interaction
+//   60-70  app / meta       — plugins, about, notifications
+//   100+   danger zone      — reconfigure / restart (unchanged)
+// `scope` is explicit so the manager's own actions split the same way
+// plugins' do: "devices" = manager's Devices view only; "global" = every tab.
 // Labels/titles come from the i18n layer; this is wrapped in a function so a
 // language switch can re-register the built-ins with freshly translated text.
 function registerBuiltinActions() {
+  // Device actions
   registerHeaderAction({ id: "device-add-btn", iconHtml: "+", labelHtml: t("header.addDevice"), scope: "devices", order: 10, onClick: doAddDevice });
-  registerHeaderAction({ id: "wizard-header-btn", iconHtml: "☁", labelHtml: t("header.fetchCloud"), scope: "global", order: 20, title: t("header.fetchCloudTitle"), onClick: openWizardModal });
-  registerHeaderAction({ id: "scan-btn", iconHtml: "📡", labelHtml: t("header.scanLan"), scope: "devices", order: 30, title: t("header.scanLanTitle"), onClick: doScan });
-  registerThemeAction();
+  registerHeaderAction({ id: "scan-btn", iconHtml: "📡", labelHtml: t("header.scanLan"), scope: "devices", order: 20, title: t("header.scanLanTitle"), onClick: doScan });
+  registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: t("header.refresh"), scope: "devices", order: 30, title: t("header.refreshTitle"), onClick: doRefresh });
+  // Cloud fetch also only makes sense on the Devices view — it feeds the
+  // same cloud-vs-bridge diff the other three device actions work with, so
+  // it's devices-scoped like them rather than showing on plugin tabs too.
+  registerHeaderAction({ id: "wizard-header-btn", iconHtml: "☁", labelHtml: t("header.fetchCloud"), scope: "devices", order: 40, title: t("header.fetchCloudTitle"), onClick: openWizardModal });
+
+  // Preferences
+  registerThemeActions();
   registerLanguageActions();
-  registerHeaderAction({ id: "refresh-btn", iconHtml: "⟳", labelHtml: t("header.refresh"), scope: "devices", order: 50, title: t("header.refreshTitle"), onClick: doRefresh });
-  registerHeaderAction({ id: "manage-plugins-btn", iconHtml: "🧩", labelHtml: t("header.managePlugins"), scope: "global", order: 55, title: t("header.managePluginsTitle"), onClick: openPluginsModal });
-  registerHeaderAction({ id: "about-btn", iconHtml: "ℹ", labelHtml: t("info.title"), scope: "global", order: 60, onClick: openAboutModal });
-  registerHeaderAction({ id: "log-btn", iconHtml: "🔔", labelHtml: t("header.log"), scope: "global", order: 65, title: t("header.logTitle"), onClick: openLogModal });
+
+  // App / meta
+  registerHeaderAction({ id: "manage-plugins-btn", iconHtml: "🧩", labelHtml: t("header.managePlugins"), scope: "global", order: 60, dividerBefore: true, title: t("header.managePluginsTitle"), onClick: openPluginsModal });
+  registerHeaderAction({ id: "about-btn", iconHtml: "ℹ", labelHtml: t("info.title"), scope: "global", order: 65, onClick: openAboutModal });
+  registerHeaderAction({ id: "log-btn", iconHtml: "🔔", labelHtml: t("header.log"), scope: "global", order: 70, title: t("header.logTitle"), onClick: openLogModal });
+
+  // Danger zone
   registerHeaderAction({
     id: "reconfigure-btn",
     iconHtml: "🔧",

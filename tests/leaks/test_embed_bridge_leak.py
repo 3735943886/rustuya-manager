@@ -9,7 +9,7 @@ Instead we patch `pyrustuyabridge.PyBridgeServer` to a MagicMock whose
 mirrors the production lifecycle of a single bridge instance per spawn,
 so the supervisor's reconfigure-respawn loop does NOT kick in against
 the stub (a clean-exit stub would tight-loop until the rate limit). We
-measure the Python wiring in `cli._spawn_embedded_bridge` /
+measure the Python wiring in `manager._spawn_embedded_bridge` /
 `_close_embedded_bridge`: supervisor task creation, supervisor
 construction, MagicMock closure retention, args reference retention.
 """
@@ -21,7 +21,7 @@ import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from rustuya_manager.cli import _close_embedded_bridge, _spawn_embedded_bridge
+from rustuya_manager.manager import _close_embedded_bridge, _spawn_embedded_bridge
 
 from .conftest import assert_no_leak_async
 
@@ -31,7 +31,7 @@ def _fake_args(tmp_path: Path) -> argparse.Namespace:
         broker="mqtt://localhost:1883",
         root="rustuya",
         log_level="info",
-        cloud=str(tmp_path / "tuyadevices.json"),
+        cloud_path=str(tmp_path / "tuyadevices.json"),
         bridge_state=str(tmp_path / "rustuya.json"),
         bridge_config=None,
     )

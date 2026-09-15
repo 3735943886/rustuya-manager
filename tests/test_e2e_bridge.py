@@ -422,7 +422,7 @@ async def _run_embed_test(tmp_path, root: str, *, bridge_config: str | None = No
     assert on state.templates etc."""
     from types import SimpleNamespace
 
-    from rustuya_manager.cli import _close_embedded_bridge, _resolve_embedded_bridge
+    from rustuya_manager.manager import _close_embedded_bridge, _resolve_embedded_bridge
 
     subprocess.run(
         ["mosquitto_pub", "-h", "localhost", "-t", f"{root}/bridge/config", "-r", "-n"],
@@ -434,7 +434,7 @@ async def _run_embed_test(tmp_path, root: str, *, bridge_config: str | None = No
         embed_bridge=True,
         broker="mqtt://localhost:1883",
         root=root,
-        cloud=str(tmp_path / "tuyadevices.json"),
+        cloud_path=str(tmp_path / "tuyadevices.json"),
         bridge_state=str(tmp_path / "bridge-state.json"),
         log_level="warn",
         bridge_config=bridge_config,
@@ -537,7 +537,7 @@ async def test_embed_bridge_inherits_broker_and_root_from_bridge_config(tmp_path
     import json as _json
     from types import SimpleNamespace
 
-    from rustuya_manager.cli import (
+    from rustuya_manager.manager import (
         _apply_bridge_config_defaults,
         _close_embedded_bridge,
         _resolve_embedded_bridge,
@@ -563,7 +563,7 @@ async def test_embed_bridge_inherits_broker_and_root_from_bridge_config(tmp_path
         embed_bridge=True,
         broker=None,
         root=None,
-        cloud=str(tmp_path / "tuyadevices.json"),
+        cloud_path=str(tmp_path / "tuyadevices.json"),
         bridge_state=str(tmp_path / "bridge-state.json"),
         log_level="warn",
         bridge_config=str(cfg_path),
@@ -605,7 +605,7 @@ async def test_embed_bridge_aborts_when_external_exists(bridge: str):
     within the 1s collision-detection window and declines to spawn."""
     from types import SimpleNamespace
 
-    from rustuya_manager.cli import _resolve_embedded_bridge
+    from rustuya_manager.manager import _resolve_embedded_bridge
 
     state = State()
     client = BridgeClient(broker="mqtt://localhost:1883", root=bridge, state=state)
@@ -613,7 +613,7 @@ async def test_embed_bridge_aborts_when_external_exists(bridge: str):
         embed_bridge=True,
         broker="mqtt://localhost:1883",
         root=bridge,
-        cloud="ignored.json",
+        cloud_path="ignored.json",
         bridge_state=None,
         log_level="warn",
         bridge_config=None,

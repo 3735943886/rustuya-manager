@@ -17,7 +17,7 @@
 When started with `--embed-bridge`, the manager runs a
 `pyrustuyabridge.PyBridgeServer` *inside its own process* instead of
 talking to a separate bridge over MQTT.
-[_spawn_embedded_bridge](../src/rustuya_manager/cli.py) schedules it as an
+[_spawn_embedded_bridge](../src/rustuya_manager/manager.py) schedules it as an
 `asyncio.Task` that `await`s the binding's `start_async()`. The manager is
 otherwise pure asyncio (FastAPI + uvicorn + aiomqtt), so an asyncio task is
 the native fit — but the choice rests on more than heuristic tidiness, and
@@ -83,7 +83,7 @@ The deciding factors, in order:
 2. **Direct failure routing.** An awaited task surfaces an unexpected
    `run()` exception straight to the supervisor on the loop instead of
    dropping it inside a daemon thread. `_EmbeddedBridgeSupervisor`
-   ([../src/rustuya_manager/cli.py](../src/rustuya_manager/cli.py)) catches
+   ([../src/rustuya_manager/manager.py](../src/rustuya_manager/manager.py)) catches
    it there, logs it, backs off, and respawns under a rate limit — and a
    future "manager fails closed if the bridge dies" feature would already
    have the exception in hand on the right thread.
@@ -131,7 +131,7 @@ SIGINT  →  manager loop handler  →  stop_event.set()
         →  run() unblocks  →  finally:  _close_embedded_bridge(supervisor)
 ```
 
-**`stop()`, not `close()`.** [_close_embedded_bridge](../src/rustuya_manager/cli.py)
+**`stop()`, not `close()`.** [_close_embedded_bridge](../src/rustuya_manager/manager.py)
 calls `supervisor.stop()`, which in turn trips the live server's
 `stop()` — the binding's sync, lock-free cancel (added in
 pyrustuyabridge 0.2.0rc5). It trips the bridge's internal
@@ -217,7 +217,7 @@ per setting with a fixed precedence:
    `rustuya.json` next to `--cloud`).
 
 `_apply_bridge_config_defaults` / `_apply_manager_defaults`
-([cli.py](../src/rustuya_manager/cli.py)) implement this: a value taken from
+([manager.py](../src/rustuya_manager/manager.py)) implement this: a value taken from
 `--bridge-config` becomes the manager's default too, so the setting is written
 once and both halves agree. When a CLI flag and the bridge-config value
 disagree, the CLI value wins (the embedded bridge is handed the same kwarg) and

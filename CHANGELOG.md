@@ -10,10 +10,31 @@ and the project versions are [PEP 440](https://peps.python.org/pep-0440/). A
 pre-release tag (`0.1.1rcN`, `.dev`, etc.) publishes to TestPyPI; a plain
 `MAJOR.MINOR.PATCH` tag publishes to PyPI.
 
-## [Unreleased]
+## [0.2.0.dev0] — 2026-09-15
+
+### Added
+
+- **`Manager` facade for programmatic use.** `from rustuya_manager import Manager`
+  gives library callers a connected, bootstrapped async context manager
+  (`State` + `BridgeClient`, optional embedded bridge, wizard/scan
+  coordinator) without depending on FastAPI/uvicorn:
+  `async with Manager(broker=..., root=...) as m: await m.add_device(...)`.
+  This is the same bootstrap logic `cli.py` and the web UI already used,
+  now factored out and reusable.
 
 ### Changed
 
+- **`fastapi`/`uvicorn` moved to an optional `web` extra.** `pip install
+  rustuya-manager` now installs core functionality only (MQTT, cloud sync,
+  the new `Manager` facade); the `--web` UI needs `pip install
+  "rustuya-manager[web]"`. Every documented deployment path (Docker, pipx,
+  systemd) already runs with `--web` and has been updated accordingly — see
+  the README.
+- Embedded-bridge supervisor and CLI-argument-default-resolution helpers
+  (`_EmbeddedBridgeSupervisor`, `_spawn_embedded_bridge`,
+  `_apply_bridge_config_defaults`, etc.) moved from `cli.py` to the new
+  `manager.py`, now part of `Manager`'s internals. No CLI-facing behavior
+  change.
 - **The Info panel moved from an in-page collapsible to an "About" menu item
   + modal.** Frees up page space below the device list; content (topics,
   manager/bridge versions with the update check, device/drop counts, unmet
@@ -23,6 +44,14 @@ pre-release tag (`0.1.1rcN`, `.dev`, etc.) publishes to TestPyPI; a plain
   available" cue moved to the header menu's shared attention-dot system (the
   same one "Restart manager" already used), which now lights for *any*
   registered item that needs it, not just this one.
+- **Hamburger menu regrouped for consistency.** Device actions (Add device,
+  Scan LAN, Refresh devices, Fetch from cloud) are now adjacent at the top
+  instead of interleaved with preference items; Theme is now a collapsible
+  System/Light/Dark submenu with checkmarks, matching Language's pattern,
+  instead of a click-to-cycle button. "Fetch from cloud" moved from global to
+  devices-tab scope (hidden on plugin tabs) to match the rest of its group.
+  No plugin-facing API change — `ctx.addHeaderAction` and its 200+ default
+  order band are untouched.
 
 ## [0.1.1] — 2026-09-05
 

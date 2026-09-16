@@ -5,13 +5,18 @@ name: Catalog sync
 # manifest (data/plugin-sources.json), asks GitHub for the latest release of
 # every listed repo (prereleases INCLUDED — the plugins ship rc builds), and
 # rewrites version/url/sha256 when a newer one exists. The change lands as a
-# PR, never a direct push to master: curation is the catalog's trust anchor
-# (plugins run in-process, unsandboxed), so a human still merges.
+# PR (kept for the diff/audit trail) rather than a direct push, but the bot
+# auto-merges it itself once this repo's own CI is green on that PR — no
+# human click required. The per-artifact sha256 pin (verified at download
+# time by every client) is the actual trust anchor here, not PR review of a
+# 3-line version/url/hash bump.
 #
 # Note: a PR opened with the default GITHUB_TOKEN does NOT trigger CI on that PR
-# (GitHub's loop-prevention rule). That's fine here — the diff is a JSON version
-# bump — but it's why the PR shows no checks. Re-push the branch by hand if you
-# want CI to run before merge.
+# (GitHub's loop-prevention rule) — CATALOG_BOT_TOKEN must be set as a repo
+# secret (PAT with Contents + Pull requests: write) for checks to run at all.
+# Without it, the "Auto-merge once CI is green" step finds no checks to watch
+# and merges unchecked, so CATALOG_BOT_TOKEN is load-bearing for this repo's
+# auto-merge, not just a nice-to-have.
 
 on:
   schedule:
@@ -58,6 +63,7 @@ jobs:
         # Idempotent: reuses the same branch + PR across days, so repeated runs
         # update one PR instead of piling up. Skips entirely when the tree is
         # unchanged (no plugin updates available).
+        id: cpr
         uses: peter-evans/create-pull-request@v8
         with:
           # A PAT (if configured) authors the PR — which both lets the bot open
@@ -73,3 +79,16 @@ jobs:
           labels: catalog, automated
           delete-branch: true
           add-paths: src/rustuya_manager/data/plugins.json
+
+      - name: Auto-merge once CI is green
+        # Only when the PR step actually created/refreshed a PR (a "none"
+        # operation means the catalog was already up to date). `gh pr checks
+        # --watch` blocks until every check on the PR finishes and fails the
+        # step (stopping the job before merge) if any of them failed — same
+        # gate a human reviewer would have relied on, just unattended.
+        if: steps.cpr.outputs.pull-request-operation == 'created' || steps.cpr.outputs.pull-request-operation == 'updated'
+        env:
+          GH_TOKEN: ${{ secrets.CATALOG_BOT_TOKEN || github.token }}
+        run: |
+          gh pr checks "${{ steps.cpr.outputs.pull-request-number }}" --watch --interval 15
+          gh pr merge "${{ steps.cpr.outputs.pull-request-number }}" --squash --delete-branch

@@ -5,6 +5,10 @@
     "rustuya-homeassistant": {
       "repo": "3735943886/rustuya-homeassistant",
       "asset": "rustuya_ha-{version}-dropin.zip"
+    },
+    "rustuya-local": {
+      "repo": "3735943886/rustuya-local",
+      "asset": "rustuya_local-{version}-dropin.zip"
     }
   }
 }

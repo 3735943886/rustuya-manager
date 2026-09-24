@@ -3,8 +3,8 @@
   "plugins": [
     {
       "id": "rustuya-homeassistant",
-      "name": "Home Assistant Discovery",
-      "description": "Generate and sync Home Assistant MQTT discovery for your Tuya devices, so they appear in Home Assistant automatically.",
+      "name": "Home Assistant Discovery (retired)",
+      "description": "Retired: use rustuya-local with the il-ha Home Assistant integration instead. Do not install both, or every device appears twice in Home Assistant.",
       "homepage": "https://github.com/3735943886/rustuya-homeassistant",
       "version": "0.0.1rc24",
       "min_api": 1,

@@ -403,7 +403,7 @@ def build_app(
         pre-filled across browsers. Kept separate from /status because that
         gets polled every 1.5s during the flow — we don't want to re-read
         the file on every tick."""
-        return {"saved_user_code": wizard.read_saved_user_code() or ""}
+        return {"saved_user_code": await wizard.read_saved_user_code() or ""}
 
     @app.post("/api/wizard/cancel")
     async def wizard_cancel() -> dict[str, Any]:

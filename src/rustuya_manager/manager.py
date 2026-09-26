@@ -475,7 +475,11 @@ class Manager:
             self.state = State()
             await self.state.set_cloud_path(str(self.cloud_path.resolve()))
             if self.cloud_path.exists():
-                await self.state.set_cloud(_load_cloud(self.cloud_path))
+                # Offloaded to a thread: callers include HA custom
+                # integrations that flag a blocking open() call on the event
+                # loop as a bug, and __aenter__ itself is squarely on that
+                # loop (it's awaited directly from async setup code).
+                await self.state.set_cloud(await asyncio.to_thread(_load_cloud, self.cloud_path))
 
             self.client = BridgeClient(
                 broker=self.broker,

@@ -151,7 +151,7 @@ class WizardManager:
                 self.session.state = WizardState.IDLE
                 self.session.message = "cancelled"
 
-    def read_saved_user_code(self) -> str | None:
+    async def read_saved_user_code(self) -> str | None:
         """Return the user_code persisted in tuyacreds.json, if any.
 
         The tuyawizard library strips `user_code` from the dict when it loads
@@ -161,7 +161,14 @@ class WizardManager:
         every new browser / re-fetch attempt.
 
         Returns None if the file is missing, unreadable, or has no user_code.
+        Offloaded to a thread (`asyncio.to_thread`) rather than reading
+        inline: callers include HA custom integrations that flag a blocking
+        `open()` call on the event loop as a bug, not just this project's own
+        (asyncio-based) web UI.
         """
+        return await asyncio.to_thread(self._read_saved_user_code_sync)
+
+    def _read_saved_user_code_sync(self) -> str | None:
         if not self.creds_path or not os.path.exists(self.creds_path):
             return None
         try:

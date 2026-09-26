@@ -20,6 +20,6 @@ from .manager import Manager
 # The one place the version is defined. pyproject.toml resolves it at build
 # time via [tool.setuptools.dynamic]; web.py uses it for the FastAPI title;
 # check.sh reads it from the installed package. Bump here and nowhere else.
-__version__ = "0.2.0.dev0"
+__version__ = "0.2.0.dev1"
 
 __all__ = ["Manager", "__version__"]

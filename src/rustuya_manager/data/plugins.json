@@ -4,21 +4,21 @@
     {
       "id": "rustuya-homeassistant",
       "name": "Home Assistant Discovery (retired)",
-      "description": "Retired: use rustuya-local with the il-ha Home Assistant integration instead. Do not install both, or every device appears twice in Home Assistant.",
-      "homepage": "https://github.com/3735943886/rustuya-homeassistant",
+      "description": "Retired: use Tuya (IL) (rustuya-local) with the il-ha Home Assistant integration instead. Do not install both, or every device appears twice in Home Assistant.",
+      "homepage": "https://github.com/3735943886/rustuya-homeassistant-v1",
       "version": "0.0.1rc24",
       "min_api": 1,
-      "url": "https://github.com/3735943886/rustuya-homeassistant/releases/download/v0.0.1rc24/rustuya_ha-0.0.1rc24-dropin.zip",
+      "url": "https://github.com/3735943886/rustuya-homeassistant-v1/releases/download/v0.0.1rc24/rustuya_ha-0.0.1rc24-dropin.zip",
       "sha256": "43b457155c79510c1c519da956034ff2c83f7c5916a95bbd6fc9dbd750b8e077"
     },
     {
       "id": "rustuya-local",
       "name": "Tuya (IL)",
       "description": "Publish your Tuya devices as IL (ildevice) with Home Assistant core's Tuya behaviour; install the il-ha integration in Home Assistant to see them as entities.",
-      "homepage": "https://github.com/3735943886/rustuya-local",
+      "homepage": "https://github.com/3735943886/rustuya-homeassistant",
       "version": "0.0.13",
       "min_api": 4,
-      "url": "https://github.com/3735943886/rustuya-local/releases/download/v0.0.13/rustuya_local-0.0.13-dropin.zip",
+      "url": "https://github.com/3735943886/rustuya-homeassistant/releases/download/v0.0.13/rustuya_local-0.0.13-dropin.zip",
       "sha256": "f70d5b68e3221f5cd542cfbedbcafb4d5eb079942c3c42c752acb3501a457b0c"
     }
   ]

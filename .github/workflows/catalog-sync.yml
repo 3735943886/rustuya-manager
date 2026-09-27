@@ -90,5 +90,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.CATALOG_BOT_TOKEN || github.token }}
         run: |
-          gh pr checks "${{ steps.cpr.outputs.pull-request-number }}" --watch --interval 15
-          gh pr merge "${{ steps.cpr.outputs.pull-request-number }}" --squash --delete-branch
+          pr="${{ steps.cpr.outputs.pull-request-number }}"
+          # The PR's checks take a moment to be registered after the push; asked too early, `gh pr checks` says
+          # "no checks reported" and fails the step (PR #24). Wait for them (up to 10 min); if none ever appear,
+          # the watch below still fails and nothing is merged unchecked.
+          for _ in $(seq 1 40); do
+            out=$(gh pr checks "$pr" 2>&1) || true
+            case "$out" in *"no checks reported"*) sleep 15 ;; *) break ;; esac
+          done
+          gh pr checks "$pr" --watch --interval 15
+          gh pr merge "$pr" --squash --delete-branch

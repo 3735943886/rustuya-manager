@@ -10,7 +10,9 @@ and the project versions are [PEP 440](https://peps.python.org/pep-0440/). A
 pre-release tag (`0.1.1rcN`, `.dev`, etc.) publishes to TestPyPI; a plain
 `MAJOR.MINOR.PATCH` tag publishes to PyPI.
 
-## [0.2.0.dev0] — 2026-09-15
+## [0.2.0] — 2026-09-27
+
+Consolidates `0.2.0.dev0` and `0.2.0.dev1`.
 
 ### Added
 
@@ -22,8 +24,15 @@ pre-release tag (`0.1.1rcN`, `.dev`, etc.) publishes to TestPyPI; a plain
   This is the same bootstrap logic `cli.py` and the web UI already used,
   now factored out and reusable.
 
+- **Plugin catalog lists `rustuya-local`** (Tuya devices as IL, for the il-ha Home Assistant integration);
+  `rustuya-homeassistant` is marked retired. The catalog is fetched from `master`, so this reached existing installs
+  already.
+
 ### Changed
 
+- **No blocking file I/O on the event loop in `Manager`.** Loading the cloud device file on enter and reading the
+  wizard's saved user code run in a worker thread, so a host such as Home Assistant does not flag them.
+  `Wizard.read_saved_user_code()` is now a coroutine (`await wizard.read_saved_user_code()`).
 - **`fastapi`/`uvicorn` moved to an optional `web` extra.** `pip install
   rustuya-manager` now installs core functionality only (MQTT, cloud sync,
   the new `Manager` facade); the `--web` UI needs `pip install

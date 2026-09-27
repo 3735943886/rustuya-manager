@@ -10,6 +10,23 @@ and the project versions are [PEP 440](https://peps.python.org/pep-0440/). A
 pre-release tag (`0.1.1rcN`, `.dev`, etc.) publishes to TestPyPI; a plain
 `MAJOR.MINOR.PATCH` tag publishes to PyPI.
 
+## [0.2.1] — 2026-09-27
+
+### Fixed
+
+- **Commands on a `{dp}` command topic template.** Commands were rendered with only `{action}`/`{id}`, so a template
+  such as `{root}/command/{action}/{id}/{dp}` got a literal `{dp}` segment and a one-DP `set` went out as a JSON
+  object instead of the template's single-DP form. `publish_command` now uses pyrustuyabridge's `render_command`,
+  the bridge's own renderer checked against its own command parser: a one-DP `set` is the bare value on
+  `…/set/<id>/<dp>`, other commands fill the placeholder. A request the template cannot carry raises instead of
+  publishing something the bridge would misread.
+
+### Changed
+
+- **Requires `pyrustuyabridge>=0.4.0.dev2`** (for `render_command`). The embedded bridge (`--embed-bridge`, the Home
+  Assistant add-on) is therefore the 0.4 development line, built on the rustuya 0.4 beta; it rejects a local key
+  that is not 16 characters.
+
 ## [0.2.0] — 2026-09-27
 
 Consolidates `0.2.0.dev0` and `0.2.0.dev1`.

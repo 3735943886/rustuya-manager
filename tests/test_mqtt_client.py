@@ -1283,6 +1283,29 @@ class TestPluginRuntimeDpBus:
         assert json.loads(body) == {"action": "set", "id": "D1", "dps": {"1": True}}
 
     @pytest.mark.asyncio
+    async def test_commands_fill_a_dp_command_template(self):
+        """A `{dp}` command template (r5c's `{root}/command/{action}/{id}/{dp}`): a one-DP set is the bare value on
+        the DP's topic, other commands fill the placeholder; never a literal `{dp}` (pyrustuyabridge.render_command)."""
+        state = State()
+        await state.set_templates(
+            BridgeTemplates(
+                root="rustuya",
+                command="rustuya/command/{action}/{id}/{dp}",
+                event="rustuya/event/{type}/{id}/{dp}",
+                message="rustuya/{level}/{id}",
+                scanner="rustuya/scanner",
+                payload="{value}",
+            )
+        )
+        client, mock = _make_client(state)
+        await client.set_device_dp("D1", "1", False)
+        assert mock.publish.await_args.args == ("rustuya/command/set/D1/1", "false")
+        await client.publish_command("status", target_id="bridge", extra={"offset": 50})
+        topic, body = mock.publish.await_args.args
+        assert topic == "rustuya/command/status/bridge/-"
+        assert json.loads(body) == {"action": "status", "id": "bridge", "offset": 50}
+
+    @pytest.mark.asyncio
     async def test_publish_derived_dp_multi_dp_mode(self):
         state = await self._multi_dp_state()
         client, mock = _make_client(state)

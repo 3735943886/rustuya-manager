@@ -984,23 +984,22 @@ class BridgeClient:
         if self.state.templates is None:
             raise RuntimeError("templates not yet resolved (bootstrap incomplete)")
 
-        vars_ = {"action": action}
+        request: dict[str, Any] = {"action": action}
         if target_id:
-            vars_["id"] = target_id
+            request["id"] = target_id
         if target_name:
-            vars_["name"] = target_name
-
-        topic = pb.render_template(self.state.templates.command, vars_)
-
-        payload: dict[str, Any] = {"action": action}
-        if target_id:
-            payload["id"] = target_id
-        if target_name:
-            payload["name"] = target_name
+            request["name"] = target_name
         if extra:
-            payload.update(extra)
+            request.update(extra)
 
-        body = json.dumps(payload)
+        # The bridge's own renderer, checked against its own command parser: fills every placeholder the template
+        # has (a one-DP `set` on `.../{dp}` is the bare value on `.../set/<id>/<dp>`), never a literal `{dp}`.
+        rendered = pb.render_command(self.state.templates.command, request)
+        if rendered is None:
+            raise RuntimeError(
+                f"the bridge's command topic {self.state.templates.command!r} cannot carry this {action!r} command"
+            )
+        topic, body = rendered
         logger.debug("publish %s %s", topic, body)
         try:
             await self._client.publish(topic, body, qos=1)

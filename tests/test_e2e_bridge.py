@@ -187,7 +187,7 @@ async def test_add_device_propagates_to_bridge_state(bridge: str):
                 "-t",
                 f"{bridge}/cmd/bf-test-1/add",
                 "-m",
-                '{"key":"k1234567890abcdef","ip":"10.0.0.1"}',
+                '{"key":"k1234567890abcde","ip":"10.0.0.1"}',
             ],
             check=True,
         )
@@ -221,7 +221,7 @@ async def test_dps_event_arrives_through_custom_topic(bridge: str):
                 "-t",
                 f"{bridge}/cmd/bf-test-evt/add",
                 "-m",
-                '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"living_room"}',
+                '{"key":"k1234567890abcde","ip":"10.0.0.1","name":"living_room"}',
             ],
             check=True,
         )
@@ -293,7 +293,7 @@ async def test_reconnect_preserves_subscriptions(bridge: str):
                 "-t",
                 f"{bridge}/cmd/bf-reconnect-dev/add",
                 "-m",
-                '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"post_reconnect_dev"}',
+                '{"key":"k1234567890abcde","ip":"10.0.0.1","name":"post_reconnect_dev"}',
             ],
             check=True,
         )
@@ -365,7 +365,7 @@ async def test_remove_clears_per_device_state(bridge: str):
                 "-t",
                 f"{bridge}/cmd/bf-rm-dev/add",
                 "-m",
-                '{"key":"k1234567890abcdef","ip":"10.0.0.1","name":"removable"}',
+                '{"key":"k1234567890abcde","ip":"10.0.0.1","name":"removable"}',
             ],
             check=True,
         )
@@ -646,7 +646,7 @@ async def test_add_response_triggers_status_refresh(bridge: str):
         await client.publish_command(
             "add",
             target_id="bf-auto-add",
-            extra={"key": "k1234567890abcdef", "ip": "10.0.0.42", "name": "auto"},
+            extra={"key": "k1234567890abcde", "ip": "10.0.0.42", "name": "auto"},
         )
         # We do NOT explicitly issue status — the test pins that the response
         # handler in _route does it for us.

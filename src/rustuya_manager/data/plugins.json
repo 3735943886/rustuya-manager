@@ -16,10 +16,10 @@
       "name": "Tuya (IL)",
       "description": "Publish your Tuya devices as IL (ildevice) with Home Assistant core's Tuya behaviour; install the il-ha integration in Home Assistant to see them as entities.",
       "homepage": "https://github.com/3735943886/rustuya-local",
-      "version": "0.0.21",
+      "version": "0.0.37",
       "min_api": 4,
-      "url": "https://github.com/3735943886/rustuya-local/releases/download/v0.0.21/rustuya_local-0.0.21-dropin.zip",
-      "sha256": "00876e61191458103f8811e5269bcd350c67bb0b68b180d3bf2310a0d65f3f93"
+      "url": "https://github.com/3735943886/rustuya-local/releases/download/v0.0.37/rustuya_local-0.0.37-dropin.zip",
+      "sha256": "25dd3ed8c3dcc2d5808359030824352e7a2c66d0a90a740f25b2c550efc44662"
     }
   ]
 }

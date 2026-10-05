@@ -194,7 +194,7 @@ async def test_add_device_propagates_to_bridge_state(bridge: str):
         # Trigger a status query so the bridge replies with the device list
         await client.publish_command("status", target_id="bridge")
         # Give the response time to land
-        for _ in range(40):
+        for _ in range(80):
             await asyncio.sleep(0.1)
             if "bf-test-1" in state.bridge:
                 break
@@ -226,7 +226,7 @@ async def test_dps_event_arrives_through_custom_topic(bridge: str):
             check=True,
         )
         await client.publish_command("status", target_id="bridge")
-        for _ in range(40):
+        for _ in range(80):
             await asyncio.sleep(0.1)
             if "bf-test-evt" in state.bridge:
                 break
@@ -298,7 +298,7 @@ async def test_reconnect_preserves_subscriptions(bridge: str):
             check=True,
         )
         await client.publish_command("status", target_id="bridge")
-        for _ in range(40):
+        for _ in range(80):
             await asyncio.sleep(0.1)
             if "bf-reconnect-dev" in state.bridge:
                 break
@@ -370,7 +370,7 @@ async def test_remove_clears_per_device_state(bridge: str):
             check=True,
         )
         await client.publish_command("status", target_id="bridge")
-        for _ in range(40):
+        for _ in range(80):
             await asyncio.sleep(0.1)
             if "bf-rm-dev" in state.bridge:
                 break
@@ -650,7 +650,7 @@ async def test_add_response_triggers_status_refresh(bridge: str):
         )
         # We do NOT explicitly issue status — the test pins that the response
         # handler in _route does it for us.
-        for _ in range(40):
+        for _ in range(80):
             await asyncio.sleep(0.1)
             if "bf-auto-add" in state.bridge:
                 break

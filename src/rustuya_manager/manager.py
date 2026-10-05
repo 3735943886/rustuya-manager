@@ -581,6 +581,10 @@ class Manager:
     async def remove_device(self, target_id: str, **extra: Any) -> None:
         await self.client.publish_command("remove", target_id=target_id, extra=extra or None)
 
+    async def wait_registry_refresh(self) -> None:
+        """Wait for the debounced registry snapshot before closing a session."""
+        await self.client.wait_registry_refresh()
+
     async def sync(self) -> DiffResult:
         """Read-only cloud-vs-bridge diff. Reconciling it (issuing the
         add/remove commands the diff implies) stays the caller's job —

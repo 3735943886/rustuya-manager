@@ -148,6 +148,7 @@ class BridgeClient:
     # A paginated `status` cycle with no page for this long is assumed dead (its
     # reply was lost) so a stalled cycle can't wedge `_request_status` forever.
     _STATUS_CYCLE_TIMEOUT: float = 30.0
+    _ADD_STATUS_DELAY: float = 5.0
     # Cap the internal aiomqtt incoming queue so a wedged dispatch surfaces as
     # a paho-side warning rather than unbounded memory growth. 1000 is well
     # above any realistic manager-side burst (bridge `status` reply is the
@@ -227,6 +228,10 @@ class BridgeClient:
         self._status_active = False
         self._status_started: float | None = None
         self._status_rerun = False
+        self._registry_refresh_task: asyncio.Task[None] | None = None
+        self._registry_refresh_deadline = 0.0
+        self._status_idle = asyncio.Event()
+        self._status_idle.set()
 
     def _client_kwargs(self) -> dict[str, Any]:
         """Build the aiomqtt.Client constructor kwargs.
@@ -257,6 +262,11 @@ class BridgeClient:
         return self
 
     async def __aexit__(self, *exc: Any) -> None:
+        if self._registry_refresh_task is not None:
+            self._registry_refresh_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._registry_refresh_task
+            self._registry_refresh_task = None
         if self._reconnect_task is not None:
             self._reconnect_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -518,7 +528,7 @@ class BridgeClient:
                 # `_on_bridge_config`'s `devices_updated_at` handling), but that
                 # lags by the bridge's save-debounce interval and a pre-0.4
                 # bridge doesn't send it at all — so still act on our own
-                # action's ack here for an immediate, version-independent
+                # action's ack here for a debounced, version-independent
                 # refresh.
                 action = parsed.get("action")
                 status_val = parsed.get("status")
@@ -536,7 +546,10 @@ class BridgeClient:
                     # ended up storing; ask for a status refresh so state.bridge
                     # picks up the new/updated entry authoritatively.
                     await self.state.record_response(target, parsed, retained=retain)
-                    asyncio.create_task(self._request_status())
+                    self._schedule_registry_refresh()
+                    device_id = parsed.get("id") or target
+                    if not retain and device_id and device_id != "bridge":
+                        await self.publish_command("get", target_id=device_id)
                 elif (
                     action == "clear"
                     and status_val == "ok"
@@ -681,6 +694,8 @@ class BridgeClient:
         # change (e.g. an `add`) that landed mid-pagination.
         if self._status_rerun:
             await self._request_status()
+        else:
+            self._status_idle.set()
 
     async def _surface_mqtt_drops(self, drop_count: Any) -> None:
         """Raise (or clear) a UI warning for bridge-side MQTT publish drops.
@@ -817,7 +832,7 @@ class BridgeClient:
         await self.state.set_bridge_config_raw(cfg)
 
         if registry_changed:
-            asyncio.create_task(self._request_status())
+            self._schedule_registry_refresh()
 
         # Idempotence check: the retained bridge/config message can be
         # re-delivered every time we subscribe to a wildcard that also matches
@@ -926,6 +941,29 @@ class BridgeClient:
             await self._client.subscribe(w)
             logger.info("Subscribed: %s", w)
 
+    def _schedule_registry_refresh(self) -> None:
+        """Refresh once after five seconds without another registry mutation."""
+        self._registry_refresh_deadline = time.monotonic() + self._ADD_STATUS_DELAY
+        if self._registry_refresh_task is None or self._registry_refresh_task.done():
+            self._registry_refresh_task = asyncio.create_task(self._refresh_registry())
+
+    async def _refresh_registry(self) -> None:
+        while True:
+            remaining = self._registry_refresh_deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(remaining)
+        await self._request_status()
+
+    async def wait_registry_refresh(self) -> None:
+        """Keep short-lived callers alive until their delayed snapshot arrives."""
+        while self._registry_refresh_task is not None:
+            task = self._registry_refresh_task
+            await asyncio.shield(task)
+            await asyncio.wait_for(self._status_idle.wait(), self._STATUS_CYCLE_TIMEOUT)
+            if task is self._registry_refresh_task:
+                return
+
     async def _request_status(self) -> None:
         """Request a full `status` snapshot, single-flighting the paginated cycle.
 
@@ -946,6 +984,7 @@ class BridgeClient:
         ):
             self._status_rerun = True
             return
+        self._status_idle.clear()
         self._status_active = True
         self._status_started = now
         self._status_rerun = False
@@ -956,6 +995,7 @@ class BridgeClient:
             # clear the in-flight flag so the next trigger isn't suppressed
             # waiting on a reply that will never arrive.
             self._status_active = False
+            self._status_idle.set()
             raise
 
     # ── command publishing ──────────────────────────────────────────────
@@ -1005,6 +1045,8 @@ class BridgeClient:
             await self._client.publish(topic, body, qos=1)
         except aiomqtt.MqttError as e:
             raise RuntimeError(f"MQTT publish failed: {e}") from e
+        if action == "add":
+            self._schedule_registry_refresh()
 
     async def publish_raw(
         self, topic: str, payload: str, *, retain: bool = False, qos: int = 1

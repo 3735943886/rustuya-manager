@@ -10,6 +10,17 @@ and the project versions are [PEP 440](https://peps.python.org/pep-0440/). A
 pre-release tag (`0.1.1rcN`, `.dev`, etc.) publishes to TestPyPI; a plain
 `MAJOR.MINOR.PATCH` tag publishes to PyPI.
 
+## [0.2.2] — 2026-10-05
+
+### Changed
+
+- Debounce bridge registry refreshes until five seconds after the last device add or registry-change notification, combining a burst of registrations into one status snapshot.
+
+### Fixed
+
+- Request each device's state immediately after a successful live add response, including sub-devices that otherwise remain unavailable until their next report.
+- Expose `wait_registry_refresh()` for short-lived library sessions to wait for the delayed, complete status snapshot before closing.
+
 ## [0.2.1] — 2026-09-27
 
 ### Fixed

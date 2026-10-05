@@ -166,9 +166,10 @@ class TestDispatch:
         await client._dispatch("tuyalog/response/bridge", self._status_reply())
         first_publish_count = aio.publish.await_count
 
+        client._ADD_STATUS_DELAY = 0
         newer_cfg = {**base_cfg, "devices_updated_at": 2000}
         await client._dispatch(cfg_topic, json.dumps(newer_cfg))
-        await asyncio.sleep(0)  # let the create_task'd _request_status() run
+        await client._registry_refresh_task
 
         assert aio.publish.await_count > first_publish_count
         assert state.bridge_config_raw["devices_updated_at"] == 2000
@@ -1468,3 +1469,72 @@ def pytest_collection_modifyitems(items):
     for item in items:
         if asyncio.iscoroutinefunction(getattr(item, "function", None)):
             item.add_marker(pytest.mark.asyncio)
+
+
+async def test_add_status_waits_for_last_add_and_coalesces_config():
+    client, aio = _make_client()
+    assert client._ADD_STATUS_DELAY == 5.0
+    client._ADD_STATUS_DELAY = 0.1
+    cfg_topic = BRIDGE_CONFIG_TOPIC_TPL.replace("{root}", "myhome/tuya")
+    await client._dispatch(cfg_topic, json.dumps({**CUSTOM_CONFIG, "devices_updated_at": 1}))
+    await client._dispatch("tuyalog/response/bridge", TestDispatch._status_reply())
+    aio.publish.reset_mock()
+    await client.publish_command("add", target_id="first")
+    await client._dispatch(
+        "tuyalog/response/first", json.dumps({"action": "add", "id": "first", "status": "ok"})
+    )
+    await asyncio.sleep(0.06)
+    await client.publish_command("add", target_id="second")
+    await client._dispatch(
+        "tuyalog/response/second", json.dumps({"action": "add", "id": "second", "status": "ok"})
+    )
+    await client._dispatch(cfg_topic, json.dumps({**CUSTOM_CONFIG, "devices_updated_at": 2}))
+    # Past the first add's deadline, but before the last add's deadline.
+    await asyncio.sleep(0.06)
+    assert aio.publish.await_count == 4  # two adds and their immediate gets
+    await client._registry_refresh_task
+    assert aio.publish.await_count == 5
+    assert aio.publish.await_args.args[0].endswith("/bridge/status")
+    waiter = asyncio.create_task(client.wait_registry_refresh())
+    await asyncio.sleep(0)
+    assert not waiter.done()  # panel must also wait for the snapshot reply
+    await client._dispatch("tuyalog/response/bridge", TestDispatch._status_reply())
+    await waiter
+    assert aio.publish.await_count == 5
+    await client.__aexit__()
+
+
+async def test_close_cancels_delayed_add_status():
+    client, aio = _make_client()
+    client._schedule_registry_refresh()
+    task = client._registry_refresh_task
+    await client.__aexit__()
+    assert task.cancelled()
+    aio.publish.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "retained, status, expected",
+    [
+        (False, "ok", 1),
+        (True, "ok", 0),
+        (False, "error", 0),
+    ],
+)
+async def test_add_ack_gets_registered_device_immediately(retained, status, expected):
+    state = State()
+    await state.set_templates(_DEFAULT_TEMPLATES)
+    client, aio = _make_client(state)
+    await client._route(
+        "message",
+        {"id": "topic-id", "level": "response"},
+        {"action": "add", "id": "sub-device", "status": status},
+        retain=retained,
+    )
+    assert aio.publish.await_count == expected
+    if expected:
+        topic, body = aio.publish.await_args.args
+        assert topic == _DEFAULT_TEMPLATES.command
+        assert json.loads(body)["id"] == "sub-device"
+        assert json.loads(body)["action"] == "get"
+    await client.__aexit__()

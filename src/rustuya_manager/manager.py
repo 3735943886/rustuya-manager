@@ -555,11 +555,14 @@ class Manager:
     async def wait_ready(
         self, *, bootstrap_timeout: float = 6.0, bridge_timeout: float = 3.0
     ) -> None:
-        """Wait for the MQTT bootstrap handshake and the bridge's initial
-        `status` reply. Separate from `__aenter__` so a caller that doesn't
-        need full readiness (e.g. firing a single fast command) can skip it."""
-        await self.client.wait_bootstrap(timeout=bootstrap_timeout)
-        await self.state.wait_for(lambda: bool(self.state.bridge), timeout=bridge_timeout)
+        """Wait for subscriptions and a complete fresh bridge registry.
+
+        Empty registries are ready too. Raise TimeoutError if either stage
+        stalls, rather than exposing an incomplete snapshot. Separate from
+        `__aenter__` so callers sending a single command can skip readiness.
+        """
+        await asyncio.wait_for(self.client.wait_bootstrap(), bootstrap_timeout)
+        await self.client.wait_registry(timeout=bridge_timeout)
 
     async def publish_command(
         self,

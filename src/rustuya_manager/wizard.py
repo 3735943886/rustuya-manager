@@ -121,6 +121,28 @@ class WizardManager:
         self.session = WizardSession()
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
+        self._changed = asyncio.Event()
+
+    def _notify(self) -> None:
+        changed, self._changed = self._changed, asyncio.Event()
+        changed.set()
+
+    def _update(self, **changes: Any) -> None:
+        for name, value in changes.items():
+            setattr(self.session, name, value)
+        self._notify()
+
+    async def wait_state_change(self, state: WizardState) -> WizardSession:
+        """Wait without polling until the session leaves ``state``.
+
+        Multiple callers may wait independently; cancellation never consumes a
+        notification belonging to another caller. Recheck before waiting so a
+        transition that happened before this call cannot be missed.
+        """
+        while self.session.state == state:
+            changed = self._changed
+            await changed.wait()
+        return self.session
 
     async def start(self, user_code: str | None = None, scan: bool = False) -> WizardSession:
         """Begin a new session. If one is already running, returns its current
@@ -136,6 +158,7 @@ class WizardManager:
             if self._task and not self._task.done():
                 return self.session
             self.session = WizardSession(state=WizardState.REQUESTING_QR)
+            self._notify()
             self._task = asyncio.create_task(self._run(user_code, scan))
         return self.session
 
@@ -148,8 +171,7 @@ class WizardManager:
                 except (asyncio.CancelledError, Exception):  # noqa: BLE001
                     pass
             if self.session.state not in (WizardState.DONE, WizardState.ERROR):
-                self.session.state = WizardState.IDLE
-                self.session.message = "cancelled"
+                self._update(state=WizardState.IDLE, message="cancelled")
 
     async def read_saved_user_code(self) -> str | None:
         """Return the user_code persisted in tuyacreds.json, if any.
@@ -191,34 +213,41 @@ class WizardManager:
         valid saved credentials skip AWAITING_SCAN entirely.
         """
         loop = asyncio.get_running_loop()
-        wizard = TuyaWizard(info_file=self.creds_path, logger=logger)
+        wizard = None
+
+        session = self.session
+
+        def apply_qr(qr_url: str | None, image: str | None) -> None:
+            # Executor callbacks may arrive after cancellation or a new login.
+            if self.session is not session or session.state in (
+                WizardState.IDLE,
+                WizardState.DONE,
+                WizardState.ERROR,
+            ):
+                return
+            if qr_url is None:
+                self._update(
+                    qr_url=None,
+                    qr_image_data_url=None,
+                    state=WizardState.LOGGED_IN,
+                    message="Logged in. Fetching devices...",
+                )
+            else:
+                self._update(
+                    qr_url=qr_url,
+                    qr_image_data_url=image,
+                    state=WizardState.AWAITING_SCAN,
+                    message="Scan the QR code with Smart Life or Tuya Smart app",
+                )
 
         def qr_callback(qr_url: str | None) -> None:
-            # Called from tuyawizard's thread — qr_url is set when the QR is
-            # ready to be scanned, then called again with None when the scan
-            # completes (so login proceeds).
-            if qr_url is None:
-                # Scan completed. Clear the QR and flip to the transient
-                # "logging in" pane immediately — don't wait for the outer
-                # flow to advance the state. This matters on the token-expiry
-                # path: there `qr_login()` runs *inside* fetch_devices() (state
-                # already FETCHING), so without this the session would stay
-                # stuck at AWAITING_SCAN — QR still on screen — until the
-                # second device-cache fetch returns. Idempotent on the fresh-
-                # login path, where _run sets LOGGED_IN again right after.
-                self.session.qr_url = None
-                self.session.qr_image_data_url = None
-                self.session.state = WizardState.LOGGED_IN
-                self.session.message = "Logged in. Fetching devices..."
-                return
-            self.session.qr_url = qr_url
-            self.session.qr_image_data_url = _qr_to_data_url(qr_url)
-            self.session.state = WizardState.AWAITING_SCAN
-            self.session.message = "Scan the QR code with Smart Life or Tuya Smart app"
+            image = _qr_to_data_url(qr_url) if qr_url is not None else None
+            loop.call_soon_threadsafe(apply_qr, qr_url, image)
 
         scan_task: asyncio.Task[list[dict[str, Any]]] | None = None
         try:
-            self.session.message = "Connecting to Tuya…"
+            wizard = TuyaWizard(info_file=self.creds_path, logger=logger)
+            self._update(message="Connecting to Tuya…")
             # login_auto signature: (user_code, creds, qr_callback)
             ok = await loop.run_in_executor(
                 None, wizard.login_auto, user_code or None, None, qr_callback
@@ -228,21 +257,23 @@ class WizardManager:
                 # once so qr_image_data_url is set) from "missing user_code on
                 # fresh login" (qr_callback never fired).
                 qr_was_shown = self.session.qr_image_data_url is not None
-                self.session.state = WizardState.ERROR
+                self._update(state=WizardState.ERROR)
                 if qr_was_shown:
-                    self.session.error = "Login was not completed in time. Try again."
-                    self.session.error_code = "qr_timeout"
-                else:
-                    self.session.error = (
-                        "Login failed. If this is the first time, paste the "
-                        "User Code from Smart Life → Me → Settings → Account "
-                        "and Security."
+                    self._update(
+                        error="Login was not completed in time. Try again.", error_code="qr_timeout"
                     )
-                    self.session.error_code = "login_failed_usercode"
+                else:
+                    self._update(
+                        error=(
+                            "Login failed. If this is the first time, paste the "
+                            "User Code from Smart Life → Me → Settings → Account "
+                            "and Security."
+                        )
+                    )
+                    self._update(error_code="login_failed_usercode")
                 return
 
-            self.session.state = WizardState.LOGGED_IN
-            self.session.message = "Logged in. Fetching devices..."
+            self._update(state=WizardState.LOGGED_IN, message="Logged in. Fetching devices...")
 
             # Kick off the bridge LAN scan in parallel with fetch_devices —
             # cloud fetch is the slow part (multi-second round-trip to
@@ -258,15 +289,14 @@ class WizardManager:
                         "scan requested but no LanScanCoordinator available — "
                         "falling back to parent-only postprocess"
                     )
-                    self.session.warning = (
-                        "Bridge not connected — scan skipped, parent linking only."
+                    self._update(
+                        warning=("Bridge not connected — scan skipped, parent linking only.")
                     )
-                    self.session.warning_code = "scan_skipped_no_bridge"
+                    self._update(warning_code="scan_skipped_no_bridge")
 
-            self.session.state = WizardState.FETCHING
+            self._update(state=WizardState.FETCHING)
             devices = await loop.run_in_executor(None, wizard.fetch_devices)
-            self.session.devices_count = len(devices)
-            self.session.message = f"Fetched {len(devices)} devices"
+            self._update(devices_count=len(devices), message=f"Fetched {len(devices)} devices")
 
             # Resolve the parallel scan. On any scan failure we degrade to
             # parent-only with a session.warning rather than failing the
@@ -274,15 +304,17 @@ class WizardManager:
             # baked-in IPs.
             scan_results: list[dict[str, Any]] | None = None
             if scan_task is not None:
-                self.session.message = "Waiting for LAN scan to finish…"
+                self._update(message="Waiting for LAN scan to finish…")
                 try:
                     scan_results = await scan_task
                 except Exception as e:  # noqa: BLE001
                     logger.warning("Bridge scan failed: %s", e)
-                    self.session.warning = (
-                        f"Bridge scan failed ({type(e).__name__}); used parent linking only."
+                    self._update(
+                        warning=(
+                            f"Bridge scan failed ({type(e).__name__}); used parent linking only."
+                        )
                     )
-                    self.session.warning_code = "scan_failed"
+                    self._update(warning_code="scan_failed")
 
             # Postprocess: "parent" links sub-devices to their gateway —
             # always needed so the bridge can route them. "all" additionally
@@ -291,28 +323,25 @@ class WizardManager:
             # rustuya.Scanner fallback path (manager doesn't depend on the
             # rustuya Python crate anymore).
             mode = "all" if scan_results else "parent"
-            self.session.message = f"Postprocessing ({mode})…"
+            self._update(message=f"Postprocessing ({mode})…")
             await loop.run_in_executor(None, postprocess_devices, devices, mode, scan_results)
 
             if self._on_devices is not None:
                 await self._on_devices(devices)
 
-            self.session.state = WizardState.DONE
-            self.session.message = f"Done — {len(devices)} devices loaded"
+            self._update(state=WizardState.DONE, message=f"Done — {len(devices)} devices loaded")
         except asyncio.CancelledError:
             if scan_task is not None and not scan_task.done():
                 scan_task.cancel()
-            self.session.state = WizardState.ERROR
-            self.session.error = "cancelled"
-            self.session.error_code = "cancelled"
+            self._update(state=WizardState.ERROR, error="cancelled", error_code="cancelled")
             raise
         except Exception as e:  # noqa: BLE001 - any failure ends in ERROR with message
             if scan_task is not None and not scan_task.done():
                 scan_task.cancel()
             logger.exception("Wizard flow failed")
-            self.session.state = WizardState.ERROR
-            self.session.error = f"{type(e).__name__}: {e}"
-            self.session.error_code = "unexpected"
+            self._update(
+                state=WizardState.ERROR, error=f"{type(e).__name__}: {e}", error_code="unexpected"
+            )
         finally:
             # Tear down tuyawizard's internals — closes the requests.Sessions
             # inside CustomerApi / LoginControl, stops the MQ thread if one
@@ -324,10 +353,11 @@ class WizardManager:
             # paho-mqtt thread but actually requests-pool retention (which
             # was my first wrong guess). tuyawizard>=0.1.8 exposes close()
             # for exactly this; runs on signal / error / success paths.
-            try:
-                wizard.close()
-            except Exception:  # noqa: BLE001
-                logger.exception("tuyawizard.close() failed")
+            if wizard is not None:
+                try:
+                    wizard.close()
+                except Exception:  # noqa: BLE001
+                    logger.exception("tuyawizard.close() failed")
 
 
 def _qr_to_data_url(text: str) -> str:

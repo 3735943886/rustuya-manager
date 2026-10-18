@@ -98,6 +98,11 @@ Run it by full path, or activate the venv first (`source ~/.venvs/rustuya-manage
 
 The `[web]` extra pulls in FastAPI/uvicorn for the `--web` UI shown below. Using rustuya-manager purely as a library (`from rustuya_manager import Manager`) needs neither — a plain `pip install rustuya-manager` covers that case.
 
+Library clients can `await manager.wait_ready()` to require a complete fresh bridge registry, including an empty
+one; timeouts raise instead of exposing a partial snapshot. For wizard progress, capture `state = manager.wizard.session.state`
+and `await manager.wizard.wait_state_change(state)` to wait for a transition without polling. Multiple observers can
+wait independently, and QR callbacks update the session on the event loop.
+
 ### Run
 
 ```bash

@@ -219,6 +219,9 @@ class BridgeClient:
         # `_handle_status_page`). None when no page-through is active; a partial
         # {id: Device} map while one is. Committed to state on the final page.
         self._status_accum: dict[str, Device] | None = None
+        self._status_offset = 0
+        self._status_total: int | None = None
+        self._registry_ready = asyncio.Event()
         # Single-flight guard for the paginated `status` cycle. `_status_active`
         # is True from the moment we emit an offset-0 request until the final
         # page commits; `_status_started` is the monotonic time of the last page
@@ -319,6 +322,7 @@ class BridgeClient:
                         # state (and drop the partial accumulator) so the
                         # re-request below opens a clean cycle instead of being
                         # coalesced away as "still active".
+                        self._registry_ready.clear()
                         self._status_active = False
                         self._status_accum = None
                         self._status_rerun = False
@@ -649,23 +653,39 @@ class BridgeClient:
             )
             return
 
-        devices = parsed["devices"]
+        devices = parsed.get("devices")
         offset = parsed.get("offset", 0)
-        returned = parsed.get("returned", len(devices))
-        has_more = bool(parsed.get("has_more", False))
-        # A page arrived → the cycle is progressing; refresh the staleness clock
-        # so a long-but-healthy page-through isn't reclaimed mid-stream.
+        returned = parsed.get("returned", len(devices) if isinstance(devices, dict) else 0)
+        total = parsed.get("device_count")
+        has_more = parsed.get("has_more", False)
+        if (
+            not isinstance(devices, dict)
+            or type(offset) is not int
+            or offset != self._status_offset
+            or type(returned) is not int
+            or returned != len(devices)
+            or type(has_more) is not bool
+            or (has_more and not returned)
+        ):
+            return
+        if total is not None and (
+            type(total) is not int
+            or total < offset + returned
+            or has_more != (offset + returned < total)
+        ):
+            return
+        if offset and total != self._status_total:
+            return
+        accum = self._status_accum or {}
+        if accum.keys() & devices.keys():
+            return
+        # Convert the whole page before mutating the active snapshot.
+        page = {did: Device.from_dict(record) for did, record in devices.items()}
+        self._status_total = total
         self._status_started = time.monotonic()
-
-        # offset 0 starts a fresh snapshot (covers the unpaginated and first-page
-        # cases). Single-flighting (see _request_status) means no *concurrent*
-        # offset-0 resets a live buffer; a non-zero offset arriving with no
-        # buffer (e.g. page 0 lost across a reconnect) still opens one rather
-        # than dropping the data.
-        if offset == 0 or self._status_accum is None:
-            self._status_accum = {}
-        for did, d in devices.items():
-            self._status_accum[did] = Device.from_dict(d)
+        accum.update(page)
+        self._status_accum = accum
+        self._status_offset += returned
 
         if has_more and returned > 0:
             # Fetch the next window. Omit `limit` so we inherit the bridge's
@@ -696,6 +716,7 @@ class BridgeClient:
             await self._request_status()
         else:
             self._status_idle.set()
+            self._registry_ready.set()
 
     async def _surface_mqtt_drops(self, drop_count: Any) -> None:
         """Raise (or clear) a UI warning for bridge-side MQTT publish drops.
@@ -955,6 +976,16 @@ class BridgeClient:
             await asyncio.sleep(remaining)
         await self._request_status()
 
+    async def wait_registry(self, timeout: float = 15.0) -> None:
+        """Wait for subscriptions and a complete fresh snapshot, including an empty one.
+
+        A request already in flight is coalesced with a fresh cycle. Failed
+        publishes cannot masquerade as a successful empty registry.
+        """
+        await asyncio.wait_for(self._bootstrap_done.wait(), timeout)
+        await self._request_status()
+        await asyncio.wait_for(self._registry_ready.wait(), timeout)
+
     async def wait_registry_refresh(self) -> None:
         """Keep short-lived callers alive until their delayed snapshot arrives."""
         while self._registry_refresh_task is not None:
@@ -984,6 +1015,10 @@ class BridgeClient:
         ):
             self._status_rerun = True
             return
+        self._registry_ready.clear()
+        self._status_accum = None
+        self._status_offset = 0
+        self._status_total = None
         self._status_idle.clear()
         self._status_active = True
         self._status_started = now

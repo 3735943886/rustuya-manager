@@ -10,6 +10,19 @@ and the project versions are [PEP 440](https://peps.python.org/pep-0440/). A
 pre-release tag (`0.1.1rcN`, `.dev`, etc.) publishes to TestPyPI; a plain
 `MAJOR.MINOR.PATCH` tag publishes to PyPI.
 
+## [Unreleased]
+
+## [0.2.3] — 2026-10-18
+
+### Added
+- `WizardManager.wait_state_change()` for independent async observers without polling. QR callbacks now dispatch
+  session updates onto the event loop and ignore callbacks from cancelled or superseded sessions.
+- `BridgeClient.wait_registry()` waits for a fresh complete snapshot, including an empty bridge registry.
+
+### Fixed
+- Reject out-of-order, duplicate, inconsistent and malformed status pages before committing a registry.
+- `Manager.wait_ready()` now waits for complete registry readiness instead of treating a nonempty device list as ready.
+
 ## [0.2.2] — 2026-10-05
 
 ### Changed

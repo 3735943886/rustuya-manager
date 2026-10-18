@@ -138,6 +138,11 @@ class TestWizardManager:
         wm = WizardManager(creds_path=str(tmp_path / "creds.json"))
 
         captured: dict[str, tuple] = {}
+        loop = asyncio.get_running_loop()
+
+        async def capture(name):
+            captured[name] = (wm.session.state, wm.session.qr_image_data_url)
+
         qr_holder: dict[str, object] = {}
 
         def login_auto(user_code, creds, qr_callback):
@@ -152,9 +157,9 @@ class TestWizardManager:
             # scan, then signal completion with qr_callback(None).
             cb = qr_holder["cb"]
             cb("tuyaSmart--qrLogin?token=expiry")
-            captured["after_show"] = (wm.session.state, wm.session.qr_image_data_url)
+            asyncio.run_coroutine_threadsafe(capture("after_show"), loop).result(timeout=2)
             cb(None)
-            captured["after_done"] = (wm.session.state, wm.session.qr_image_data_url)
+            asyncio.run_coroutine_threadsafe(capture("after_done"), loop).result(timeout=2)
             return SAMPLE_DEVICES
 
         mock_wizard = MagicMock()

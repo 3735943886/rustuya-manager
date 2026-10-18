@@ -1069,7 +1069,7 @@ class TestStatusPagination:
         # final page already cleared `_status_active`; a real second reply
         # only exists because a follow-up `_request_status()` ran, so
         # re-arm it here rather than reaching into `_status_accum` too.
-        client._status_active = True
+        await client._request_status()
         await client._dispatch(
             "tuyalog/response/bridge",
             self._status(
@@ -1119,23 +1119,20 @@ class TestStatusPagination:
         assert state.bridge == {}
         aio.publish.assert_not_called()
 
-    async def test_lost_page_zero_recovery_is_not_blocked_by_the_gate(self):
-        """The gate must not break the one legitimate case that looks the
-        same on the surface: *our own* cycle's page 0 got lost (e.g. across a
-        reconnect) and a later page of *our own* cycle arrives with no buffer
-        open yet. `_status_active` stays True for our whole cycle regardless
-        of which pages actually arrive, so this must still commit."""
+    async def test_missing_page_zero_never_commits_a_partial_registry(self):
         state = State()
         client, aio = await self._templated_client(state)
-        assert client._status_active  # set by _templated_client, as if we asked
-
-        # Page 0 never arrived; page 1 (offset=50) is the first one we see.
         await client._dispatch(
             "tuyalog/response/bridge",
             self._status({"b": {"id": "b"}}, offset=50, returned=1, has_more=False),
         )
-
-        assert set(state.bridge) == {"b"}
+        assert state.bridge == {}
+        assert client._status_active
+        await client._dispatch(
+            "tuyalog/response/bridge",
+            self._status({"a": {"id": "a"}}, offset=0, returned=1, has_more=False),
+        )
+        assert set(state.bridge) == {"a"}
 
 
 class TestBrokerEndpointAndTls:

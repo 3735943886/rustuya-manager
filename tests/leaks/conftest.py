@@ -81,8 +81,10 @@ def _take_snapshot() -> _Snapshot:
     # finalize because finalizers ran out of order.
     gc.collect()
     gc.collect()
-    snap = tracemalloc.take_snapshot()
+    # Count before snapshotting: the snapshot allocates gc-tracked tuples per
+    # live trace, which would otherwise be reported as growth.
     gc_count = len(gc.get_objects())
+    snap = tracemalloc.take_snapshot()
     try:
         task_count = len(asyncio.all_tasks())
     except RuntimeError:
